@@ -28,6 +28,7 @@ iproute2
 isc-dhcp-client
 ca-certificates
 util-linux
+fdisk
 smartmontools
 nvme-cli
 gddrescue

@@ -56,4 +56,9 @@ jobs:
         working-directory: src/rescue-agent
       - run: go vet ./...
         working-directory: src/rescue-agent
+      - name: Adaptive clone engines on synthetic GPT and MBR disks
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fdisk util-linux ntfs-3g e2fsprogs dosfstools qemu-utils
+          sudo env PATH="$PATH" bash rescue/scripts/test-adaptive-linux.sh
       - run: for script in rescue/scripts/*.sh; do bash -n "$script"; done

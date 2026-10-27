@@ -19,6 +19,7 @@ func main() {
 	flag.StringVar(&options.ServerPin, "server-pin", "", "SHA256 DER do certificado servidor, conferido localmente")
 	flag.StringVar(&options.StateDir, "state-dir", "/var/lib/slt-rescue-agent", "Diretório privado para identidade e proteção de replay")
 	flag.StringVar(&options.FixtureDir, "fixture-dir", "", "SOMENTE LAB: usa arquivos .raw deste diretório em vez de dispositivos físicos")
+	flag.StringVar(&options.ScratchDir, "scratch-dir", "", "Diretório Linux persistente fora do destino, com espaço para preparar clone adaptado")
 	flag.BoolVar(&options.AllowFileWrite, "allow-file-write", false, "SOMENTE LAB: permite restaurar arquivos .raw dentro de --fixture-dir")
 	flag.BoolVar(&options.AllowPhysicalWrite, "allow-physical-write", false, "Permite pedir confirmação local adicional para sobrescrever disco físico offline")
 	flag.BoolVar(&options.Once, "once", false, "Envia inventário e consulta uma tarefa, depois encerra")

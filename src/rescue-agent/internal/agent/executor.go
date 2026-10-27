@@ -27,14 +27,16 @@ type Options struct {
 	AllowPhysicalWrite bool
 	Once               bool
 	PollInterval       time.Duration
+	ScratchDir         string
 	Input              io.Reader
 	Output             io.Writer
 }
 
 type Runner struct {
-	Client   *Client
-	Options  Options
-	DeviceID string
+	Client            *Client
+	Options           Options
+	DeviceID          string
+	LastRestoreReport *RestoreReport
 }
 
 func (r *Runner) report(ctx context.Context, p Plan, phase string, processed, total int64) error {
@@ -52,7 +54,7 @@ func (r *Runner) report(ctx context.Context, p Plan, phase string, processed, to
 }
 
 func (r *Runner) inventory(ctx context.Context) error {
-	v, err := NewInventory(ctx, r.DeviceID, r.Options.FixtureDir)
+	v, err := NewInventoryWithScratch(ctx, r.DeviceID, r.Options.FixtureDir, r.Options.ScratchDir)
 	if err != nil {
 		return err
 	}
@@ -94,7 +96,9 @@ func (r *Runner) execute(ctx context.Context, p Plan) (string, error) {
 	case "CAPTURE":
 		return "Imagem raw capturada e validada no repositório", r.capture(ctx, p, d)
 	case "RESTORE":
-		return "Imagem raw gravada, sincronizada e verificada por releitura; boot não foi homologado", r.restore(ctx, p, d)
+		err := r.restore(ctx, p, d)
+		details, _ := json.Marshal(r.LastRestoreReport)
+		return string(details), err
 	default:
 		return "", errors.New("tipo de job não suportado")
 	}
@@ -186,6 +190,10 @@ func (r *Runner) capture(ctx context.Context, p Plan, d Disk) error {
 		return err
 	}
 	defer f.Close()
+	var capturedLayout *DiskLayout
+	if adaptiveToolsAvailable(false) {
+		capturedLayout, _ = InspectLayout(ctx, d.Path, d.SizeBytes, d.LogicalSectorBytes)
+	}
 	buffer := make([]byte, ChunkSize)
 	var offset int64
 	for sequence := 0; offset < d.SizeBytes; sequence++ {
@@ -219,22 +227,36 @@ func (r *Runner) capture(ctx context.Context, p Plan, d Disk) error {
 		offset += length
 	}
 	var manifest Manifest
-	if _, err = r.Client.JSON(ctx, "POST", "/agent/v1/jobs/"+p.ID+"/capture-complete", struct{}{}, &manifest); err != nil {
+	if capturedLayout != nil {
+		afterLayout, e := InspectLayout(ctx, d.Path, d.SizeBytes, d.LogicalSectorBytes)
+		if e != nil || !layoutsEqual(capturedLayout, afterLayout) {
+			return errors.New("layout da origem mudou durante captura")
+		}
+	}
+	if _, err = r.Client.JSON(ctx, "POST", "/agent/v1/jobs/"+p.ID+"/capture-complete", map[string]any{"layout": capturedLayout}, &manifest); err != nil {
 		return err
 	}
 	if manifest.State != "AVAILABLE" || manifest.LogicalSizeBytes != d.SizeBytes || manifest.SourceFingerprint != d.Fingerprint {
 		return errors.New("servidor não confirmou imagem disponível íntegra")
 	}
+	if capturedLayout != nil && !layoutsEqual(capturedLayout, manifest.Layout) {
+		return errors.New("layout confirmado pelo servidor difere do capturado")
+	}
 	return r.report(ctx, p, "VERIFIED", offset, d.SizeBytes)
 }
 
 func (r *Runner) restore(ctx context.Context, p Plan, d Disk) error {
+	r.LastRestoreReport = nil
 	var m Manifest
 	if _, err := r.Client.JSON(ctx, "GET", "/agent/v1/jobs/"+p.ID+"/manifest", nil, &m); err != nil {
 		return err
 	}
 	if err := ValidateManifest(m, p); err != nil {
 		return err
+	}
+	r.LastRestoreReport = &RestoreReport{Strategy: cloneStrategy(p), SourceLayout: m.Layout, Warnings: []string{"Destino incompleto até conclusão e releitura; boot não validado."}}
+	if cloneStrategy(p) == "FIT" || cloneStrategy(p) == "PRESERVE_LAYOUT" {
+		return r.restoreAdapted(ctx, p, d, m)
 	}
 	if err := r.report(ctx, p, "PREFLIGHT", 0, m.LogicalSizeBytes); err != nil {
 		return err
@@ -263,6 +285,7 @@ func (r *Runner) restore(ctx context.Context, p Plan, d Disk) error {
 		if n != len(data) {
 			return io.ErrShortWrite
 		}
+		r.LastRestoreReport.BytesWritten = c.OffsetBytes + int64(c.SizeBytes)
 	}
 	if err = f.Sync(); err != nil {
 		return err
@@ -280,7 +303,133 @@ func (r *Runner) restore(ctx context.Context, p Plan, d Disk) error {
 			return fmt.Errorf("verificação de leitura falhou no chunk %d", c.Sequence)
 		}
 	}
+	tableVerified := false
+	if m.Layout != nil && m.LogicalSizeBytes == d.SizeBytes && adaptiveToolsAvailable(false) {
+		layout, e := InspectLayout(ctx, d.Path, d.SizeBytes, d.LogicalSectorBytes)
+		if e != nil || !layoutsEqual(m.Layout, layout) {
+			return errors.New("tabela restaurada não confere com manifest")
+		}
+		tableVerified = true
+	}
+	r.LastRestoreReport = &RestoreReport{Strategy: cloneStrategy(p), DataVerified: true, TableVerified: tableVerified, BootPayloadPreserved: true, BootVerified: false, BytesWritten: m.LogicalSizeBytes, SourceLayout: m.Layout, TargetLayout: m.Layout, Warnings: []string{"Boot exige teste real no computador destino. Integridade de transferência não comprova sistema inicializável."}}
 	return r.report(ctx, p, "VERIFIED", m.LogicalSizeBytes, m.LogicalSizeBytes)
+}
+
+func (r *Runner) restoreAdapted(ctx context.Context, p Plan, d Disk, m Manifest) error {
+	required, err := scratchRequired(m, d.SizeBytes)
+	if err != nil {
+		return err
+	}
+	workspace, err := newWorkspace(r.Options.ScratchDir, required, d.Path)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if cleanupErr := removeWorkspace(r.Options.ScratchDir, workspace); cleanupErr != nil {
+			fmt.Fprintln(r.Options.Output, "Aviso: cópia privada scratch foi preservada por falha de limpeza:", cleanupErr)
+		}
+	}()
+	sourcePath := filepath.Join(workspace, "source.raw")
+	source, err := os.OpenFile(sourcePath, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0600)
+	if err != nil {
+		return err
+	}
+	for _, c := range m.Chunks {
+		if err = r.report(ctx, p, "PREPARING", c.OffsetBytes, m.LogicalSizeBytes); err != nil {
+			source.Close()
+			return err
+		}
+		data, _, e := r.Client.Request(ctx, "GET", fmt.Sprintf("/agent/v1/jobs/%s/chunks/%d", p.ID, c.Sequence), nil, nil)
+		if e != nil {
+			source.Close()
+			return e
+		}
+		h := sha256.Sum256(data)
+		if len(data) != c.SizeBytes || !strings.EqualFold(hex.EncodeToString(h[:]), c.SHA256) {
+			source.Close()
+			return errors.New("imagem corrompida durante preparação; destino não foi aberto")
+		}
+		if _, err = source.WriteAt(data, c.OffsetBytes); err != nil {
+			source.Close()
+			return err
+		}
+	}
+	if err = source.Sync(); err != nil {
+		source.Close()
+		return err
+	}
+	if err = source.Close(); err != nil {
+		return err
+	}
+	prepared, err := prepareImage(ctx, sourcePath, workspace, m, d.SizeBytes, *p.Clone)
+	if err != nil {
+		return err
+	}
+	r.LastRestoreReport = &prepared.Report
+	r.LastRestoreReport.TableVerified = false
+	r.LastRestoreReport.BootPayloadPreserved = false
+	if err = r.report(ctx, p, "PREPARED", m.LogicalSizeBytes, m.LogicalSizeBytes); err != nil {
+		return err
+	}
+	// Destination is opened only after download, full image adaptation, table/filesystem checks and hashes have passed.
+	destination, err := r.openDisk(ctx, p, d, true)
+	if err != nil {
+		return err
+	}
+	defer destination.Close()
+	image, err := os.Open(prepared.Path)
+	if err != nil {
+		return err
+	}
+	defer image.Close()
+	buffer := make([]byte, ChunkSize)
+	for _, c := range prepared.Chunks {
+		if err = r.report(ctx, p, "RESTORING", c.OffsetBytes, d.SizeBytes); err != nil {
+			return err
+		}
+		if _, err = image.ReadAt(buffer[:c.SizeBytes], c.OffsetBytes); err != nil {
+			return err
+		}
+		h := sha256.Sum256(buffer[:c.SizeBytes])
+		if !strings.EqualFold(hex.EncodeToString(h[:]), c.SHA256) {
+			return errors.New("cópia preparada mudou antes de escrita")
+		}
+		n, e := destination.WriteAt(buffer[:c.SizeBytes], c.OffsetBytes)
+		if e != nil {
+			return e
+		}
+		if n != c.SizeBytes {
+			return io.ErrShortWrite
+		}
+		r.LastRestoreReport.BytesWritten = c.OffsetBytes + int64(c.SizeBytes)
+	}
+	if err = destination.Sync(); err != nil {
+		return err
+	}
+	for _, c := range prepared.Chunks {
+		if err = r.report(ctx, p, "VERIFYING", c.OffsetBytes, d.SizeBytes); err != nil {
+			return err
+		}
+		if _, err = destination.ReadAt(buffer[:c.SizeBytes], c.OffsetBytes); err != nil {
+			return err
+		}
+		h := sha256.Sum256(buffer[:c.SizeBytes])
+		if !strings.EqualFold(hex.EncodeToString(h[:]), c.SHA256) {
+			return fmt.Errorf("releitura do clone diverge em %d", c.OffsetBytes)
+		}
+	}
+	layout, err := InspectLayout(ctx, d.Path, d.SizeBytes, d.LogicalSectorBytes)
+	if err != nil {
+		return err
+	}
+	if !layoutsEqual(prepared.Layout, layout) {
+		return errors.New("layout do destino difere da cópia validada")
+	}
+	r.LastRestoreReport.DataVerified = true
+	r.LastRestoreReport.TableVerified = true
+	r.LastRestoreReport.BootPayloadPreserved = true
+	r.LastRestoreReport.BytesWritten = d.SizeBytes
+	return r.report(ctx, p, "VERIFIED", d.SizeBytes, d.SizeBytes)
 }
 
 func Run(ctx context.Context, options Options) error {

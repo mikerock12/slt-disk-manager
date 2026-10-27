@@ -143,6 +143,10 @@ func fixtureDisks(dir string) ([]Disk, error) {
 }
 
 func NewInventory(ctx context.Context, deviceID, fixtureDir string) (Inventory, error) {
+	return NewInventoryWithScratch(ctx, deviceID, fixtureDir, "")
+}
+
+func NewInventoryWithScratch(ctx context.Context, deviceID, fixtureDir, scratchDir string) (Inventory, error) {
 	disks, err := CollectDisks(ctx, fixtureDir)
 	if err != nil {
 		return Inventory{}, err
@@ -150,6 +154,21 @@ func NewInventory(ctx context.Context, deviceID, fixtureDir string) (Inventory, 
 	hostname, _ := os.Hostname()
 	capabilities := []string{"INVENTORY", "SMART", "CAPTURE", "RESTORE"}
 	notes := []string{"Captura raw de disco offline. Restauração física exige aprovação local adicional. Boot e hardware ainda exigem homologação."}
+	if runtime.GOOS == "linux" && adaptiveToolsAvailable(false) {
+		for i := range disks {
+			d := &disks[i]
+			layout, err := InspectLayout(ctx, d.Path, d.SizeBytes, d.LogicalSectorBytes)
+			if err == nil {
+				d.Layout = layout
+			}
+		}
+		if root, err := scratchPath(scratchDir); err == nil && checkScratchStorage(root, 64*1024*1024, "") == nil {
+			capabilities = append(capabilities, "RESTORE_LAYOUT")
+			if adaptiveToolsAvailable(true) {
+				capabilities = append(capabilities, "RESTORE_FIT")
+			}
+		}
+	}
 	if fixtureDir != "" {
 		hostname += "-FIXTURE"
 		notes = append(notes, "MODO DE TESTE: discos são arquivos .raw sintéticos.")
