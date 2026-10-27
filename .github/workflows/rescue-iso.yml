@@ -1,12 +1,26 @@
-name: Build experimental Rescue ISO
+name: Build and boot Rescue ISO
 on:
   workflow_dispatch:
+  pull_request:
+    paths:
+      - 'src/rescue-agent/**'
+      - 'rescue/**'
+      - '.github/workflows/rescue-iso.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'src/rescue-agent/**'
+      - 'rescue/**'
+      - '.github/workflows/rescue-iso.yml'
 permissions:
   contents: read
+concurrency:
+  group: rescue-iso-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
-  build-iso:
+  build-and-boot:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 70
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -18,13 +32,33 @@ jobs:
         run: |
           go test ./...
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o ../../rescue/slt-rescue-agent ./cmd/slt-rescue-agent
-      - name: Build Debian live image in isolated container
+      - name: Build Debian live image in disposable container
+        timeout-minutes: 50
         run: |
-          docker run --rm --privileged -v "$PWD:/work" -w /work debian:trixie bash -c 'apt-get update && apt-get install -y live-build debootstrap xorriso squashfs-tools syslinux-common syslinux-utils isolinux grub-pc-bin grub-efi-amd64-bin dosfstools mtools && SLT_BUILD_DIR=/work/artifacts/rescue-iso bash /work/rescue/scripts/build-debian-live.sh'
-      - uses: actions/upload-artifact@v7
+          mkdir -p artifacts
+          set -o pipefail
+          docker run --rm --privileged -e DEBIAN_FRONTEND=noninteractive -e "SLT_OUTPUT_OWNER=$(id -u):$(id -g)" -v "$PWD:/work" -w /work debian:trixie bash -euxo pipefail -c '
+            apt-get update
+            apt-get install -y --no-install-recommends live-build debootstrap xorriso squashfs-tools syslinux-common syslinux-utils isolinux grub-pc-bin grub-efi-amd64-bin dosfstools mtools ca-certificates wget cpio file rsync zstd
+            SLT_BUILD_DIR=/work/artifacts/rescue-iso bash /work/rescue/scripts/build-debian-live.sh
+            chown "$SLT_OUTPUT_OWNER" /work/artifacts/rescue-iso /work/artifacts/rescue-iso/live-image-amd64.hybrid.iso /work/artifacts/rescue-iso/live-image-amd64.hybrid.iso.sha256
+          ' 2>&1 | tee artifacts/rescue-iso-build.log
+      - name: Install isolated VM test tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends qemu-system-x86 ovmf
+      - name: Boot actual ISO in BIOS and UEFI (no disks, no network)
+        timeout-minutes: 14
+        run: bash rescue/scripts/test-iso-boot.sh artifacts/rescue-iso/live-image-amd64.hybrid.iso artifacts/rescue-boot
+      - name: Preserve ISO, hashes and boot evidence
+        if: always()
+        uses: actions/upload-artifact@v7
         with:
-          name: slt-rescue-experimental-iso
+          name: slt-rescue-iso-and-boot-evidence
           path: |
             artifacts/rescue-iso/live-image-amd64.hybrid.iso
             artifacts/rescue-iso/live-image-amd64.hybrid.iso.sha256
-          retention-days: 7
+            artifacts/rescue-iso-build.log
+            artifacts/rescue-boot/
+          compression-level: 0
+          retention-days: 14

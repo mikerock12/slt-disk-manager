@@ -32,7 +32,7 @@ with zipfile.ZipFile(output, "x", compression=zipfile.ZIP_DEFLATED) as archive:
         path = root / relative
         if not path.is_file() or path.is_symlink() or not path.resolve().is_relative_to(root):
             raise SystemExit("Refusing missing, symlink or external source file: " + relative)
-        if path.suffix.lower() in {".pfx", ".p12", ".pem", ".key", ".db", ".zip", ".raw", ".img", ".iso", ".log"} or any(part.lower() in {"state", "runtime", ".tools", ".build", ".git", "bin", "obj", "artifacts", ".aws", ".codex"} for part in path.relative_to(root).parts):
+        if path.suffix.lower() in {".pfx", ".p12", ".pem", ".key", ".db", ".zip", ".raw", ".img", ".iso", ".wim", ".esd", ".swm", ".vhd", ".vhdx", ".log"} or any(part.lower() in {"state", "runtime", ".tools", ".build", ".git", "bin", "obj", "artifacts", "isos", ".aws", ".codex"} for part in path.relative_to(root).parts):
             raise SystemExit("Refusing potentially sensitive/generated file: " + relative)
         contents = path.read_bytes()
         archive.writestr(relative, contents)

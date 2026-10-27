@@ -109,6 +109,7 @@ def main():
         capture = execute("CAPTURE", source_disk)
         images = request("GET", "/api/v1/images")
         image = next(i for i in images if i["id"] == capture["plan"]["imageId"])
+        image = request("GET", "/api/v1/images/" + image["id"])
         assert image["state"] == "AVAILABLE" and len(image["chunks"]) == 2
         request("POST", "/api/v1/images/" + image["id"] + "/verify", {})
         wait_for(lambda: next((i for i in request("GET", "/api/v1/images") if i["id"] == image["id"] and i["state"] == "AVAILABLE"), None), "background image verification")

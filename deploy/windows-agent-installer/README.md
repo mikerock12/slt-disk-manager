@@ -1,5 +1,16 @@
 # Instalação do serviço Windows
 
+Para habilitar o gerenciador de arquivos, prepare um JSON local e informe `-FileRootsPath C:\SLT\scopes.json` na instalação. O instalador copia esse arquivo para `file-roots.json` no estado privado do agente, com acesso restrito a Administradores e SYSTEM, e registra o serviço apontando para essa cópia. Sem esse parâmetro, o serviço não anuncia acesso a arquivos; em reinstalações, informe-o novamente para habilitar os escopos. Não altere o arquivo original esperando mudar a cópia do serviço.
+
+```json
+[
+  {"id":"documentos","label":"Documentos autorizados","path":"C:\\Users\\Cliente\\Documents","allowRead":true,"allowWrite":false},
+  {"id":"entregas","label":"Entregas ao cliente","path":"C:\\SLT-Entregas","allowRead":false,"allowWrite":true}
+]
+```
+
+Crie previamente as pastas autorizadas. O agente rejeita escopos que incluam seu estado, credenciais ou binários e caminhos com links/junctions. A restauração cria uma pasta nova dentro do escopo de escrita; não sobrescreve arquivos existentes. Escolha apenas os dados autorizados pelo responsável do computador.
+
 Execute no PC cliente autorizado, em PowerShell como administrador. Use um pacote **publicado para win-x64**, não apenas a pasta de build. O diretório de origem precisa conter o executável e `Hardware/Collect-Inventory.ps1`.
 
 ```powershell

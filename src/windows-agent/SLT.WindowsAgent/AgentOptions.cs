@@ -3,7 +3,7 @@ using System.Net;
 namespace SLT.WindowsAgent;
 
 public sealed record AgentOptions(Uri Server, string ServerPin, string StateDirectory, bool Once, int PollSeconds,
-    string? SmartctlPath, bool CollectOnly)
+    string? SmartctlPath, bool CollectOnly, string? FileRootsPath = null)
 {
     public static AgentOptions Parse(string[] args)
     {
@@ -14,7 +14,7 @@ public sealed record AgentOptions(Uri Server, string ServerPin, string StateDire
         {
             if (args[i] == "--once") { once = true; continue; }
             if (args[i] == "--collect-only") { collect = true; continue; }
-            if (args[i] is not ("--server" or "--server-pin" or "--state-dir" or "--poll-seconds" or "--smartctl"))
+            if (args[i] is not ("--server" or "--server-pin" or "--state-dir" or "--poll-seconds" or "--smartctl" or "--file-roots"))
                 throw new ArgumentException($"Opção desconhecida: {args[i]}");
             if (++i == args.Length) throw new ArgumentException("Uma opção está sem valor.");
             if (!values.TryAdd(args[i - 1], args[i])) throw new ArgumentException("Opção repetida.");
@@ -31,7 +31,10 @@ public sealed record AgentOptions(Uri Server, string ServerPin, string StateDire
         var smartctl = values.GetValueOrDefault("--smartctl");
         if (smartctl is not null && (!Path.IsPathFullyQualified(smartctl) || !File.Exists(smartctl)))
             throw new ArgumentException("--smartctl exige caminho absoluto para smartctl.exe existente.");
-        return new(server, pin.ToLowerInvariant(), state, once, poll, smartctl, collect);
+        var fileRoots = values.GetValueOrDefault("--file-roots");
+        if (fileRoots is not null && (!Path.IsPathFullyQualified(fileRoots) || !System.IO.File.Exists(fileRoots)))
+            throw new ArgumentException("--file-roots exige caminho absoluto para JSON local existente.");
+        return new(server, pin.ToLowerInvariant(), state, once, poll, smartctl, collect, fileRoots);
     }
 
     public static void EnsureLocalServer(Uri server)

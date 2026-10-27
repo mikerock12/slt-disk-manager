@@ -7,6 +7,7 @@ param(
     [string]$InstallDirectory = (Join-Path $env:ProgramFiles 'SLT Disk Manager\WindowsAgent'),
     [string]$StateDirectory = (Join-Path $env:ProgramData 'SLT\WindowsAgent'),
     [string]$SmartctlPath,
+    [string]$FileRootsPath,
     [switch]$SkipStart
 )
 $ErrorActionPreference = 'Stop'
@@ -21,6 +22,20 @@ function Assert-SafePath([string]$Value) {
     return $absolute.TrimEnd('\')
 }
 
+function Assert-NoReparseAncestors([string]$Value) {
+    $candidate = [IO.Path]::GetFullPath($Value)
+    while ($candidate) {
+        if (Test-Path -LiteralPath $candidate) {
+            if ((Get-Item -LiteralPath $candidate -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) {
+                throw 'Caminho de estado/configuracao nao pode atravessar links ou junctions.'
+            }
+        }
+        $parent = [IO.Path]::GetDirectoryName($candidate)
+        if ($parent -eq $candidate) { break }
+        $candidate = $parent
+    }
+}
+
 if (Get-Service -Name 'SLTWindowsAgent' -ErrorAction SilentlyContinue) {
     throw 'SLTWindowsAgent ja existe. Desinstale explicitamente o servico antes de instalar nova versao; o estado de pareamento sera preservado.'
 }
@@ -31,7 +46,19 @@ $agentName = 'SLT.WindowsAgent.exe'
 if (-not (Test-Path -LiteralPath (Join-Path $source $agentName) -PathType Leaf)) { throw 'Pacote publicado nao contem SLT.WindowsAgent.exe.' }
 if (-not (Test-Path -LiteralPath (Join-Path $source 'Hardware\Collect-Inventory.ps1') -PathType Leaf)) { throw 'Pacote publicado sem coletor de hardware.' }
 if ($statePath.Equals($installPath, [StringComparison]::OrdinalIgnoreCase) -or
-    $statePath.StartsWith($installPath.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'Use diretorio de estado separado dos binarios.' }
+    $statePath.StartsWith($installPath.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase) -or
+    $installPath.StartsWith($statePath.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'Use diretorio de estado separado dos binarios.' }
+$scopeJson = $null
+if ($FileRootsPath) {
+    $scopeSource = (Resolve-Path -LiteralPath (Assert-SafePath $FileRootsPath)).Path
+    Assert-NoReparseAncestors $scopeSource
+    $scopeInfo = Get-Item -LiteralPath $scopeSource
+    if ($scopeInfo.PSIsContainer -or $scopeInfo.Length -gt 65536) { throw 'Escopos exigem arquivo JSON de ate 64 KiB.' }
+    $scopeJson = [IO.File]::ReadAllText($scopeSource)
+    $scopeDefinitions = @($scopeJson | ConvertFrom-Json)
+    if (-not $scopeJson.TrimStart().StartsWith('[') -or $scopeDefinitions.Count -gt 32) { throw 'Escopos exigem array JSON com ate 32 entradas.' }
+    # O agente valida todos os caminhos, permissoes, conflitos e IDs antes de parear.
+}
 if ($SmartctlPath) {
     $SmartctlPath = (Resolve-Path -LiteralPath (Assert-SafePath $SmartctlPath)).Path
     if (-not (Test-Path -LiteralPath $SmartctlPath -PathType Leaf)) { throw 'smartctl.exe nao encontrado.' }
@@ -54,9 +81,31 @@ foreach ($sid in @('S-1-5-18', 'S-1-5-32-544')) {
     $installAcl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule($principal, 'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow')))
 }
 Set-Acl -LiteralPath $installPath -AclObject $installAcl
+Assert-NoReparseAncestors $statePath
+New-Item -ItemType Directory -Path $statePath -Force | Out-Null
+Assert-NoReparseAncestors $statePath
+$stateAcl = New-Object Security.AccessControl.DirectorySecurity
+$stateAcl.SetAccessRuleProtection($true, $false)
+foreach ($sid in @('S-1-5-18', 'S-1-5-32-544')) {
+    $principal = New-Object Security.Principal.SecurityIdentifier($sid)
+    $stateAcl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule($principal, 'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow')))
+}
+Set-Acl -LiteralPath $statePath -AclObject $stateAcl
 $agent = Join-Path $installPath $agentName
 $agentArguments = @('--server', $Server, '--server-pin', $ServerPin, '--state-dir', $statePath)
 if ($SmartctlPath) { $agentArguments += @('--smartctl', $SmartctlPath) }
+if ($null -ne $scopeJson) {
+    $privateScopes = Join-Path $statePath 'file-roots.json'
+    Assert-NoReparseAncestors $privateScopes
+    $temporaryScopes = Join-Path $statePath ('scopes-' + [Guid]::NewGuid().ToString('N') + '.tmp')
+    try {
+        [IO.File]::WriteAllText($temporaryScopes, $scopeJson, (New-Object Text.UTF8Encoding($false)))
+        Move-Item -LiteralPath $temporaryScopes -Destination $privateScopes -Force
+    } finally {
+        if (Test-Path -LiteralPath $temporaryScopes) { Remove-Item -LiteralPath $temporaryScopes -Force }
+    }
+    $agentArguments += @('--file-roots', $privateScopes)
+}
 
 Write-Host 'Iniciando pareamento local. Confira o codigo no servidor e aprove a maquina correta.'
 & $agent @agentArguments --once

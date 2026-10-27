@@ -14,6 +14,7 @@ void Reject(Action action, string message)
 }
 try
 {
+    FeatureTests.Run(Check);
     var certs = new Certificates(root, IPAddress.Loopback);
     using var db = new Store(root); var c = new Controller(db, certs, Path.Combine(root, "repo"));
     using var key = RSA.Create(2048);

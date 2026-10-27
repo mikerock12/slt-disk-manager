@@ -1,6 +1,13 @@
 # Contexto persistente
 
-Atualizado em 2026-10-26. Projeto novo baseado na especificação técnica 1.0.0.
+Atualizado em 2026-10-27. Projeto baseado na especificação técnica 1.0.0. Registros abaixo são históricos; o checkpoint mais recente prevalece.
+
+## Checkpoint atual — 2026-10-27
+- Backend/UI implementam clone integral entre clientes via imagem validada, adaptação GPT/MBR NTFS/ext4, arquivos com escopos bidirecionais, importação local no servidor e catálogo ISO/WIM/ESD + planos WinPE. Locks por máquina permitem trabalho simultâneo em PCs distintos. Transferências usam tabela de chunks normalizada; RESTORE sem estratégia explícita agora exige mesma capacidade.
+- Controller97/97 (inclui clone, arquivos, importação, mídia e concorrência em3clientes); Windows42/42; arquivos mTLS real5/5; Desktop26/26 e renderizações XAML sintéticas revisadas. Go WinPE testa execução mock, confirmação, troca de disco, hashes/corrupção, cancelamento e falhas. Vet/cross-build Windows/Linux e kit PowerShell passaram. Não houve DiskPart/DISM real.
+- PR2 https://github.com/mikerock12/slt-disk-manager/pull/2. Checkpoint remoto20e900a689b517fb2fd38c62b4d6dc9eae9513a0 validou Linux real CI40455586685: shrink/grow GPT/MBR NTFS/ext4 preservando boot/WinRE e sentinelas OS/dados, source imutável, GPT backup, corrupção/hibernação bloqueadas, loop sintético e VHDX. Windows do checkpoint também executa CI. Próxima publicação inclui integração completa, WinPE e workflowISO.
+- Mídia fornecida pelo usuário ISOs/Windows10.iso: install.esd3.981.914.908B, SHA256507466d70b5e48e13ef9664cb9e912a61c7cbf3fabb57a0684b7c805173a36ab,4edições Home/HomeSingleLanguage/Education/Pro AMD64 versão10.0.19041.3803. Importação por API local e readback/hash passaram duas vezes; ISO original não alterada nem versionada. Catálogos de teste estão em artifacts/media-e2e-* (privados/ignorados). Instalação e primeiro boot não testados.
+- ISO Rescue ainda em preparação: novo workflow PR constrói Debianlive em container e smokeQEMU BIOS/UEFI sem rede/discos de dados. Não declarar ISO construída/bootada antes de evidência. Restam CI completo, pacote beta.3, merge PR2, backupDrive atualizado e homologação Windows/hardware. docs/WORKFLOWS.md orienta operação; STATUS mantém módulos integrais pendentes.
 
 ## Objetivo autorizado
 Implementar client Windows, controlador Windows/WPF e Rescue Linux; criar repo público e destaque no GitHub, commit/push/PR/CI/merge e backup no Google Drive.

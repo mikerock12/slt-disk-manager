@@ -1,5 +1,10 @@
 # Mídia SLT Rescue
 
+Para instalação Windows pela mídia oficial do operador, consulte
+[`windows-pe/README.md`](windows-pe/README.md). O agente Go WinPE é separado do
+Rescue Linux e exige novo pareamento, plano assinado e confirmação local.
+O gerador de kit não inclui Windows/ADK nem modifica USB ou boot do computador.
+
 `scripts/build-debian-live.sh` prepara uma ISO Debian Live amd64 usando `live-build`. Execute em uma máquina/VM Debian descartável como root, com rede para os repositórios Debian. O ambiente Windows do desenvolvimento não construiu nem homologou esta ISO.
 
 ```sh
@@ -25,6 +30,17 @@ Pareamento é separado por agente, conferido fisicamente. A imagem não embute s
 Restaurar precisa de `--allow-physical-write` e confirmação no teclado do cliente. Inicialmente use apenas inventário/SMART em hardware real; captura/restauração devem ser homologadas em VM/discos descartáveis. Firmware UEFI, Secure Boot, drivers VMD/RAID e conectividade permanecem dependentes do hardware.
 
 `smartmontools`, `gddrescue` e `partclone` constam na mídia para uso autorizado local, mas apenas SMART de leitura e captura/restauração RAW estão integrados ao protocolo. Revisar licenças do Debian e de terceiros antes da redistribuição comercial.
+
+O agente também implementa `PRESERVE_LAYOUT` e `FIT` quando iniciado com `--scratch-dir` em armazenamento persistente saudável, separado do destino. São necessários `sfdisk` (pacote `fdisk`), `blkid`, `ntfsresize`, `ntfs-3g.probe`, `resize2fs` e `e2fsck`. A adaptação ocorre numa cópia privada antes de abrir o disco destino; o guia detalhado e as restrições estão em `src/rescue-agent/README.md`. A presença do código não comprova boot ou homologação de hardware.
+
+Para executar a suíte de integração de motores num runner Linux dedicado:
+
+```sh
+sudo apt-get install fdisk util-linux ntfs-3g e2fsprogs dosfstools
+sudo env PATH="$PATH" bash rescue/scripts/test-adaptive-linux.sh
+```
+
+Todos os discos da suíte são arquivos temporários; o teste de loop só desconecta o dispositivo que ele criou após comprovar seu backing_file. Não usa `losetup -D` nem enumera discos reais como destinos.
 
 ## Manutenção local avançada
 

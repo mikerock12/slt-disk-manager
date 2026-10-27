@@ -12,6 +12,8 @@ public partial class MainWindow : Window
     private ControllerClient? _client;
     private Device[] _devices = [];
     private ImageManifest[] _images = [];
+    private FileBundle[] _fileBundles = [];
+    private DeploymentMedia[] _media = [];
     private AuditEvent[] _audit = [];
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromSeconds(10) };
     private bool _busy;
@@ -20,6 +22,9 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        Cloning.Configure(RequireClient, ReviewPlanAsync, RefreshAsync);
+        Files.Configure(RequireClient, ReviewPlanAsync, RefreshAsync);
+        Deployment.Configure(RequireClient, ReviewPlanAsync, RefreshAsync);
         _timer.Tick += async (_, _) => { if (!_busy && _client is not null) await RunAsync(RefreshAsync, false); };
         Loaded += async (_, _) =>
         {
@@ -89,7 +94,10 @@ public partial class MainWindow : Window
         var jobsTask = client.GetAsync<Job[]>("/api/v1/jobs");
         var imagesTask = client.GetAsync<ImageManifest[]>("/api/v1/images");
         var auditTask = client.GetAsync<AuditEvent[]>("/api/v1/audit");
-        await Task.WhenAll(dashboardTask, devicesTask, enrollmentsTask, jobsTask, imagesTask, auditTask);
+        var clonesTask = client.GetAsync<CloneSession[]>("/api/v1/clones");
+        var bundlesTask = client.GetAsync<FileBundle[]>("/api/v1/file-bundles");
+        var mediaTask = client.GetAsync<DeploymentMedia[]>("/api/v1/media");
+        await Task.WhenAll(dashboardTask, devicesTask, enrollmentsTask, jobsTask, imagesTask, auditTask, clonesTask, bundlesTask, mediaTask);
         var dashboard = await dashboardTask;
         DeviceCount.Text = $"{dashboard.Devices} / {dashboard.Online}";
         JobCount.Text = dashboard.ActiveJobs.ToString();
@@ -118,6 +126,11 @@ public partial class MainWindow : Window
         SourceImage.SelectedItem = _images.FirstOrDefault(x => x.Id == sourceId && x.State == "AVAILABLE");
         _audit = await auditTask;
         AuditGrid.ItemsSource = _audit;
+        _fileBundles = await bundlesTask;
+        Cloning.UpdateData(_devices, await clonesTask, jobs);
+        Files.UpdateData(_devices, _fileBundles);
+        _media = await mediaTask;
+        Deployment.UpdateData(_devices, _media);
         StatusLine.Text = $"Atualizado às {DateTime.Now:HH:mm:ss}. Comunicação HTTPS com certificado fixado. Intervalo: 10 segundos.";
         ConnectionBadge.Text = "CONECTADO / LOCAL";
     }
@@ -206,7 +219,10 @@ public partial class MainWindow : Window
         var device = _devices.FirstOrDefault(x => x.Id == job.Plan.DeviceId);
         var disk = device?.Inventory?.Disks.FirstOrDefault(x => x.Fingerprint == job.Plan.DiskFingerprint);
         var image = _images.FirstOrDefault(x => x.Id == job.Plan.ImageId);
-        var dialog = new PlanApprovalWindow(job, device, disk, image) { Owner = this };
+        var bundle = _fileBundles.FirstOrDefault(x => x.Id == job.Plan.File?.BundleId);
+        var root = device?.Inventory?.FileRoots?.FirstOrDefault(x => x.Id == job.Plan.File?.RootId);
+        var media = _media.FirstOrDefault(x => x.Id == job.Plan.Deployment?.MediaId);
+        var dialog = new PlanApprovalWindow(job, device, disk, image, bundle, root, media) { Owner = this };
         if (dialog.ShowDialog() != true) return;
         await RequireClient().PostAsync<JsonElement>($"/api/v1/jobs/{Uri.EscapeDataString(job.Id)}/approve", new { challenge = dialog.TypedChallenge });
         await RefreshAsync();
@@ -214,7 +230,7 @@ public partial class MainWindow : Window
     private async void CancelJob_Click(object sender, RoutedEventArgs e) => await RunAsync(async () =>
     {
         var job = RequireJob();
-        var message = job.Plan.Kind == "RESTORE" ? "Cancelar durante restauração pode deixar o disco de destino incompleto e sem inicialização. A interrupção é best effort. Solicitar cancelamento?" : "Solicitar cancelamento da tarefa selecionada?";
+        var message = job.Plan.Kind is "RESTORE" or "DEPLOY_WINDOWS" ? "Cancelar durante gravação pode deixar o disco de destino incompleto e sem inicialização. A interrupção é best effort. Solicitar cancelamento?" : "Solicitar cancelamento da tarefa selecionada?";
         if (MessageBox.Show(this, message, "Cancelar tarefa", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) != MessageBoxResult.Yes) return;
         await RequireClient().PostAsync<JsonElement>($"/api/v1/jobs/{Uri.EscapeDataString(job.Id)}/cancel", new { });
         await RefreshAsync();

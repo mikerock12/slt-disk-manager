@@ -406,4 +406,3 @@ func TestAdaptiveLinuxPreparedVHDXRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 }
-

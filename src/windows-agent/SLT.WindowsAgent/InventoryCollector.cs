@@ -5,8 +5,9 @@ using System.Text.Json;
 
 namespace SLT.WindowsAgent;
 
-public sealed class InventoryCollector(AgentOptions options)
+public sealed class InventoryCollector(AgentOptions options, FileRootCatalog? fileRoots = null)
 {
+    private readonly FileRootCatalog roots = fileRoots ?? new FileRootCatalog(options);
     private sealed record Collected(string Os, DiskInfo[] Disks, string[] Notes);
 
     public async Task<Inventory> Collect(string deviceId, CancellationToken ct)
@@ -23,8 +24,9 @@ public sealed class InventoryCollector(AgentOptions options)
         var disks = (collected.Disks ?? []).Select(d => d with { Fingerprint = Wire.Fingerprint(d), Partitions = d.Partitions ?? [] }).ToArray();
         var caps = new List<string> { "INVENTORY" };
         if (options.SmartctlPath is not null) caps.Add("SMART");
+        caps.AddRange(roots.Capabilities);
         return new Inventory(deviceId, Environment.MachineName, collected.Os, "WINDOWS", "0.1.0", caps.ToArray(), disks,
-            DateTimeOffset.UtcNow, collected.Notes ?? []);
+            DateTimeOffset.UtcNow, collected.Notes ?? [], roots.Inventory);
     }
 
     public async Task<JobResult> Smart(JobPlan plan, Inventory inventory, CancellationToken ct)

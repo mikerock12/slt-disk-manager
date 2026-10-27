@@ -66,7 +66,7 @@ func VerifyAssignment(s SignedAssignment, certificate *x509.Certificate, deviceI
 	}
 	if p.Kind == "DEPLOY_WINDOWS" {
 		d := p.Deployment
-		if d == nil || !identifierPattern.MatchString(d.MediaID) || d.ImageIndex < 1 || d.ImageIndex > 1000 || (d.Firmware != "UEFI" && d.Firmware != "BIOS") || strings.TrimSpace(p.Challenge) == "" || (p.LogicalSectorBytes != 512 && p.LogicalSectorBytes != 4096) {
+		if d == nil || !identifierPattern.MatchString(d.MediaID) || d.ImageIndex < 1 || d.ImageIndex > 1000 || (d.Firmware != "GPT_UEFI" && d.Firmware != "MBR_BIOS") || strings.TrimSpace(p.Challenge) == "" || (p.LogicalSectorBytes != 512 && p.LogicalSectorBytes != 4096) {
 			return p, errors.New("implantação Windows sem mídia, índice, firmware, setor ou confirmação válidos")
 		}
 	} else if p.Deployment != nil {

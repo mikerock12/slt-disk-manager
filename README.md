@@ -31,6 +31,13 @@ usados apenas no desenvolvimento/backup solicitado pelo proprietário.
 - Plano com consentimento, confirmação contextual, assinatura RSA, validade e ledger anti-replay.
 - Captura/restauração RAW offline em chunks de 4 MiB, SHA256, recibos persistidos,
   releitura do destino e clonagem A → imagem verificada → B.
+- Assistente de clone integral entre clientes: GPT/MBR, preservação do layout ou
+  ajuste NTFS/ext4 em cópia de trabalho para destinos menores/maiores. CI Linux
+  verifica boot/WinRE e arquivos sentinela; primeiro boot do SO ainda não homologado.
+- Gerenciador de arquivos com escopos locais, backups selecionados, importação
+  de pastas do servidor e envio para novas pastas nos clientes.
+- Catálogo local ISO/WIM/ESD e agente WinPE nativo para aplicar Windows e criar
+  boot UEFI/BIOS. Tarefas em PCs distintos seguem em paralelo; boot real pendente.
 - Histórico durável, auditoria encadeada, progresso real, cancelamento cooperativo,
   interrupção explícita após reinício sem reexecução automática de escrita.
 - Instaladores PowerShell de serviço, regra de firewall privada e pacote portátil.
@@ -38,8 +45,9 @@ usados apenas no desenvolvimento/backup solicitado pelo proprietário.
 ## Limites atuais
 
 Veja [a matriz completa](docs/STATUS.md). Não há instalador MSI/assinatura de código,
-ISO Rescue já homologada, boot remoto automático, PXE, RBAC multiusuário,
-explorador remoto, particionamento remoto, nem instalação automatizada Windows/Linux.
+ISO Rescue já homologada em hardware, boot remoto automático, PXE, RBAC multiusuário
+nem implantação Linux centralizada. O particionamento Windows só é oferecido pelo
+perfil de instalação no WinPE, com confirmação no painel e no teclado do destino.
 Há scripts locais de aquisição ddrescue/Partclone e orientações de implantação;
 eles não equivalem à implementação centralizada desses módulos. O protocolo v1
 usa HTTPS JSON com polling em vez de gRPC (ADR em docs).
@@ -59,6 +67,7 @@ Go usa apenas biblioteca padrão.
 Os testes de disco usam somente arquivos sintéticos. Testes Windows de inventário
 fazem leitura do hardware e podem relatar permissões insuficientes sem elevação.
 O CI inclui build, suites de segurança, integração real HTTPS/mTLS e empacotamento.
+Consulte [os fluxos da bancada](docs/WORKFLOWS.md) para clone, arquivos e WinPE.
 
 ## Trabalho multiagentes
 

@@ -3,17 +3,21 @@ using System.Security.Cryptography.X509Certificates;
 
 namespace Slt.Controller;
 
-public sealed class Controller
+public sealed partial class Controller
 {
     public readonly object Gate = new();
     public Store Db { get; }
     public Certificates Certificates { get; }
     public string Repository { get; }
+    public FileRepository Files { get; }
+    public MediaRepository Media { get; }
     public const int ChunkSize = 4 * 1024 * 1024;
     private static readonly string[] Active = ["QUEUED", "RUNNING", "CANCELLING"];
     public Controller(Store db, Certificates certificates, string repository)
     {
         Db = db; Certificates = certificates; Repository = repository; Directory.CreateDirectory(Repository);
+        Files = new FileRepository(this);
+        Media = new MediaRepository(this);
         foreach (var job in db.All<Job>("job").Where(j => Active.Contains(j.State)))
         {
             db.Put("job", job.Id, job with { State = "INTERRUPTED", Result = new(false, "Servidor reiniciado; replaneje após conferir o destino. Nenhuma escrita foi reenviada.", "") });
@@ -24,12 +28,14 @@ public sealed class Controller
             db.Put("image", image.Id, image with { State = "FAILED" });
             db.Log("system", "image.interrupted", image.Id);
         }
+        foreach(var image in db.All<ImageManifest>("image").Where(i=>i.Chunks.Count>0))
+        { db.ImportChunks(image.Id,"disk",image.Chunks);db.Put("image",image.Id,image with{Chunks=[]}); }
     }
-    private static void Ensure(bool condition, int status, string error) { if (!condition) throw new ApiException(status, error); }
+    internal static void Ensure(bool condition, int status, string error) { if (!condition) throw new ApiException(status, error); }
     public Enrollment Enroll(EnrollmentRequest request)
     {
         Ensure(!string.IsNullOrWhiteSpace(request.Hostname) && request.Hostname.Length <= 128, 400, "Hostname inválido.");
-        Ensure(request.Mode is "WINDOWS" or "RESCUE", 400, "Modo inválido.");
+        Ensure(request.Mode is "WINDOWS" or "RESCUE" or "WINPE", 400, "Modo inválido.");
         Ensure(request.Secret is { Length: 64 } && request.Secret.All(Uri.IsHexDigit), 400, "Secret de pareamento deve ter 32 bytes aleatórios hex.");
         Ensure(request.CsrPem is { Length: < 12000 }, 400, "CSR inválido.");
         _ = CertificateRequest.LoadSigningRequestPem(request.CsrPem, HashAlgorithmName.SHA256, CertificateRequestLoadOptions.Default, RSASignaturePadding.Pkcs1);
@@ -74,6 +80,9 @@ public sealed class Controller
         }
         Ensure(inventory.Disks.Select(x => x.Fingerprint).Distinct().Count() == inventory.Disks.Length, 400, "Discos ambíguos.");
         Ensure(inventory.Disks.Select(x => x.Path).Distinct(StringComparer.Ordinal).Count() == inventory.Disks.Length, 400, "Caminhos de discos duplicados.");
+        foreach(var disk in inventory.Disks) if(disk.Layout != null) ClonePlanning.ValidateLayout(disk.Layout, disk.SizeBytes);
+        var roots=inventory.FileRoots ?? [];
+        Ensure(roots.Length<=32 && roots.Select(r=>r.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count()==roots.Length && roots.All(r=>r.Id is {Length:>0 and <=48} && r.Id.All(ch=>char.IsAsciiLetterOrDigit(ch)||ch is '-' or '_') && r.Label is {Length:>0 and <=128}),400,"Escopos de arquivos inválidos.");
         Db.Put("device", id, d with { Hostname = inventory.Hostname, LastSeenAtUtc = DateTimeOffset.UtcNow, Inventory = inventory });
     }
     public Device Device(string id) => Db.Get<Device>("device", id) ?? throw new ApiException(404, "Máquina não encontrada.");
@@ -85,6 +94,9 @@ public sealed class Controller
     }
     public Job Plan(PlanRequest request)
     {
+        if(request.Kind is "FILE_LIST" or "FILE_BACKUP" or "FILE_RESTORE") return Files.Plan(request);
+        if(request.Kind == "DEPLOY_WINDOWS") return PlanDeployment(request);
+        if(request.Kind == "RESTORE" && request.CloneOptions == null) request = request with { CloneOptions = new("EXACT_RAW") };
         Ensure(request.Kind is "INVENTORY" or "SMART" or "CAPTURE" or "RESTORE", 400, "Operação não implementada nesta versão.");
         Ensure(request.Consent, 400, "Registre autorização do responsável antes de criar uma tarefa.");
         var d = Device(request.DeviceId);
@@ -110,13 +122,13 @@ public sealed class Controller
             var image = GetImage(imageId);
             Ensure(image.State == "AVAILABLE", 409, "Imagem indisponível ou sendo verificada.");
             ValidateChunks(image, false);
-            Ensure(image.State == "AVAILABLE" && image.LogicalSizeBytes <= disk.SizeBytes && image.LogicalSectorBytes == disk.LogicalSectorBytes, 409, "Imagem incompleta, corrompida ou incompatível com capacidade/setores do destino.");
+            ClonePlanning.ValidateRestore(image,d,disk,request.CloneOptions);
             Ensure(image.SourceDeviceId != d.Id || image.SourceFingerprint != disk.Fingerprint, 409, "Origem e destino são o mesmo disco. Use outro disco físico.");
         }
         var id = Wire.Id();
         var challenge = request.Kind == "RESTORE" ? $"APAGAR {d.Hostname} {disk!.Fingerprint[..12]}" : $"AUTORIZAR {request.Kind} {id[..8]}";
         var plan = new JobPlan(id, request.Kind, d.Id, disk?.Fingerprint ?? "", disk?.Path ?? "", disk?.SizeBytes ?? 0,
-            disk?.LogicalSectorBytes ?? 512, imageId, challenge, DateTimeOffset.UtcNow.AddMinutes(15), true);
+            disk?.LogicalSectorBytes ?? 512, imageId, challenge, request.Kind=="RESTORE" && request.CloneOptions!=null?DateTimeOffset.UtcNow.AddHours(24):DateTimeOffset.UtcNow.AddMinutes(15), true, CloneOptions:request.CloneOptions);
         var job = new Job(id, plan, "AWAITING_APPROVAL", DateTimeOffset.UtcNow); Db.Put("job", id, job);
         Db.Log("admin", "job.planned", Wire.Serialize(plan)); return job;
     }
@@ -126,6 +138,8 @@ public sealed class Controller
         var d = Device(job.Plan.DeviceId);
         Ensure(d.TrustStatus == "TRUSTED" && d.LastSeenAtUtc > DateTimeOffset.UtcNow.AddSeconds(-45), 409, "Agente offline/revogado.");
         Ensure(d.Inventory?.Capabilities.Contains(job.Plan.Kind) == true, 409, "Capacidade indisponível.");
+        if(job.Plan.File != null){ Files.Revalidate(job); return; }
+        if(job.Plan.Kind == "DEPLOY_WINDOWS"){ RevalidateDeployment(job); return; }
         if (job.Plan.Kind == "INVENTORY") return;
         var disk = d.Inventory!.Disks.SingleOrDefault(x => x.Fingerprint == job.Plan.DiskFingerprint);
         Ensure(disk != null && disk.Path == job.Plan.DiskPath && disk.SizeBytes == job.Plan.DiskSizeBytes && disk.LogicalSectorBytes == job.Plan.LogicalSectorBytes, 409, "Disco mudou após planejamento.");
@@ -135,6 +149,7 @@ public sealed class Controller
         {
             var image = GetImage(job.Plan.ImageId); Ensure(image.State == "AVAILABLE", 409, "Imagem indisponível ou em verificação.");
             ValidateChunks(image, false);
+            ClonePlanning.ValidateRestore(image,d,disk!,job.Plan.CloneOptions);
         }
     }
     public Job Approve(string id, string challenge)
@@ -145,9 +160,10 @@ public sealed class Controller
         if (job.Plan.Kind == "CAPTURE")
         {
             var p = job.Plan;
-            var image = new ImageManifest(1, p.ImageId, $"{Device(p.DeviceId).Hostname} {DateTimeOffset.Now:yyyy-MM-dd HH:mm}", "CREATING", p.DeviceId, p.DiskFingerprint, p.DiskSizeBytes, p.LogicalSectorBytes, DateTimeOffset.UtcNow, []);
+            var image = new ImageManifest(1, p.ImageId, $"{Device(p.DeviceId).Hostname} {DateTimeOffset.Now:yyyy-MM-dd HH:mm}", "CREATING", p.DeviceId, p.DiskFingerprint, p.DiskSizeBytes, p.LogicalSectorBytes, DateTimeOffset.UtcNow, [], Device(p.DeviceId).Inventory?.Disks.Single(d=>d.Fingerprint==p.DiskFingerprint).Layout);
             Directory.CreateDirectory(ImageDir(image.Id)); Db.Put("image", image.Id, image);
         }
+        if(job.Plan.Kind=="FILE_BACKUP") Files.Prepare(job);
         job = job with { State = "QUEUED", ApprovedAtUtc = DateTimeOffset.UtcNow }; Db.Put("job", id, job);
         Db.Log("admin", "job.approved", $"{id} fingerprint={job.Plan.DiskFingerprint}"); return job;
     }
@@ -179,10 +195,12 @@ public sealed class Controller
         var j = GetJob(id); Ensure(j.Plan.DeviceId == deviceId, 403, "Tarefa pertence a outro agente.");
         Ensure(Active.Contains(j.State), 409, "Resultado já reconciliado/encerrado; não repetir execução.");
         if (result.Success && j.Plan.Kind == "CAPTURE") Ensure(Db.Get<ImageManifest>("image", j.Plan.ImageId)?.State == "AVAILABLE", 409, "Imagem não finalizada e verificada.");
+        if (result.Success && j.Plan.Kind == "FILE_BACKUP") Ensure(Files.Get(j.Plan.File!.BundleId).State == "AVAILABLE",409,"Backup não finalizado/verificado.");
         var state = j.CancelRequested ? "CANCELLED" : result.Success ? "COMPLETED" : "FAILED";
         Db.Put("job", id, j with { State = state, Result = result });
         if (state != "COMPLETED" && j.Plan.Kind == "CAPTURE" && Db.Get<ImageManifest>("image", j.Plan.ImageId) is {} image && image.State != "AVAILABLE")
             Db.Put("image", image.Id, image with { State = "FAILED" });
+        if(state!="COMPLETED" && j.Plan.Kind=="FILE_BACKUP") Files.Fail(j.Plan.File!.BundleId);
         Db.Log(internalCall ? "system" : deviceId, $"job.{state.ToLowerInvariant()}", $"{id} {result.Message}");
     }
     public Job Cancel(string id)
@@ -198,43 +216,48 @@ public sealed class Controller
     private string ChunkPath(string id, int seq) => Path.Combine(ImageDir(id), $"{seq:D8}.bin");
     public ImageChunk Upload(string deviceId, string jobId, int seq, byte[] bytes, string sha)
     {
-        var j = AgentJob(deviceId, jobId, "CAPTURE"); var image = GetImage(j.Plan.ImageId);
+        var j = AgentJob(deviceId, jobId, "CAPTURE"); var image = Db.Get<ImageManifest>("image",j.Plan.ImageId) ?? throw new ApiException(404,"Imagem não encontrada.");
         Ensure(image.State == "CREATING" && seq >= 0, 409, "Imagem não está recebendo dados.");
         var hash = Convert.ToHexStringLower(SHA256.HashData(bytes));
         Ensure(SafeEquals(hash, sha), 400, "SHA256 não corresponde aos dados recebidos.");
         var offset = (long)seq * ChunkSize; var size = (int)Math.Min(ChunkSize, image.LogicalSizeBytes - offset);
         Ensure(offset >= 0 && size > 0 && bytes.Length == size, 400, "Tamanho/offset de chunk inválido.");
-        if (seq < image.Chunks.Count)
+        if (Db.GetChunk(image.Id,"disk",seq) is {} old)
         {
-            var old = image.Chunks[seq]; Ensure(old.Sha256 == hash && File.Exists(ChunkPath(image.Id, seq)), 409, "Chunk duplicado divergente."); return old;
+            Ensure(old.Sha256 == hash && File.Exists(ChunkPath(image.Id, seq)), 409, "Chunk duplicado divergente."); return old;
         }
-        Ensure(seq == image.Chunks.Count, 409, "Chunk fora de ordem; aguarde recibo persistido.");
+        Ensure(seq == Db.NextChunk(image.Id,"disk"), 409, "Chunk fora de ordem; aguarde recibo persistido.");
         Ensure(FreeBytes() > bytes.Length + 16L * 1024 * 1024, 409, "Repositório sem espaço.");
         var path = ChunkPath(image.Id, seq); var temp = path + ".incoming";
         using (var fs = new FileStream(temp, FileMode.Create, FileAccess.Write, FileShare.None, ChunkSize, FileOptions.WriteThrough)) { fs.Write(bytes); fs.Flush(true); }
         File.Move(temp, path, true);
         using (var persisted = File.OpenRead(path))
             Ensure(Convert.ToHexStringLower(SHA256.HashData(persisted)) == hash, 409, "Falha de integridade após persistência do chunk.");
-        var chunk = new ImageChunk(seq, offset, bytes.Length, hash); image.Chunks.Add(chunk); Db.Put("image", image.Id, image); return chunk;
+        var chunk = new ImageChunk(seq, offset, bytes.Length, hash); Db.AddChunk(image.Id,"disk",chunk); return chunk;
     }
-    public ImageManifest Complete(string deviceId, string jobId)
+    public ImageManifest Complete(string deviceId, string jobId, DiskLayout? layout = null)
     {
         var j = AgentJob(deviceId, jobId, "CAPTURE"); var image = GetImage(j.Plan.ImageId);
+        if(layout!=null){ ClonePlanning.ValidateLayout(layout,image.LogicalSizeBytes); Ensure(layout.SectorSize==image.LogicalSectorBytes,400,"Setor do layout não corresponde à imagem."); image=image with{Layout=layout}; }
         // Each chunk was re-read and hashed before its durable receipt. Checking
         // continuity here avoids re-reading a multi-terabyte image under the DB lock.
         ValidateChunks(image, false); image = image with { State = "AVAILABLE" };
         // Hashes live in durable catalog, and manifest is promoted atomically only after all chunks validate.
         var path = Path.Combine(ImageDir(image.Id), "manifest.json"); File.WriteAllText(path + ".tmp", Wire.Serialize(image)); File.Move(path + ".tmp", path, true);
-        Db.Put("image", image.Id, image); Db.Log(deviceId, "image.available", image.Id); return image;
+        Db.Put("image", image.Id, image with{Chunks=[]}); Db.Log(deviceId, "image.available", image.Id); return image;
     }
-    public ImageManifest GetImage(string id) => Db.Get<ImageManifest>("image", id) ?? throw new ApiException(404, "Imagem não encontrada.");
+    public ImageManifest GetImage(string id)
+    {
+        var image=Db.Get<ImageManifest>("image",id) ?? throw new ApiException(404,"Imagem não encontrada.");
+        return image.Chunks.Count>0 ? image : image with{Chunks=Db.Chunks(id,"disk")};
+    }
     public ImageManifest Verify(string id)
     {
         var image = GetImage(id); Ensure(image.State == "AVAILABLE", 409, "Imagem não está disponível.");
         try { ValidateChunks(image); }
         catch (Exception e) when (e is ApiException or IOException)
         {
-            Db.Put("image", id, image with { State = "FAILED" }); Db.Log("system", "image.corrupt", id); throw new ApiException(409, "Imagem corrompida/incompleta; restauração bloqueada.");
+            Db.Put("image", id, image with { State = "FAILED",Chunks=[] }); Db.Log("system", "image.corrupt", id); throw new ApiException(409, "Imagem corrompida/incompleta; restauração bloqueada.");
         }
         Db.Log("admin", "image.verified", id); return image;
     }
@@ -242,7 +265,7 @@ public sealed class Controller
     {
         var image = GetImage(id); Ensure(image.State == "AVAILABLE", 409, "Imagem indisponível ou já sendo verificada.");
         Ensure(!Db.All<Job>("job").Any(j => j.Plan.Kind == "RESTORE" && j.Plan.ImageId == id && Active.Contains(j.State)), 409, "Imagem em uso por restauração; aguarde a conclusão antes de verificar.");
-        var verifying = image with { State = "VERIFYING" }; Db.Put("image", id, verifying);
+        var verifying = image with { State = "VERIFYING",Chunks=[] }; Db.Put("image", id, verifying);
         Db.Log("admin", "image.verification.started", id);
         _ = Task.Run(() =>
         {
@@ -250,7 +273,7 @@ public sealed class Controller
             try { ValidateChunks(image); } catch { state = "FAILED"; }
             lock (Gate)
             {
-                Db.Put("image", id, image with { State = state });
+                Db.Put("image", id, image with { State = state,Chunks=[] });
                 Db.Log("system", state == "AVAILABLE" ? "image.verified" : "image.corrupt", id);
             }
         });
@@ -274,9 +297,11 @@ public sealed class Controller
     }
     public byte[] Download(string deviceId, string jobId, int seq)
     {
-        var image = DownloadManifest(deviceId, jobId); Ensure(seq >= 0 && seq < image.Chunks.Count, 404, "Chunk inválido.");
+        var j=AgentJob(deviceId,jobId,"RESTORE");var image=Db.Get<ImageManifest>("image",j.Plan.ImageId) ?? throw new ApiException(404,"Imagem não encontrada.");
+        Ensure(image.State=="AVAILABLE",409,"Imagem indisponível.");
+        var chunk=Db.GetChunk(image.Id,"disk",seq) ?? throw new ApiException(404,"Chunk inválido.");
         var bytes = File.ReadAllBytes(ChunkPath(image.Id, seq));
-        Ensure(Convert.ToHexStringLower(SHA256.HashData(bytes)) == image.Chunks[seq].Sha256, 409, "Chunk corrompido; escrita bloqueada."); return bytes;
+        Ensure(bytes.Length==chunk.SizeBytes && Convert.ToHexStringLower(SHA256.HashData(bytes)) == chunk.Sha256, 409, "Chunk corrompido; escrita bloqueada."); return bytes;
     }
     public long FreeBytes() => new DriveInfo(Path.GetPathRoot(Path.GetFullPath(Repository))!).AvailableFreeSpace;
     public static bool SafeEquals(string a, string b) => CryptographicOperations.FixedTimeEquals(System.Text.Encoding.UTF8.GetBytes(a), System.Text.Encoding.UTF8.GetBytes(b));

@@ -32,6 +32,8 @@ try {
     Copy-Item -LiteralPath rescue/README.md -Destination (Join-Path $output 'rescue/README.md')
     Copy-Item -LiteralPath rescue/scripts -Destination (Join-Path $output 'rescue/scripts') -Recurse
     Copy-Item -LiteralPath rescue/profiles -Destination (Join-Path $output 'rescue/profiles') -Recurse
+    Copy-Item -LiteralPath rescue/windows-pe -Destination (Join-Path $output 'windows-pe') -Recurse
+    Copy-Item -LiteralPath artifacts/slt-winpe-agent.exe -Destination (Join-Path $output 'windows-pe/slt-winpe-agent.exe')
     Get-ChildItem -LiteralPath $output -Recurse -File | Get-FileHash -Algorithm SHA256 | ForEach-Object {
         '{0}  {1}' -f $_.Hash.ToLowerInvariant(), $_.Path.Substring($output.Length+1).Replace('\','/')
     } | Set-Content -LiteralPath (Join-Path $output 'SHA256SUMS.txt') -Encoding ascii

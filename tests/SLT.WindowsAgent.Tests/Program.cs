@@ -4,9 +4,13 @@ using System.Security.Cryptography.X509Certificates;
 using System.Text.Json;
 using SLT.WindowsAgent;
 
+if (args.Contains("--e2e-files", StringComparer.Ordinal)) return await WindowsFilesE2E.Run();
+
 var passed = 0;
+var total = 0;
 void Check(string name, Action test)
 {
+    total++;
     try { test(); passed++; Console.WriteLine("PASS " + name); }
     catch (Exception ex) { Console.Error.WriteLine("FAIL " + name + ": " + ex.Message); Environment.ExitCode = 1; }
 }
@@ -84,5 +88,6 @@ Check("smartctl arbitrary remote path rejected", () =>
     Reject(() => InventoryCollector.SmartDevicePath(@"\\.\PhysicalDrive0 --test=long"));
 });
 Check("smartctl unsupported device range rejected", () => Reject(() => InventoryCollector.SmartDevicePath(@"\\.\PhysicalDrive256")));
-Console.WriteLine($"WindowsAgent security checks passed: {passed}/24");
+FileFeatureTests.Run(Check, Assert, Reject);
+Console.WriteLine($"WindowsAgent security checks passed: {passed}/{total}");
 return Environment.ExitCode;
