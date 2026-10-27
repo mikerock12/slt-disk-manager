@@ -170,7 +170,9 @@ func ValidateLayout(l *DiskLayout, totalBytes int64) error {
 }
 
 func InspectLayout(ctx context.Context, path string, totalBytes int64, sector int) (*DiskLayout, error) {
-	data, err := tool(ctx, nil, "sfdisk", "--json", "--sector-size", strconv.Itoa(sector), path)
+	args, err := sfdiskArgs(ctx, sector, "--json", path)
+	if err != nil { return nil, err }
+	data, err := tool(ctx, nil, "sfdisk", args...)
 	if err != nil {
 		return nil, err
 	}
@@ -352,7 +354,9 @@ func rewriteLayout(ctx context.Context, path string, l *DiskLayout, totalBytes i
 	if err != nil {
 		return err
 	}
-	if _, err = tool(ctx, strings.NewReader(renderLayout(l)), "sfdisk", "--sector-size", strconv.Itoa(l.SectorSize), "--no-reread", "--no-tell-kernel", "--wipe", "never", "--wipe-partitions", "never", path); err != nil {
+	args, err := sfdiskArgs(ctx, l.SectorSize, "--no-reread", "--no-tell-kernel", "--wipe", "never", "--wipe-partitions", "never", path)
+	if err != nil { return err }
+	if _, err = tool(ctx, strings.NewReader(renderLayout(l)), "sfdisk", args...); err != nil {
 		return err
 	}
 	f, err = os.OpenFile(path, os.O_RDWR, 0)
@@ -372,7 +376,9 @@ func rewriteLayout(ctx context.Context, path string, l *DiskLayout, totalBytes i
 	if err = f.Sync(); err != nil {
 		return err
 	}
-	if _, err = tool(ctx, nil, "sfdisk", "--verify", "--sector-size", strconv.Itoa(l.SectorSize), path); err != nil {
+	args, err = sfdiskArgs(ctx, l.SectorSize, "--verify", path)
+	if err != nil { return err }
+	if _, err = tool(ctx, nil, "sfdisk", args...); err != nil {
 		return err
 	}
 	actual, err := InspectLayout(ctx, path, totalBytes, l.SectorSize)
@@ -383,6 +389,16 @@ func rewriteLayout(ctx context.Context, path string, l *DiskLayout, totalBytes i
 		return errors.New("layout produzido difere do plano; destino não será aberto")
 	}
 	return nil
+}
+
+// util-linux 2.39 defaults regular image files to 512-byte sectors and has no
+// --sector-size flag. Never silently interpret a 4Kn image as 512-byte sectors.
+func sfdiskArgs(ctx context.Context, sector int, args ...string) ([]string, error) {
+	if sector == 512 { return args, nil }
+	if sector != 4096 { return nil, errors.New("setor lógico não suportado") }
+	help, err := tool(ctx, nil, "sfdisk", "--help")
+	if err != nil || !strings.Contains(string(help), "--sector-size") { return nil, errors.New("sfdisk instalado não oferece --sector-size; adaptação 4Kn bloqueada") }
+	return append([]string{"--sector-size", strconv.Itoa(sector)}, args...), nil
 }
 
 func protectedFilesystem(fs string) bool {
