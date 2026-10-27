@@ -1,0 +1,30 @@
+name: Build experimental Rescue ISO
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build-iso:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: src/rescue-agent/go.mod
+          cache: false
+      - name: Test and build Linux agent
+        working-directory: src/rescue-agent
+        run: |
+          go test ./...
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o ../../rescue/slt-rescue-agent ./cmd/slt-rescue-agent
+      - name: Build Debian live image in isolated container
+        run: |
+          docker run --rm --privileged -v "$PWD:/work" -w /work debian:trixie bash -c 'apt-get update && apt-get install -y live-build debootstrap xorriso squashfs-tools syslinux-common syslinux-utils isolinux grub-pc-bin grub-efi-amd64-bin dosfstools mtools && SLT_BUILD_DIR=/work/artifacts/rescue-iso bash /work/rescue/scripts/build-debian-live.sh'
+      - uses: actions/upload-artifact@v7
+        with:
+          name: slt-rescue-experimental-iso
+          path: |
+            artifacts/rescue-iso/live-image-amd64.hybrid.iso
+            artifacts/rescue-iso/live-image-amd64.hybrid.iso.sha256
+          retention-days: 7

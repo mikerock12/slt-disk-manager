@@ -20,3 +20,37 @@ Implementar client Windows, controlador Windows/WPF e Rescue Linux; criar repo p
 
 ## Próximos passos
 Implementação paralela por diretórios, integração e testes de segurança, empacotamento, publicação e backup. Consolidar resultados dos agentes aqui e em AGENTS.md ao concluir cada tarefa.
+
+## Entregas de implementação verificadas
+- Controller ASP.NET Core/SQLite com CA, pin TLS, mTLS, revogação, NIC/CIDR privado, admin loopback, jobs assinados/consentimento/challenge e imagens RAW.
+- Windows client e scripts de serviço: build, 24 checks segurança, E2E real 4/4, leitura de dois discos locais. SChannel exige reimportar chaves para container Windows no servidor e client (corrigido).
+- Rescue Go: testes/vet e cross-build; E2E real com .NET 5/5, captura e restauração byte a byte de arquivo de 4 MiB+512 bytes, revogação. Não usou discos reais.
+- Painel WPF implementado, compilado; revisão visual/funcional final em andamento.
+- Controller 34/34 verificações sintéticas; solução inteira compilou com 0 avisos/0 erros. Dependência SQLitePCLRaw.lib.e_sqlite3 2.1.12 fixa advisory detectado na 2.1.11.
+- Transporte JSON polling, persistência documentos SQLite, single admin token: desvios da visão-alvo explícitos em ADR/STATUS, sem declarar gRPC/EF/RBAC completo.
+- Ainda pendentes: ISO e boot homologados, reboot remoto, arquivos/partições remotos, instalação automatizada de SO, PXE, clone direto/lote, MSI assinado, RBAC e validação em VMs/hardware.
+- Git inicializado. main baseline a55c905; implementação na branch feat/workshop-client-server. Nenhum remote/PR/merge remoto criado até autenticação GitHub válida.
+
+## Fechamento de integração / revisão
+- Controller35/35, Windows24/24, Go5 testes+vet, WindowsE2E4/4 e GoE2E6/6. Segunda instância no mesmo state é recusada antes de abrir o banco. Verificação não interrompe restore ativo. Instalação SYSTEM restringe executáveis a pasta dedicada de Program Files e ACL Administradores/SYSTEM; rejeita reparse/root.
+- Desktop sem erros/avisos; auditoria ID long e mensagem VERIFYING corrigidos. QA visual permanece pendente: lançamento pela ferramenta de UI travou até interrupção, sem janela/screenshot.
+- Pacote self-contained beta.2 em artifacts, com runtime, scripts e guia. Build ISO disponível em workflow manual, mas WSL não está instalado operacionalmente e não há Docker aqui; ISO/boot não testados.
+- Destino Drive criado e verificado: https://drive.google.com/drive/folders/10F1ZWzqpRpwDYd3y-TVECFxa2MTUu5Wa . Upload/recibos serão registrados no fechamento de entrega.
+- Autenticação GitHub bloqueante: gh token inválido, navegador GitHub/Google sem sessão. Usuário recebeu solicitação de login enquanto implementação continuava; não criar PR/merge/destaque fictícios.
+
+## Artefatos e continuidade
+- Commit implementação 9a65e66 em feat/workshop-client-server. Main ainda é baseline; sem remote nem merge fictício. Última alteração documental registra recibos e helpers de backup.
+- Pacote beta.2 gerado: artifacts/SLT-Disk-Manager-0.1.0-beta.2-win-x64.zip (173.358.572 bytes), SHA256 b9e822afd2de867fad091afe5425c355cea3ae77b1248233c26cd2e11dccb04f.
+- Backup fonte/histórico: https://drive.google.com/file/d/1SnQiWVMYd-O0WK6grrkKkgFKAZz9AlEI/view?usp=drivesdk . Upload verificado por metadados.
+- Binários no mesmo destino Drive, em 3 partes por limite 100MiB do conector. Partes com 64MiB, 64MiB e 39.140.844 bytes. package-manifest.json e Reunir-Pacote.ps1/.cmd incluídos; reunião local produziu ZIP com hash idêntico. Listagem Drive confirmou 8 arquivos iniciais e tamanhos; sem compartilhamento público.
+- Próxima retomada GitHub: conferir gh auth status/login e existência de mikerock12/slt-disk-manager antes de criar; publicar main baseline+branch implementação, abrir PR, anexar à conversa, aguardar CI, corrigir falhas, merge, fixar repo no perfil e atualizar backup. Não marcar isso como feito antes dos retornos remotos.
+- Homologação/escopo faltante em docs/STATUS.md. Inventário/diagnóstico é o primeiro uso indicado nos dois computadores; escrita física continua sem homologação. Pacote tem QUICKSTART.md na raiz; documentação completa atualizada está no source backup/workspace.
+
+## Correção da janela SLT.Controller.Tests.exe
+- Usuário enviou screenshot de erro de aplicação. EventLog Application/.NET Runtime 1026 de 19:00:31 apontou IOException sem tratamento no Directory.Delete da limpeza de controller.db em um teste antigo. Não é evidência de falha do servidor/client beta.2.
+- SQLite Pooling=False e catch do corpo do teste já estavam presentes, mas finally ainda podia lançar. TestCleanup agora valida o diretório temporário exclusivo, tenta limpar até 3 vezes e registra aviso/preserva a pasta em caso de lock/permissão, sem mascarar o resultado da suíte.
+- Teste reproduziu arquivo bloqueado e liberação do handle: 37/37 checks, exit 0. Nenhum processo SLT.Controller.Tests/WerFault nem janela correspondente encontrado na inspeção atual. Não houve necessidade de encerrar processos do usuário.
+- Somente testes/documentação alterados. Pacote executável beta.2 permanece com o mesmo hash. Backup das fontes será atualizado mantendo o ID Drive já registrado.
+- Usuário respondeu que autenticará via gh auth login. Não presumir login concluído: última consulta ainda informou token inválido.
+- Após reconexão feita pelo usuário, get_profile do plugin confirmou mikerock12 e search_repositories não encontrou o projeto. O plugin está conectado e funcional; faltam operações de criar repo e pin nos tools disponíveis. CLI e navegador têm autenticação separada: gh continua inválido; nova aba https://github.com/new abriu login, marcada para handoff. Aguardar login nessa aba OU gh auth login, sem pedir nova reconexão do plugin.
+- Correção commitada em 0c6df63 e source backup substituído no mesmo ID Drive; readback confirmou tamanho 308.365 bytes. Binários beta.2 não mudaram, pois correção é do harness de testes.

@@ -30,7 +30,7 @@ PUT `/agent/v1/jobs/{id}/chunks/{seq}` bytes, header `X-Content-SHA256` -> {sequ
 POST `/agent/v1/jobs/{id}/capture-complete` {} -> ImageManifest após validação completa.
 GET `/agent/v1/jobs/{id}/manifest` -> ImageManifest (RESTORE autorizado somente).
 GET `/agent/v1/jobs/{id}/chunks/{seq}` -> bytes, hash via manifest, checar ANTES da escrita.
-`ImageManifest`: {schemaVersion:1, id, name, state:"CREATING"|"AVAILABLE"|"FAILED", sourceDeviceId, sourceFingerprint, logicalSizeBytes:long, logicalSectorBytes:int, createdAtUtc, chunks:ImageChunk[]}.
+`ImageManifest`: {schemaVersion:1, id, name, state:"CREATING"|"VERIFYING"|"AVAILABLE"|"FAILED", sourceDeviceId, sourceFingerprint, logicalSizeBytes:long, logicalSectorBytes:int, createdAtUtc, chunks:ImageChunk[]}.
 `ImageChunk`: {sequence:int, offsetBytes:long, sizeBytes:int, sha256}.
 
 ## Administrativo
@@ -43,5 +43,6 @@ POST `/api/v1/jobs/plan` {kind, deviceId, diskFingerprint, imageId?, consent:boo
 POST `/api/v1/jobs/{id}/approve` {challenge} -> Job (queued). Challenge deve ser digitado, não automaticamente preenchido.
 POST `/api/v1/jobs/{id}/cancel` {} -> Job.
 GET `/api/v1/images` -> ImageManifest[]. POST `/api/v1/images/{id}/verify` {} -> ImageManifest.
+Verificação profunda inicia em background e retorna estado VERIFYING; consultar catálogo até AVAILABLE ou FAILED. Evita bloquear heartbeat durante releitura de imagens grandes. Cada chunk de captura é relido e validado antes do recibo, e cada download é hash-validado antes da transmissão.
 GET `/api/v1/audit` -> [{id, timestampUtc, actor, action, details, previousHash, eventHash}].
 Erros JSON {error} e status HTTP apropriado. Reinício marca trabalhos ativos INTERRUPTED sem reenviar escrita.
