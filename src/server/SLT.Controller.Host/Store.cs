@@ -41,6 +41,13 @@ public sealed class Store : IDisposable
         using var c = connection.CreateCommand(); c.CommandText = "INSERT INTO credentials VALUES($id,$thumb)";
         c.Parameters.AddWithValue("$id", deviceId); c.Parameters.AddWithValue("$thumb", thumbprint); c.ExecuteNonQuery();
     }
+    public List<FileBundle> FileCatalog()
+    {
+        using var c=connection.CreateCommand();
+        c.CommandText="SELECT json_set(json_remove(json,'$.entries'),'$.entries',json('[]'),'$.entryCount',json_array_length(json,'$.entries')) FROM documents WHERE kind='filebundle' ORDER BY rowid DESC";
+        using var reader=c.ExecuteReader();var rows=new List<FileBundle>();
+        while(reader.Read())rows.Add(Wire.Read<FileBundle>(reader.GetString(0)));return rows;
+    }
     public string? Identify(string thumbprint)
     {
         using var c = connection.CreateCommand(); c.CommandText = "SELECT device_id FROM credentials WHERE thumbprint=$thumb";

@@ -50,7 +50,7 @@ public record FileRootInfo(string Id, string Label, bool CanRead, bool CanWrite)
 public record FileRequest(string RootId, string RelativePath = "", string[]? Paths = null, string BundleId = "", string Name = "", string? Cursor = null, int PageSize = 100);
 public record FileListRequest(string DeviceId, string RootId, string RelativePath, string? Cursor, int PageSize, bool Consent);
 public record BundleEntry(string Id, string RelativePath, bool IsDirectory, long SizeBytes, DateTimeOffset LastWriteTimeUtc, List<ImageChunk> Chunks);
-public record FileBundle(int SchemaVersion, string Id, string Name, string State, string SourceDeviceId, string RootId, DateTimeOffset CreatedAtUtc, long TotalBytes, List<BundleEntry> Entries);
+public record FileBundle(int SchemaVersion, string Id, string Name, string State, string SourceDeviceId, string RootId, DateTimeOffset CreatedAtUtc, long TotalBytes, List<BundleEntry> Entries, int? EntryCount = null);
 public record BundleStart(List<BundleEntry> Entries, long TotalBytes);
 public record LocalImport(string Path, string Name, bool Consent);
 public record MediaImport(string Path, string Name);

@@ -101,6 +101,15 @@ func NewClient(server, pin string, cert *tls.Certificate) (*Client, error) {
 }
 
 func (c *Client) Request(ctx context.Context, method, path string, body io.Reader, headers map[string]string) ([]byte, int, error) {
+	return c.requestLimited(ctx, method, path, body, headers, ChunkSize+65536)
+}
+
+// Whole-disk manifests grow with the number of 4 MiB chunks. JSON operations
+// explicitly select this bound; an HTTP Content-Type supplied by the peer can
+// never relax the binary transfer limit. Plan/signature limits remain separate.
+const maximumJSONResponseBytes int64 = 256 * 1024 * 1024
+
+func (c *Client) requestLimited(ctx context.Context, method, path string, body io.Reader, headers map[string]string, maximum int64) ([]byte, int, error) {
 	req, err := http.NewRequestWithContext(ctx, method, c.base+path, body)
 	if err != nil {
 		return nil, 0, err
@@ -114,11 +123,14 @@ func (c *Client) Request(ctx context.Context, method, path string, body io.Reade
 		return nil, 0, err
 	}
 	defer r.Body.Close()
-	data, err := io.ReadAll(io.LimitReader(r.Body, ChunkSize+65537))
+	if r.ContentLength > maximum {
+		return nil, r.StatusCode, errors.New("resposta excede limite")
+	}
+	data, err := io.ReadAll(io.LimitReader(r.Body, maximum+1))
 	if err != nil {
 		return nil, r.StatusCode, err
 	}
-	if len(data) > ChunkSize+65536 {
+	if int64(len(data)) > maximum {
 		return nil, r.StatusCode, errors.New("resposta excede limite")
 	}
 	if r.StatusCode < 200 || r.StatusCode >= 300 {
@@ -136,7 +148,7 @@ func (c *Client) JSON(ctx context.Context, method, path string, input, output an
 		}
 		reader = bytes.NewReader(data)
 	}
-	data, status, err := c.Request(ctx, method, path, reader, nil)
+	data, status, err := c.requestLimited(ctx, method, path, reader, nil, maximumJSONResponseBytes)
 	if err != nil {
 		return status, err
 	}

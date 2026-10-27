@@ -42,7 +42,7 @@ for mode in BIOS UEFI; do
   cat "$output/$mode.serial.log" || true
   cat "$output/$mode.qemu.log" || true
   [[ $status -eq 0 ]] || { echo "$mode VM failed/timed out: $status" >&2; exit 1; }
-  grep -q "SLT_RESCUE_BOOT_READY:$mode:AGENT_HELP_OK:ENGINES_OK" "$output/$mode.serial.log"
+  grep -q "SLT_RESCUE_BOOT_READY:$mode:AGENT_HELP_OK:ENGINES_OK:LOGIN_OK:NETWORK_TOOLS_OK" "$output/$mode.serial.log"
   grep -q 'SLT_RESCUE_SYNTHETIC_SMOKE_POWEROFF' "$output/$mode.serial.log"
   printf '%s PASS: live kernel/userspace, packaged Go CLI and engines; no disk job or network\n' "$mode" | tee -a "$output/results.txt"
 done

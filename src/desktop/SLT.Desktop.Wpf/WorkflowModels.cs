@@ -50,10 +50,10 @@ public sealed record FilePage(string RootId, string RelativePath, FileEntry[] En
 public sealed record BundleEntry(string Id, string RelativePath, bool IsDirectory, long SizeBytes,
     DateTimeOffset LastWriteTimeUtc, ImageChunk[] Chunks);
 public sealed record FileBundle(int SchemaVersion, string Id, string Name, string State, string SourceDeviceId,
-    string RootId, DateTimeOffset CreatedAtUtc, long TotalBytes, BundleEntry[] Entries)
+    string RootId, DateTimeOffset CreatedAtUtc, long TotalBytes, BundleEntry[] Entries, [property:JsonPropertyName("entryCount")] int? CatalogEntryCount = null)
 {
     public string Size => Display.Bytes(TotalBytes);
-    public int EntryCount => Entries.Length;
+    [JsonIgnore] public int EntryCount => CatalogEntryCount ?? Entries.Length;
     public string Created => CreatedAtUtc.ToLocalTime().ToString("dd/MM/yyyy HH:mm");
     public string Label => $"{Name} • {Size} • {EntryCount} entradas • {State}";
 }

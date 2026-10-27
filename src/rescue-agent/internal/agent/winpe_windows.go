@@ -220,7 +220,7 @@ func pePathDisks(path string) ([]int, error) {
 	if n == 0 {
 		return nil, peError("mapeamento de volume indisponível", e)
 	}
-	if strings.Contains(strings.ToLower(syscall.UTF16ToString(device)), `\ramdisk`) {
+	if nonPhysicalWinPEVolume(syscall.UTF16ToString(device)) {
 		return []int{}, nil
 	}
 	h, err := peOpen(`\\.\` + root)

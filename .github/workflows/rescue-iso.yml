@@ -6,12 +6,14 @@ on:
       - 'src/rescue-agent/**'
       - 'rescue/**'
       - '.github/workflows/rescue-iso.yml'
+      - 'VERSION'
   push:
     branches: [main]
     paths:
       - 'src/rescue-agent/**'
       - 'rescue/**'
       - '.github/workflows/rescue-iso.yml'
+      - 'VERSION'
 permissions:
   contents: read
 concurrency:
@@ -20,6 +22,8 @@ concurrency:
 jobs:
   build-and-boot:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     timeout-minutes: 70
     steps:
       - uses: actions/checkout@v7
@@ -41,7 +45,7 @@ jobs:
             apt-get update
             apt-get install -y --no-install-recommends live-build debootstrap xorriso squashfs-tools syslinux-common syslinux-utils isolinux grub-pc-bin grub-efi-amd64-bin dosfstools mtools ca-certificates wget cpio file rsync zstd
             SLT_BUILD_DIR=/work/artifacts/rescue-iso bash /work/rescue/scripts/build-debian-live.sh
-            chown "$SLT_OUTPUT_OWNER" /work/artifacts/rescue-iso /work/artifacts/rescue-iso/live-image-amd64.hybrid.iso /work/artifacts/rescue-iso/live-image-amd64.hybrid.iso.sha256
+            chown "$SLT_OUTPUT_OWNER" /work/artifacts/rescue-iso /work/artifacts/rescue-iso/live-image-amd64.hybrid.iso /work/artifacts/rescue-iso/live-image-amd64.hybrid.iso.sha256 /work/artifacts/rescue-iso/packages.tsv /work/artifacts/rescue-iso/source-index.tsv /work/artifacts/rescue-iso/package-copyrights.tar.gz
           ' 2>&1 | tee artifacts/rescue-iso-build.log
       - name: Install isolated VM test tools
         run: |
@@ -58,7 +62,28 @@ jobs:
           path: |
             artifacts/rescue-iso/live-image-amd64.hybrid.iso
             artifacts/rescue-iso/live-image-amd64.hybrid.iso.sha256
+            artifacts/rescue-iso/packages.tsv
+            artifacts/rescue-iso/source-index.tsv
+            artifacts/rescue-iso/package-copyrights.tar.gz
             artifacts/rescue-iso-build.log
             artifacts/rescue-boot/
           compression-level: 0
           retention-days: 14
+      - name: Attach tested Rescue ISO to matching release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(tr -d '\r\n' < VERSION)
+          tag="v$version"
+          for attempt in $(seq 1 30); do
+            if gh release view "$tag" --json targetCommitish >/dev/null 2>&1; then break; fi
+            sleep 10
+          done
+          target=$(gh release view "$tag" --json targetCommitish --jq .targetCommitish)
+          test "$target" = "$GITHUB_SHA" || { echo 'Existing release preserved; VERSION does not match this commit.'; exit 0; }
+          (cd artifacts/rescue-iso && sha256sum --check live-image-amd64.hybrid.iso.sha256)
+          iso="SLT-Rescue-$version-amd64.iso"
+          cp artifacts/rescue-iso/live-image-amd64.hybrid.iso "artifacts/$iso"
+          (cd artifacts && sha256sum "$iso" > "$iso.sha256")
+          gh release upload "$tag" "artifacts/$iso" "artifacts/$iso.sha256" artifacts/rescue-iso/packages.tsv artifacts/rescue-iso/source-index.tsv artifacts/rescue-iso/package-copyrights.tar.gz --clobber

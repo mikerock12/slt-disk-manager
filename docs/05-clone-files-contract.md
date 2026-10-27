@@ -75,8 +75,17 @@ PUT `/agent/v1/jobs/{id}/bundle/{fileId}/chunks/{seq}` binário + X-Content-SHA2
 POST `/agent/v1/jobs/{id}/bundle-complete` {} -> FileBundle AVAILABLE somente após validação.
 GET `/agent/v1/jobs/{id}/bundle` -> FileBundle (somente job FILE_RESTORE atribuído).
 GET `/agent/v1/jobs/{id}/bundle/{fileId}/chunks/{seq}` -> bytes verificados.
-GET `/api/v1/file-bundles` -> FileBundle[] (catálogo).
+GET `/api/v1/file-bundles` -> FileBundle[] com entries:[] e entryCount (catálogo leve).
+GET `/api/v1/file-bundles/{id}` -> manifesto completo sob demanda.
+POST `/api/v1/file-bundles/import` {path,name,consent} -> CREATING; importação local assíncrona com leases no-follow.
 POST `/api/v1/file-bundles/{id}/verify` {} -> bundle VERIFYING, validação background.
+
+O transporte Go distingue JSON (máximo256MiB) dos chunks binários (4MiB+64KiB).
+Manifestos de discos>=128GiB ultrapassam4MiB e não podem usar o limite binário.
+capture-complete retorna metadados sem repetir chunks; GETmanifest de restore
+continua completo e limitado. Preflights verificam estrutura/tamanhos/hashes dos
+recibos já persistidos e relidos, sem abrir todos os chunks sob o lock global.
+Verificação profunda manual roda fora do lock; cada download também confere hash.
 
 ## Responsáveis
 

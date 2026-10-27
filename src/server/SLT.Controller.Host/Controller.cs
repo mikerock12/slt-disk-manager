@@ -285,8 +285,10 @@ public sealed partial class Controller
         foreach (var c in image.Chunks)
         {
             Ensure(c.Sequence == sequence++ && c.OffsetBytes == total && c.SizeBytes > 0 && c.SizeBytes <= ChunkSize, 409, "Manifesto não contíguo.");
-            using var fs = File.OpenRead(ChunkPath(image.Id, c.Sequence));
-            Ensure(fs.Length == c.SizeBytes && (!deep || Convert.ToHexStringLower(SHA256.HashData(fs)) == c.Sha256), 409, "Integridade de chunk inválida."); total += c.SizeBytes;
+            Ensure(c.SizeBytes==Math.Min(ChunkSize,image.LogicalSizeBytes-total) && c.Sha256 is {Length:64} && c.Sha256.All(Uri.IsHexDigit),409,"Tamanho/hash do chunk inválido.");
+            if(deep){using var fs = File.OpenRead(ChunkPath(image.Id, c.Sequence));
+                Ensure(fs.Length == c.SizeBytes && Convert.ToHexStringLower(SHA256.HashData(fs)) == c.Sha256, 409, "Integridade de chunk inválida.");}
+            total += c.SizeBytes;
         }
         Ensure(total == image.LogicalSizeBytes && total > 0, 409, "Imagem incompleta.");
     }

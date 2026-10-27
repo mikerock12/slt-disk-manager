@@ -8,7 +8,8 @@ public static class FileEndpoints
         string Device(HttpContext context)=>(string)context.Items["deviceId"]!;
         app.MapGet("/api/v1/jobs/{id}",(string id)=>Locked(()=>c.GetJob(id)));
         app.MapPost("/api/v1/files/list",(FileListRequest request)=>Locked(()=>c.Files.List(request)));
-        app.MapGet("/api/v1/file-bundles",()=>Locked(()=>c.Db.All<FileBundle>("filebundle")));
+        app.MapGet("/api/v1/file-bundles",()=>Locked(()=>c.Db.FileCatalog()));
+        app.MapGet("/api/v1/file-bundles/{id}",(string id)=>Locked(()=>c.Files.Get(id)));
         app.MapPost("/api/v1/file-bundles/import",(LocalImport request)=>Locked(()=>c.Files.Import(request)));
         app.MapPost("/api/v1/media/import",(MediaImport request)=>Locked(()=>c.Media.Import(request)));
         app.MapGet("/api/v1/media",()=>Locked(()=>c.Db.All<DeploymentMedia>("media").Select(m=>m with{Chunks=[]}).ToArray()));

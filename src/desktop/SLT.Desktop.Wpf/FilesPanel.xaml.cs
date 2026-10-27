@@ -220,10 +220,12 @@ public partial class FilesPanel : UserControl
         if (_refresh is not null) await _refresh();
         BrowserStatus.Text = result.State == "VERIFYING" ? "Verificação iniciada em segundo plano. Aguarde o catálogo apresentar AVAILABLE ou FAILED." : $"Estado de verificação: {result.State}.";
     });
-    private void BundleDetails_Click(object sender, RoutedEventArgs e)
+    private async void BundleDetails_Click(object sender, RoutedEventArgs e) => await RunAsync(async () =>
     {
-        if (Bundles.SelectedItem is FileBundle bundle) new DetailsWindow("Manifesto do backup de arquivos", JsonSerializer.Serialize(bundle, new JsonSerializerOptions(JsonSerializerDefaults.Web) { WriteIndented = true })) { Owner = Window.GetWindow(this) }.ShowDialog();
-    }
+        var selected=Bundles.SelectedItem as FileBundle ?? throw new InvalidOperationException("Selecione um backup.");
+        var bundle=await Client.GetAsync<FileBundle>($"/api/v1/file-bundles/{Uri.EscapeDataString(selected.Id)}");
+        new DetailsWindow("Manifesto do backup de arquivos", JsonSerializer.Serialize(bundle, new JsonSerializerOptions(JsonSerializerDefaults.Web) { WriteIndented = true })) { Owner = Window.GetWindow(this) }.ShowDialog();
+    });
     private async void ImportLocalFile_Click(object sender, RoutedEventArgs e)
     {
         var picker = new OpenFileDialog { Title = "Selecionar arquivo local do servidor para enviar aos clientes", Filter = "Todos os arquivos|*.*" };

@@ -12,7 +12,7 @@ Esta é uma beta 0.1.0, não o aceite integral da seção 25 da especificação.
 | Inventário discos/partições | Implementado | Campos indisponíveis são relatados; drivers/permissões variam |
 | SMART/NVMe | Implementado via smartctl | Ferramenta externa opcional; hardware ainda sem matriz homologada |
 | Rescue Go | Implementado | Testes fixtures e build Linux amd64 |
-| ISO/USB UEFI | Script live-build entregue | ISO ainda não construída nem bootada em VM |
+| ISO/USB BIOS/UEFI | Construída e iniciada em QEMU | CI40456449172; CLI e motores presentes; SecureBoot/hardware ainda não homologados |
 | Reboot Windows→Rescue | Pendente | Boot USB assistido, sem alterações automáticas no firmware |
 | CAPTURE/RESTORE raw | Implementado | Testes de chunks, corrupção e revalidação; físico não homologado |
 | Clone A→servidor→B | Assistente integrado | Captura validada + plano destino; GPT/MBR, NTFS/ext4 menor/maior em CI Linux |

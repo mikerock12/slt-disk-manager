@@ -41,6 +41,6 @@ Move-Item -LiteralPath $temporary -Destination $output
 Write-Host "ZIP reunido e validado: $output"
 ''', encoding="utf-8")
 (destination / "Reunir-Pacote.cmd").write_bytes(b'@echo off\r\npowershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0Reunir-Pacote.ps1"\r\npause\r\n')
-(destination / "LEIA-ME.txt").write_text("Baixe as tres partes, package-manifest.json, Reunir-Pacote.ps1 e Reunir-Pacote.cmd na mesma pasta. Execute Reunir-Pacote.cmd. O script verifica SHA256 das partes e do ZIP reunido. Depois extraia o ZIP e leia QUICKSTART.md. Nao execute restauração em dados reais antes da homologação indicada.\n", encoding="utf-8")
+(destination / "LEIA-ME.txt").write_text("Baixe todas as partes listadas no package-manifest.json, mais package-manifest.json, Reunir-Pacote.ps1 e Reunir-Pacote.cmd na mesma pasta. Execute Reunir-Pacote.cmd. O script verifica SHA256 das partes e do ZIP reunido. Depois extraia o ZIP e leia QUICKSTART.md. Nao execute restauração em dados reais antes da homologação indicada.\n", encoding="utf-8")
 print(destination)
 print(json.dumps(manifest, indent=2))

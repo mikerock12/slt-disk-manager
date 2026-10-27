@@ -99,7 +99,9 @@ internal static class WindowsFilesE2E
             var backupResult = await Finished(admin, backup.Id, agent);
             Require(backupResult.State == "COMPLETED", "FILE_BACKUP não concluiu: " + backupResult.Result?.Details);
             var bundles = await Get<FileBundle[]>(admin, "/api/v1/file-bundles");
-            var bundle = bundles.Single(b => b.Id == backup.Plan.File!.BundleId);
+            var summary = bundles.Single(b => b.Id == backup.Plan.File!.BundleId);
+            Require(summary.Entries.Length==0,"Catálogo não deve transmitir manifestos completos em cada atualização.");
+            var bundle = await Get<FileBundle>(admin,"/api/v1/file-bundles/"+summary.Id);
             FileSafety.ValidateBundle(bundle, backup.Plan.File!.BundleId);
             Require(bundle.Entries.Any(e => e.IsDirectory && e.RelativePath == "docs/empty"), "Pasta vazia ausente.");
             Console.WriteLine("PASS Real FILE_BACKUP selected files, empty folder, zero file, multi-chunk SHA256 and AVAILABLE catalog");

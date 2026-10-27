@@ -91,7 +91,7 @@ public sealed partial class FileRepository
         // A file can never be an ancestor directory of another entry.
         var byPath=start.Entries.ToDictionary(e=>e.RelativePath,StringComparer.OrdinalIgnoreCase);
         foreach(var e in start.Entries){var parent=e.RelativePath;while(parent.Contains('/')){parent=parent[..parent.LastIndexOf('/')];Require(byPath.TryGetValue(parent,out var p)&&p.IsDirectory,400,"Diretório ancestral ausente ou conflitante no manifesto.");}}
-        Require(total==start.TotalBytes && owner.FreeBytes()>total+64L*1024*1024,409,"Tamanho total divergente ou espaço insuficiente no servidor.");
+        Require(total==start.TotalBytes && total<=1L<<40 && owner.FreeBytes()>total+64L*1024*1024,409,"Tamanho total divergente, acima de 1 TiB ou espaço insuficiente no servidor.");
         bundle=bundle with{Entries=start.Entries,TotalBytes=total};Persist(bundle);
         foreach(var e in start.Entries)Db.Put("bundle-entry",bundle.Id+":"+e.Id,e);
         return bundle;
@@ -128,8 +128,10 @@ public sealed partial class FileRepository
             foreach(var chunk in entry.Chunks)
             {
                 Require(!entry.IsDirectory && chunk.Sequence==sequence++ && chunk.OffsetBytes==offset && chunk.SizeBytes>0 && chunk.SizeBytes<=Controller.ChunkSize,409,"Manifesto de arquivo não contíguo.");
-                using var stream=File.OpenRead(DataPath(bundle.Id,entry.Id,chunk.Sequence));
-                Require(stream.Length==chunk.SizeBytes && (!deep || Convert.ToHexStringLower(SHA256.HashData(stream))==chunk.Sha256),409,"Arquivo/chunk corrompido.");offset+=chunk.SizeBytes;
+                Require(chunk.SizeBytes==Math.Min(Controller.ChunkSize,entry.SizeBytes-offset)&&chunk.Sha256 is {Length:64}&&chunk.Sha256.All(Uri.IsHexDigit),409,"Tamanho/hash do arquivo inválido.");
+                if(deep){using var stream=File.OpenRead(DataPath(bundle.Id,entry.Id,chunk.Sequence));
+                    Require(stream.Length==chunk.SizeBytes && Convert.ToHexStringLower(SHA256.HashData(stream))==chunk.Sha256,409,"Arquivo/chunk corrompido.");}
+                offset+=chunk.SizeBytes;
             }
             Require(offset==entry.SizeBytes,409,"Arquivo incompleto.");total=checked(total+offset);
         }

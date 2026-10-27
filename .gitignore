@@ -20,6 +20,10 @@ ISOs/
 *.swm
 *.vhd
 *.vhdx
+*.qcow2
+*.vmdk
+__pycache__/
+*.pyc
 *.img
 *.raw
 *.log

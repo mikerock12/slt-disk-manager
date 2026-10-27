@@ -142,6 +142,8 @@ internal static class FeatureTests
                 Reject(() => controller.Files.Import(new(controller.Repository, "Forbidden repository", true)), "server local file import cannot expose operational repository");
                 var imported = AwaitBundle(controller.Files.Import(new(localPath, "Local selected", true)).Id);
                 check(imported.State == "AVAILABLE" && imported.TotalBytes == localBytes.Length && imported.Entries.Count == 4 && imported.Entries.Any(e => e.IsDirectory && e.RelativePath.EndsWith("/empty")), "server local folder import preserves UTF8 files empty directories and multi-chunk data");
+                var catalog=db.FileCatalog().Single(item=>item.Id==imported.Id);
+                check(catalog.EntryCount==4 && catalog.Entries.Count==0 && catalog.TotalBytes==localBytes.Length,"file catalog preserves counts without retransmitting whole manifests");
                 var localRestore = controller.Plan(new("FILE_RESTORE", fileDevice.Id, "", null, true, new("destination", "server-delivery", BundleId: imported.Id))); controller.Approve(localRestore.Id, localRestore.Plan.Challenge); controller.Next(fileDevice.Id);
                 var entry = imported.Entries.Single(e => e.RelativePath.EndsWith("/ação.bin"));
                 var delivered = entry.Chunks.SelectMany(chunk => controller.Files.Download(fileDevice.Id, localRestore.Id, entry.Id, chunk.Sequence)).ToArray();

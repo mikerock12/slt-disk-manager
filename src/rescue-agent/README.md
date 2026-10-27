@@ -8,6 +8,8 @@ Os testes de instalação usam executores falsos; não comprovam boot/VM/hardwar
 
 Agente Go sem dependências externas. Faz pareamento individual por CSR RSA, fixa o SHA-256 DER do servidor, usa mTLS e executa planos assinados. Inventário, SMART de leitura, captura RAW em chunks de 4 MiB e restauração com hash antes de cada escrita e verificação por releitura.
 
+Manifestos JSON possuem limite de resposta de 256 MiB, separado do limite de chunks binários (4 MiB + 64 KiB de margem de transporte). O agente rejeita respostas acima do limite pelo tamanho anunciado ou durante a leitura, inclusive sem Content-Length. Esse limite de metadados não comprova homologação de discos de determinada capacidade; os testes físicos e limites de armazenamento continuam independentes. Planos assinados mantêm seus limites próprios.
+
 ```sh
 go test ./...
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o slt-rescue-agent ./cmd/slt-rescue-agent

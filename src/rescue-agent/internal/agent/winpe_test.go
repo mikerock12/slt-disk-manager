@@ -90,6 +90,16 @@ func TestWinPECommandsAreTyped(t *testing.T) {
 	}
 }
 func TestWinPEStorageDescriptorBounds(t *testing.T) {
+	for _, device := range []string{`\Device\Ramdisk{synthetic}`, `\Device\CdRom0`, `\Device\CdRom7`} {
+		if !nonPhysicalWinPEVolume(device) {
+			t.Fatalf("read-only optical/RAM volume rejected: %s", device)
+		}
+	}
+	for _, device := range []string{`\Device\HarddiskVolume3`, `\Device\Harddisk0\DR0`, `\Device\CdRomFake`, `\Device\CdRom0\anything`} {
+		if nonPhysicalWinPEVolume(device) {
+			t.Fatalf("physical/unknown mapping skipped: %s", device)
+		}
+	}
 	data := make([]byte, 128)
 	binary.LittleEndian.PutUint32(data[4:], 128)
 	binary.LittleEndian.PutUint32(data[12:], 40)

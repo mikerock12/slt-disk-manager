@@ -43,6 +43,8 @@ internal static class Program
             var serialized = JsonSerializer.Serialize(plan, json);
             Check(serialized.Contains("\"clone\":") && !serialized.Contains("\"cloneOptions\":"), "DTO preserva nome JSON clone");
             Check(JsonSerializer.Deserialize<JobPlan>(serialized, json)?.CloneOptions?.ResizePartitionNumber == 2, "DTO lê opções de adaptação assinadas");
+            var summary=JsonSerializer.Deserialize<FileBundle>("{\"schemaVersion\":1,\"id\":\"catalog\",\"name\":\"Backup\",\"state\":\"AVAILABLE\",\"sourceDeviceId\":\"source\",\"rootId\":\"root\",\"createdAtUtc\":\"2026-10-27T00:00:00Z\",\"totalBytes\":512,\"entries\":[],\"entryCount\":100000}",json)!;
+            Check(summary.EntryCount==100000 && summary.Entries.Length==0,"Catálogo leve mantém contagem sem carregar manifesto completo");
             var filesPlan = plan with { Kind = "FILE_RESTORE", Challenge = "GRAVAR DESTINO Pasta-Nova", File = new FileRequest("docs", "Pasta-Nova", [], "bundle", "Backup", null, 200) };
             var fileApproval = new PlanApprovalWindow(job with { Plan = filesPlan }, target, null, null, null, new FileRootInfo("docs", "Documentos autorizados", true, true));
             var fileText = string.Join("\n", Children<TextBlock>(fileApproval).Select(t => t.Text));

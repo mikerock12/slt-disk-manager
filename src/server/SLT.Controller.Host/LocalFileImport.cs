@@ -21,10 +21,10 @@ public sealed partial class FileRepository
     {
         try
         {
-            var entries=new List<BundleEntry>();long total=0;
+            var entries=new List<BundleEntry>();var names=new HashSet<string>(StringComparer.OrdinalIgnoreCase);long total=0;
             void Visit(string path,string relative)
             {
-                Relative(relative,false);Require(entries.Count<100000,400,"Importação excede 100000 entradas.");
+                Relative(relative,false);Require(entries.Count<100000 && names.Add(relative),400,"Importação excede 100000 entradas ou contém colisão de nomes.");
                 using var lease=SecuredPath.OpenAbsolute(path,readFile:!Directory.Exists(path));var info=lease.Info;
                 var entry=new BundleEntry(Wire.Id(),relative,info.IsDirectory,info.IsDirectory?0:info.Length,info.LastWriteTimeUtc,[]);
                 entries.Add(entry);

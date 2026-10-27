@@ -249,6 +249,20 @@ func decodeWinPEExtents(data []byte) ([]int, error) {
 	return out, nil
 }
 
+func nonPhysicalWinPEVolume(device string) bool {
+	device = strings.ToLower(device)
+	if strings.HasPrefix(device, `\device\ramdisk`) {
+		return true
+	}
+	const cdPrefix = `\device\cdrom`
+	if strings.HasPrefix(device, cdPrefix) {
+		number := strings.TrimPrefix(device, cdPrefix)
+		n, err := strconv.Atoi(number)
+		return err == nil && n >= 0 && n <= 4095 && strconv.Itoa(n) == number
+	}
+	return false
+}
+
 type winPERunner struct {
 	options            WinPEOptions
 	platform           winPEPlatform
