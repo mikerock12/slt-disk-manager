@@ -176,7 +176,34 @@ func TestAdaptiveLinuxFitNTFSAndExt4PreserveWholeDisk(t *testing.T) {
 					partFile.Close()
 					var restored []byte
 					if fs == "ntfs" {
-						restored, err = exec.CommandContext(ctx, "ntfscat", filepath.Join(work, "data-check.raw"), "/sentinel.bin").Output()
+						// ntfsresize intentionally schedules CHKDSK on the private prepared
+						// copy. Read that synthetic copy with ntfscat's READONLY+RECOVER
+						// mode; never clear its dirty flag or relax the production source
+						// ntfs-3g.probe gate. Verify the inspection did not modify it.
+						checkPath := filepath.Join(work, "data-check.raw")
+						checkFile, openErr := os.Open(checkPath)
+						if openErr != nil {
+							t.Fatal(openErr)
+						}
+						checkSize := prepared.Layout.Partitions[1].LengthLba * 512
+						beforeRead, hashErr := hashRange(ctx, checkFile, 0, checkSize)
+						if hashErr != nil {
+							checkFile.Close()
+							t.Fatal(hashErr)
+						}
+						command := exec.CommandContext(ctx, "ntfscat", "--force", checkPath, "/sentinel.bin")
+						var stderr bytes.Buffer
+						command.Stderr = &stderr
+						restored, err = command.Output()
+						if err != nil {
+							checkFile.Close()
+							t.Fatalf("target=%d: ntfscat readonly prepared fixture: %v: %s", size, err, stderr.String())
+						}
+						afterRead, hashErr := hashRange(ctx, checkFile, 0, checkSize)
+						checkFile.Close()
+						if hashErr != nil || afterRead != beforeRead {
+							t.Fatalf("NTFS read inspection modified fixture: %v", hashErr)
+						}
 					} else {
 						dest := filepath.Join(work, "sentinel-restored.bin")
 						_, err = tool(ctx, nil, "debugfs", "-R", "dump /sentinel.bin "+dest, filepath.Join(work, "data-check.raw"))
@@ -379,3 +406,4 @@ func TestAdaptiveLinuxPreparedVHDXRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
