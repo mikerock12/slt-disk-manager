@@ -4,8 +4,9 @@ O proprietário ainda não escolheu licença comercial/open-source. O repositór
 público publica o código com direitos reservados; não atribuir MIT/GPL ao código
 do projeto sem decisão explícita do proprietário.
 
-.NET runtime e bibliotecas Microsoft: licenças incluídas na distribuição oficial
-e arquivos de terceiros do publish. Microsoft.Data.Sqlite e SQLitePCLRaw:
+.NET runtime: licença e avisos oficiais acompanham o pacote em
+`docs/licenses/DotNet-LICENSE.txt` e `DotNet-ThirdPartyNotices.txt`.
+Microsoft.Data.Sqlite e SQLitePCLRaw:
 consulte os pacotes fixados no csproj; dependência SQLite nativa atualizada para
 2.1.12 após detecção de advisory na versão 2.1.11.
 
@@ -19,5 +20,6 @@ pacotes também estão em `/usr/share/doc` no sistema Live. Distribuição comer
 e eventual oferta de código correspondente continuam sujeitas à revisão do proprietário.
 
 Não são distribuídos Windows, WinPE, WIM, ISO Microsoft, chaves de ativação ou
-drivers proprietários. O operador fornece mídia e licenças legítimas. Os perfis
+drivers Windows de fabricantes. O firmware Linux fornecido pelos pacotes Debian
+acompanha a ISO sob as respectivas licenças. O operador fornece mídia Windows e licenças legítimas. Os perfis
 documentados não contornam criptografia, Secure Boot nem ativação.

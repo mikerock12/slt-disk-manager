@@ -27,7 +27,8 @@ Esta é uma beta 0.1.0, não o aceite integral da seção 25 da especificação.
 | Auditoria/plano/locks/anti-replay | Implementado | Registro encadeado; não é WORM nem auditoria externa |
 | Retomada de imagem pela rede | Pendente | Recibo idempotente; queda encerra sem retomar escrita |
 | Criptografia em repouso/retention | Externa/manual | ACLs para chaves; proteger volume e definir política |
-| MSI/assinatura de binários | Pendente | ZIP self-contained e scripts de serviço |
+| Instalador EXE Windows | Implementado e testado | Componentes servidor/cliente/offline; per-user; desinstalação preserva estado gerado |
+| MSI/assinatura de binários | Pendente | ZIP e instalador Inno disponíveis; sem certificado de assinatura do proprietário |
 | GitHub/CI remoto/PR/merge/destaque | Publicado e fixado | PR1/CI Windows+Linux mesclado; PR2 integra novos fluxos |
 | Backup Google Drive | Concluído e conferido | Fonte+Git bundle; pacote em 3 partes e reunidor com SHA256; sem dados de clientes |
 

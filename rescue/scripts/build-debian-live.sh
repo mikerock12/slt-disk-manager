@@ -90,6 +90,9 @@ enabled=false
 NETWORK
 ln -s /usr/lib/systemd/system/NetworkManager.service config/includes.chroot/etc/systemd/system/multi-user.target.wants/NetworkManager.service
 install -m 0755 -- "$agent_binary" config/includes.chroot/usr/local/bin/slt-rescue-agent
+mkdir -p config/includes.chroot/usr/share/doc/slt-rescue
+install -m 0644 -- "$root_dir/../docs/licenses/Go-LICENSE.txt" config/includes.chroot/usr/share/doc/slt-rescue/Go-LICENSE.txt
+install -m 0644 -- "$root_dir/README.md" config/includes.chroot/usr/share/doc/slt-rescue/README.md
 install -m 0755 -- "$root_dir/scripts/start-rescue.sh" config/includes.chroot/usr/local/bin/slt-start
 # Readiness never enrolls or starts a disk job. The smoke test powers down only
 # when the QEMU guest carries our explicit SMBIOS fixture marker.
