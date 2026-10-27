@@ -1,0 +1,16 @@
+<Solution>
+  <Folder Name="/src/" />
+  <Folder Name="/src/desktop/">
+    <Project Path="src/desktop/SLT.Desktop.Wpf/SLT.Desktop.Wpf.csproj" />
+  </Folder>
+  <Folder Name="/src/server/">
+    <Project Path="src/server/SLT.Controller.Host/SLT.Controller.Host.csproj" />
+  </Folder>
+  <Folder Name="/src/windows-agent/">
+    <Project Path="src/windows-agent/SLT.WindowsAgent/SLT.WindowsAgent.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/SLT.Controller.Tests/SLT.Controller.Tests.csproj" />
+    <Project Path="tests/SLT.WindowsAgent.Tests/SLT.WindowsAgent.Tests.csproj" />
+  </Folder>
+</Solution>

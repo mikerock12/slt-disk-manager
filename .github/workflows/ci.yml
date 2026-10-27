@@ -1,0 +1,59 @@
+name: Build, safety and integration
+on:
+  push:
+    branches: [main, 'feat/**', 'fix/**']
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: src/rescue-agent/go.mod
+          cache: false
+      - name: Build Windows and Linux binaries
+        shell: pwsh
+        run: ./scripts/build.ps1 -Configuration Debug
+      - name: Safety suites and real mTLS integration
+        shell: pwsh
+        run: ./scripts/test-all.ps1 -Integration
+      - name: Dependency security audit
+        shell: pwsh
+        run: |
+          $env:DOTNET_CLI_HOME=Join-Path $PWD '.tools/dotnet-home'
+          $env:NUGET_PACKAGES=Join-Path $PWD '.tools/nuget'
+          dotnet restore SLT.DiskManager.slnx -p:NuGetAudit=true
+          if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
+      - name: Build portable package
+        shell: pwsh
+        run: ./scripts/package-release.ps1 -Version "0.1.0-ci.${{ github.run_number }}"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: slt-disk-manager-win-x64
+          path: artifacts/SLT-Disk-Manager-*.zip
+          retention-days: 14
+  rescue-linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: src/rescue-agent/go.mod
+          cache: false
+      - run: go test -race ./...
+        working-directory: src/rescue-agent
+      - run: go vet ./...
+        working-directory: src/rescue-agent
+      - run: for script in rescue/scripts/*.sh; do bash -n "$script"; done
