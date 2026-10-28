@@ -307,7 +307,7 @@ class VM:
         assert self.process is None or self.process.poll() is not None
         qmp_port, serial_port = free_port(), free_port()
         args = [str(QEMU_DIR / "qemu-system-x86_64.exe"), "-L", str(QEMU_DIR / "share"), "-name", f"SLT LAB {self.name}",
-                "-machine", f"q35,accel={self.lab.accel}", "-cpu", "host" if self.lab.accel == "whpx" else "max", "-m", str(memory), "-smp", "2", "-display", "none", "-vga", "std",
+                "-machine", "q35", "-accel", "whpx,kernel-irqchip=off" if self.lab.accel == "whpx" else self.lab.accel, "-cpu", "host" if self.lab.accel == "whpx" else "max", "-m", str(memory), "-smp", "2", "-display", "none", "-vga", "std",
                 "-rtc", "base=localtime", "-qmp", f"tcp:127.0.0.1:{qmp_port},server=on,wait=off",
                 "-serial", f"tcp:127.0.0.1:{serial_port},server=on,wait=off",
                 "-drive", f"file={self.disk},if=none,id=disk,format=qcow2,cache=writeback",
@@ -535,10 +535,14 @@ def phase_install(lab):
     assert windows_media["state"] == "AVAILABLE" and linux_media["state"] == "AVAILABLE" and linux_media["kind"] == "LINUX", (windows_media, linux_media)
     edition = next(i for i in windows_media["images"] if i["name"].strip().lower() == "windows 10 pro")
     lab.evidence("media", {"windows": windows_media["sha256"], "windowsEdition": edition["name"], "linux": linux_media["sha256"], "linuxName": linux_media["images"][0]["name"]})
+    # Fresh blank disks, as for a new install. With no bootable hard disk the Windows media
+    # boots straight into WinPE, without the "press any key" prompt a keypress could miss.
+    for name in ("client1", "client2"):
+        for suffix in (".qcow2", "-vars.fd"):
+            (lab.ws / (name + suffix)).unlink(missing_ok=True)
     c1, c2 = VM(lab, "client1", 64, True), VM(lab, "client2", 128, False)
     seed = build_kit(lab, "client2")
     c2.start(cdrom=WINDOWS_ISO, seed=seed, scratch=True)
-    c2.press_for_cd(15)
     c1.start(cdrom=ROOT / lab.args.rescue_iso)
     rescue_login(c1)
     d1 = rescue_start_agent(lab, c1, True, used)

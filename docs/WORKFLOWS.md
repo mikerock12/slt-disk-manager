@@ -14,18 +14,20 @@ direto no disco. O servidor guarda no máximo 256 MiB por vez (ajustável com
 `--stream-window-chunks`) e apaga cada lote assim que o destino confirma a gravação.
 Clonar dois HDDs de 1 TB não exige 1 TB livre no servidor nem disco extra no Rescue.
 
-Funciona para EXATO, PRESERVAR e AJUSTAR quando o destino é igual ou maior. No AJUSTAR
-para disco maior, as partições posteriores (recuperação/OEM) já são gravadas deslocadas
-e a partição NTFS/ext4 é expandida no próprio destino depois de reler e comparar todos os
-dados. Autorize a origem e depois o destino (APAGAR no painel e no teclado local do
+Funciona para EXATO, PRESERVAR e AJUSTAR, inclusive para disco menor. No AJUSTAR, as
+partições posteriores (recuperação/OEM) já são gravadas deslocadas e a partição NTFS/ext4
+é expandida ou reduzida no próprio destino depois de reler e comparar todos os dados. Na
+redução, os blocos que passam do novo tamanho ficam na RAM do Rescue (só os não nulos,
+até 1 GiB) até o filesystem ser reduzido; se não couberem, o clone para antes de alterar
+a tabela de partições. Desligue a hibernação e o início rápido do Windows de origem. Autorize a origem e depois o destino (APAGAR no painel e no teclado local do
 Rescue). A origem termina assim que enviar o último lote; o destino segue até verificar.
 Uma queda de rede, de energia ou cancelamento interrompe o clone: o destino fica parcial
 e é preciso planejar de novo, com a origem intacta. Não há imagem para repetir.
 
 ### Imagem completa no servidor
 
-Use quando precisar reduzir para um disco menor, restaurar a mesma origem mais de uma
-vez ou guardar a imagem. O servidor precisa de espaço igual à capacidade inteira da
+Use quando precisar restaurar a mesma origem mais de uma vez, guardar a imagem ou
+reduzir um volume com mais de 1 GiB de dados espalhados além do novo tamanho. O servidor precisa de espaço igual à capacidade inteira da
 origem. Para AJUSTAR nesse modo, o agente destino precisa de `--scratch-dir` apontando
 para armazenamento saudável separado do destino.
 
@@ -111,8 +113,8 @@ integral para preservar o disco inteiro. Não há substituição de pasta existe
 
 ## Instalar Windows no cliente 3
 
-Na aba Instalar Windows importe a ISO, WIM ou ESD local. ISO requer 7-Zip instalado
-no servidor; a importação extrai apenas install.esd/install.wim, enumera edições e
+Na aba Instalar sistema importe a ISO, WIM ou ESD local. O 7-Zip acompanha o servidor
+para ler a ISO; a importação extrai apenas install.esd/install.wim, enumera edições e
 calcula SHA256. A mídia fica somente no repositório local. A mídia fornecida pelo
 proprietário contém Windows 10 Home, Home Single Language, Education e Pro AMD64.
 
@@ -128,9 +130,33 @@ APAGAR no painel e localmente no cliente. O agente confere mídia, ferramentas,
 identidade e volumes antes de DiskPart, DISM e BCDBoot. BIOS também exige bootsect
 da mídia legítima. O disco de destino é totalmente apagado.
 
-Reinício só ocorre quando marcado explicitamente e após confirmação do resultado
-pelo servidor. Aplicar imagem/criar arquivos de boot não prova primeiro boot/OOBE.
-Esse teste ainda precisa de VM/hardware. Não há quebra de ativação ou licença.
+Informe o nome do computador e o usuário administrador local. O servidor gera uma senha
+temporária, mostra uma única vez e grava no `unattend.xml`: o Windows inicia direto na
+área de trabalho, sem as telas de OOBE, com idioma, teclado e fuso definidos e hibernação
+desligada. Anote a senha e troque-a no primeiro acesso. Reinício só ocorre quando marcado
+explicitamente e após confirmação do resultado pelo servidor. Não há quebra de ativação
+ou licença: o Windows ativa com a licença do equipamento ou do cliente.
+
+## Instalar Xubuntu/Ubuntu
+
+Importe a ISO oficial desktop (Ubuntu/Xubuntu com instalador em camadas, 24.04 ou mais
+nova) na mesma aba. Inicie o cliente pelo SLT Rescue em modo UEFI, com escrita habilitada,
+e pareie. Escolha mídia, disco, nome do computador e usuário. O Rescue baixa a ISO em
+lotes verificados, cria partição EFI e raiz ext4, extrai o sistema, instala GRUB/shim
+pelos pacotes da própria ISO (sem internet) e cria o usuário com a senha temporária
+gerada pelo servidor; ela precisa ser trocada no primeiro login. Instalações Windows e
+Linux em clientes diferentes podem ser aprovadas ao mesmo tempo.
+
+## Converter MBR para GPT/UEFI
+
+Para passar um Windows de BIOS/MBR para UEFI/GPT (por exemplo após clonar para outro
+computador), inicie o cliente pelo kit WinPE em modo **UEFI** e use **Converter
+disco MBR → GPT/UEFI** na aba Instalar sistema, escolhendo a mídia Windows importada.
+O servidor extrai o MBR2GPT.EXE dessa mídia e amarra seu SHA256 ao plano assinado. O agente executa
+`/validate`, pede a confirmação CONVERTER no teclado local, converte e confere a nova tabela GPT e a
+partição EFI. Depois ajuste o firmware para iniciar em UEFI. O `/validate` da Microsoft
+recusa discos com partições estendidas, mais de três primárias ou BitLocker ativo; nesse
+caso nada é alterado.
 
 ## Se falhar
 

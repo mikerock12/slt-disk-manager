@@ -30,27 +30,30 @@ usados apenas no desenvolvimento/backup solicitado pelo proprietário.
 - ASP.NET Core/.NET 10, SQLite local em WAL, painel WPF separado.
 - Escuta em IP privado explícito, allowlist CIDR, administração somente loopback.
 - Pin SHA256, CSR, certificados individuais, mTLS e revogação imediata.
-- Inventário Windows/Rescue, SMART por smartctl quando instalado.
+- Inventário Windows/Rescue e SMART pelo smartctl 7.5 que acompanha o cliente.
 - Plano com consentimento, confirmação contextual, assinatura RSA, validade e ledger anti-replay.
 - Captura/restauração RAW offline em chunks de 4 MiB, SHA256, recibos persistidos,
   releitura do destino e clonagem A → imagem verificada → B.
 - Assistente de clone integral entre clientes: GPT/MBR, preservação do layout ou
-  ajuste NTFS/ext4 em cópia de trabalho para destinos menores/maiores. CI Linux
-  verifica boot/WinRE e arquivos sentinela; primeiro boot do SO ainda não homologado.
+  ajuste NTFS/ext4 para destinos menores/maiores. Por padrão em lotes: o servidor
+  guarda no máximo 256 MiB e não precisa de espaço do tamanho do disco.
 - Gerenciador de arquivos com escopos locais, backups selecionados, importação
   de pastas do servidor e envio para novas pastas nos clientes.
-- Catálogo local ISO/WIM/ESD e agente WinPE nativo para aplicar Windows e criar
-  boot UEFI/BIOS. Tarefas em PCs distintos seguem em paralelo; boot real pendente.
+- Instalação de sistemas: Windows pelo agente WinPE (UEFI/BIOS, sem telas de OOBE,
+  conta local com senha temporária gerada pelo servidor) e Xubuntu/Ubuntu pelo Rescue
+  (UEFI/GPT, GRUB/shim da própria ISO). Instalações em PCs distintos seguem em paralelo.
+- Conversão de disco Windows MBR → GPT/UEFI pelo WinPE com o MBR2GPT da mídia importada.
 - Histórico durável, auditoria encadeada, progresso real, cancelamento cooperativo,
   interrupção explícita após reinício sem reexecução automática de escrita.
-- Instaladores PowerShell de serviço, regra de firewall privada e pacote portátil.
+- Instalador EXE completo (runtime .NET/C++, 7-Zip e smartctl embutidos) que pode
+  instalar servidor e cliente como serviços do Windows, além do pacote portátil.
 
 ## Limites atuais
 
 Veja [a matriz completa](docs/STATUS.md). Não há instalador MSI/assinatura de código,
-ISO Rescue já homologada em hardware, boot remoto automático, PXE, RBAC multiusuário
-nem implantação Linux centralizada. O particionamento Windows só é oferecido pelo
-perfil de instalação no WinPE, com confirmação no painel e no teclado do destino.
+ISO Rescue já homologada em hardware, boot remoto automático, PXE nem RBAC multiusuário.
+O particionamento só é oferecido pelos perfis de instalação (Windows no WinPE, Linux no
+Rescue), com confirmação no painel e no teclado do destino.
 Há scripts locais de aquisição ddrescue/Partclone e orientações de implantação;
 eles não equivalem à implementação centralizada desses módulos. O protocolo v1
 usa HTTPS JSON com polling em vez de gRPC (ADR em docs).

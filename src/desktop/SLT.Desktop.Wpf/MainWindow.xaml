@@ -55,12 +55,12 @@
      <Border BorderBrush="#E88222" BorderThickness="1" Padding="16" Margin="0,0,0,18"><StackPanel><TextBlock Text="RESTAURAÇÃO APAGA O CONTEÚDO DO DESTINO" FontWeight="Bold" Foreground="#F0A55F"/><TextBlock Text="Captura e restauração exigem Rescue, disco desmontado e identidade confirmada. Para clonar A → B, capture A, verifique a imagem e restaure em B. O clone mantém o layout bruto; boot em outro hardware exige validação. Restauração em bloco físico também exige confirmação local no Rescue." TextWrapping="Wrap" Margin="0,8,0,0"/></StackPanel></Border>
      <CheckBox x:Name="OperationConsent" Content="Tenho autorização do responsável para acessar os dados e executar esta tarefa." Margin="0,0,0,16"/>
      <Button Content="Gerar pré-verificação e plano" HorizontalAlignment="Left" Click="CreatePlan_Click"/>
-     <TextBlock Text="Para instalar Windows, use a aba Instalar Windows com cliente WinPE. Boot, clonagem e implantação ainda exigem homologação em VM/hardware; instalação Linux, ddrescue e PXE não estão disponíveis neste painel." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="0,24,0,0"/>
+     <TextBlock Text="Para instalar Windows (cliente WinPE) ou Xubuntu/Ubuntu (cliente SLT Rescue em UEFI), use a aba Instalar sistema. Boot, clonagem e implantação ainda exigem homologação em hardware; ddrescue e PXE não estão disponíveis neste painel." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="0,24,0,0"/>
     </StackPanel></ScrollViewer>
    </TabItem>
    <TabItem Header="Clonagem"><local:ClonePanel x:Name="Cloning"/></TabItem>
    <TabItem Header="Arquivos"><local:FilesPanel x:Name="Files"/></TabItem>
-    <TabItem Header="Instalar Windows"><local:DeploymentPanel x:Name="Deployment"/></TabItem>
+    <TabItem Header="Instalar sistema"><local:DeploymentPanel x:Name="Deployment"/></TabItem>
    <TabItem Header="Imagens">
     <Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions><TextBlock Text="Catálogo RAW • AVAILABLE indica integridade dos chunks; a inicialização do sistema exige teste próprio." Margin="0,0,0,14" TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}"/>
      <DataGrid x:Name="ImagesGrid" Grid.Row="1"><DataGrid.Columns><DataGridTextColumn Header="Nome" Binding="{Binding Name}" Width="*" MinWidth="140"/><DataGridTextColumn Header="Estado" Binding="{Binding State}" Width="130"/><DataGridTextColumn Header="Tamanho lógico" Binding="{Binding Size}" Width="140"/><DataGridTextColumn Header="Setor lógico" Binding="{Binding LogicalSectorBytes}" Width="110"/><DataGridTextColumn Header="Criada em" Binding="{Binding Created}" Width="160"/><DataGridTextColumn Header="ID" Binding="{Binding Id}" Width="270"/></DataGrid.Columns></DataGrid>

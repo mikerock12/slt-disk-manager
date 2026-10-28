@@ -167,7 +167,7 @@ internal static class Program
                 ((ScrollViewer)filesPanel.Content).ScrollToEnd();
                 Render((FrameworkElement)main.Content, 1316, 840, Path.Combine(output, "desktop-arquivos-inferior-fixture.png"));
                 Render((FrameworkElement)fileApproval.Content, 740, 650, Path.Combine(output, "desktop-aprovacao-arquivos-fixture.png"));
-                tabs.SelectedItem = Children<TabItem>(main).Single(t => Equals(t.Header, "Instalar Windows"));
+                tabs.SelectedItem = Children<TabItem>(main).Single(t => Equals(t.Header, "Instalar sistema"));
                 Render((FrameworkElement)main.Content, 1316, 840, Path.Combine(output, "desktop-instalacao-fixture.png"));
                 ((ScrollViewer)deploymentPanel.Content).ScrollToEnd();
                 Render((FrameworkElement)main.Content, 1316, 840, Path.Combine(output, "desktop-instalacao-inferior-fixture.png"));

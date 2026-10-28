@@ -90,7 +90,7 @@ public partial class DeploymentPanel : UserControl
         if (_busy) return;
         _busy = true; UpdateButtons();
         try { await action(); }
-        catch (Exception ex) { MessageBox.Show(Window.GetWindow(this), ex.Message, "Instalar Windows", MessageBoxButton.OK, MessageBoxImage.Warning); }
+        catch (Exception ex) { MessageBox.Show(Window.GetWindow(this), ex.Message, "Instalar sistema", MessageBoxButton.OK, MessageBoxImage.Warning); }
         finally { _busy = false; UpdateButtons(); }
     }
     private void PickMedia_Click(object sender, RoutedEventArgs e)

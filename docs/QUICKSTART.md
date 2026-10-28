@@ -74,17 +74,19 @@ O USB que hospeda o Rescue e os discos montados/sistema são bloqueados. Não h�
 transição automática de boot do Windows nesta versão. Não desative Secure Boot
 como procedimento padrão; use mídia compatível validada no laboratório.
 
-## Arquivos e Windows em outro cliente
+## Arquivos e sistemas em outros clientes
 
 Configure as pastas autorizadas no cliente conforme WORKFLOWS.md e use a aba
 Arquivos para backups selecionados e envios. Importe arquivos/pastas do próprio
 servidor no catálogo e escolha uma pasta nova no cliente para recebê-los.
 
-A aba Instalar Windows importa sua ISO/WIM/ESD e permite escolher edição e destino
-WinPE. O kit em windows-pe prepara a inicialização do agente no pendrive oficial,
-sem incluir mídia Microsoft. Clone nos clientes1/2 e instalação no cliente3 podem
-andar em paralelo. Instalação/primeiro boot Windows ainda exigem homologação em VM;
-consulte WORKFLOWS.md e windows-pe/README.md para preparar o ambiente.
+A aba Instalar sistema importa ISO/WIM/ESD do Windows ou a ISO oficial do
+Xubuntu/Ubuntu. Windows é instalado com o cliente no WinPE (o kit em windows-pe
+prepara o pendrive oficial, sem incluir mídia Microsoft); Xubuntu/Ubuntu com o
+cliente no SLT Rescue em UEFI. Informe nome do computador e usuário: o servidor gera
+uma senha temporária, mostrada uma única vez. Instalações em clientes diferentes e
+clones podem andar em paralelo. A mesma aba converte um disco Windows MBR para
+GPT/UEFI pelo WinPE. Consulte WORKFLOWS.md e windows-pe/README.md.
 
 ## Falhas, consentimento e dados
 
