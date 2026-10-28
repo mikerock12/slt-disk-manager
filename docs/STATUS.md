@@ -1,7 +1,7 @@
 # Matriz de entrega e homologação
 
 Esta é a beta 0.1.0-beta.4, não o aceite integral da seção 25 da especificação.
-Downloads e evidências atuais em ENTREGA-2026-10-28.md; registros anteriores são históricos.
+Downloads e evidências atuais em ENTREGA-2026-10-28-beta4.md; registros anteriores são históricos.
 
 | Requisito | Estado nesta entrega | Evidência/limite |
 |---|---|---|
@@ -31,7 +31,7 @@ Downloads e evidências atuais em ENTREGA-2026-10-28.md; registros anteriores s�
 | Criptografia em repouso/retention | Externa/manual | ACLs para chaves; proteger volume e definir política |
 | Instalador EXE Windows | Implementado e testado | Componentes servidor/cliente/offline; per-user; desinstalação preserva estado gerado |
 | MSI/assinatura de binários | Pendente | ZIP e instalador Inno disponíveis; sem certificado de assinatura do proprietário |
-| GitHub/CI remoto/PR/merge/destaque | Publicado e fixado | PR1/PR2/PR3 mesclados; beta.3.3 publicada com CI40698928108 Windows/Linux e ISO40698928184 SUCCESS |
+| GitHub/CI remoto/PR/merge/destaque | Publicado e fixado | PR1–PR7 mesclados; beta.4 publicada com CI40729165261 Windows/Linux e ISO40729165548 SUCCESS |
 | Backup Google Drive | Concluído e conferido (beta.3.3) | Drive privado: fonte+Git bundle e os oito assets da release com manifesto SHA256; tamanhos/hashes e permissão só do proprietário conferidos; sem dados de clientes nem mídia Microsoft |
 
 Homologação restante: Windows 10/11 em VMs UEFI, Linux ext4, SATA/NVMe em discos
