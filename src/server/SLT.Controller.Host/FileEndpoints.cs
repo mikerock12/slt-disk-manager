@@ -6,7 +6,7 @@ public static class FileEndpoints
     {
         T Locked<T>(Func<T> action){lock(c.Gate)return action();}
         string Device(HttpContext context)=>(string)context.Items["deviceId"]!;
-        app.MapGet("/api/v1/jobs/{id}",(string id)=>Locked(()=>c.GetJob(id)));
+        app.MapGet("/api/v1/jobs/{id}",(string id)=>Locked(()=>Provisioning.WithoutSecrets(c.GetJob(id))));
         app.MapPost("/api/v1/files/list",(FileListRequest request)=>Locked(()=>c.Files.List(request)));
         app.MapGet("/api/v1/file-bundles",()=>Locked(()=>c.Db.FileCatalog()));
         app.MapGet("/api/v1/file-bundles/{id}",(string id)=>Locked(()=>c.Files.Get(id)));

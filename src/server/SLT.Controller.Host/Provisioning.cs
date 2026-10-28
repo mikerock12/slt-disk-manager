@@ -41,6 +41,12 @@ public static class Provisioning
         Encode(0, 0, c[63], 2);
         return output.ToString();
     }
+    // The Windows plan carries the temporary password in clear text for unattend.xml, signed
+    // with the plan. Admin listings never show it, and it is erased once the job is over.
+    public static Job WithoutSecrets(Job job) =>
+        job.Plan.Deployment?.Account is { } a && (a.Password != null || a.PasswordHash != null)
+            ? job with { Plan = job.Plan with { Deployment = job.Plan.Deployment with { Account = a with { Password = a.Password == null ? null : "***", PasswordHash = a.PasswordHash == null ? null : "***" } } } }
+            : job;
     public static string RandomSalt() => new(RandomNumberGenerator.GetItems(CryptAlphabet.AsSpan(2), 16));
     // Upper, lower and digit for Windows complexity; no ambiguous characters for reading aloud.
     public static string TemporaryPassword()

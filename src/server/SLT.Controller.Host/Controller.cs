@@ -20,7 +20,7 @@ public sealed partial class Controller
         Media = new MediaRepository(this);
         foreach (var job in db.All<Job>("job").Where(j => Active.Contains(j.State)))
         {
-            db.Put("job", job.Id, job with { State = "INTERRUPTED", Result = new(false, "Servidor reiniciado; replaneje após conferir o destino. Nenhuma escrita foi reenviada.", "") });
+            db.Put("job", job.Id, Provisioning.WithoutSecrets(job with { State = "INTERRUPTED", Result = new(false, "Servidor reiniciado; replaneje após conferir o destino. Nenhuma escrita foi reenviada.", "") }));
             db.Log("system", "job.interrupted", job.Id);
         }
         foreach (var image in db.All<ImageManifest>("image").Where(i => i.State is "VERIFYING" or "CREATING"))
@@ -204,7 +204,7 @@ public sealed partial class Controller
         else if (result.Success && j.Plan.Kind == "CAPTURE") Ensure(Db.Get<ImageManifest>("image", j.Plan.ImageId)?.State == "AVAILABLE", 409, "Imagem não finalizada e verificada.");
         if (result.Success && j.Plan.Kind == "FILE_BACKUP") Ensure(Files.Get(j.Plan.File!.BundleId).State == "AVAILABLE",409,"Backup não finalizado/verificado.");
         var state = j.CancelRequested ? "CANCELLED" : result.Success ? "COMPLETED" : "FAILED";
-        Db.Put("job", id, j with { State = state, Result = result });
+        Db.Put("job", id, Provisioning.WithoutSecrets(j with { State = state, Result = result }));
         if (j.Plan.StreamId != null) StreamFinished(j, state, result.Message);
         else if (state != "COMPLETED" && j.Plan.Kind == "CAPTURE" && Db.Get<ImageManifest>("image", j.Plan.ImageId) is {} image && image.State != "AVAILABLE")
             Db.Put("image", image.Id, image with { State = "FAILED" });
@@ -215,7 +215,7 @@ public sealed partial class Controller
     {
         var j = GetJob(id); Ensure(j.State is "AWAITING_APPROVAL" or "QUEUED" or "RUNNING" or "CANCELLING", 409, "Tarefa já encerrada.");
         j = j with { State = j.State is "RUNNING" or "CANCELLING" ? "CANCELLING" : "CANCELLED", CancelRequested = true };
-        Db.Put("job", id, j); Db.Log("admin", "job.cancel.request", id);
+        Db.Put("job", id, j.State == "CANCELLED" ? Provisioning.WithoutSecrets(j) : j); Db.Log("admin", "job.cancel.request", id);
         if (j.Plan.StreamId != null && j.State == "CANCELLED") StreamFinished(j, "CANCELLED", "Cancelada antes de iniciar.");
         return j;
     }

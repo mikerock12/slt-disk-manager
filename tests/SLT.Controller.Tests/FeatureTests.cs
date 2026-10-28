@@ -238,6 +238,11 @@ internal static class FeatureTests
             Reject(() => controller.Media.ToolDownload(uefiPe.Id, conversion.Id), "tool changed after planning is blocked");
             controller.Result(uefiPe.Id, conversion.Id, new(true, "fixture", ""));
             controller.Cancel(linuxJob.Id);
+            check(controller.GetJob(linuxJob.Id).Plan.Deployment!.Account!.PasswordHash == "***", "account secret erased from the stored plan once the job ends");
+            var windowsAccount = new DeploymentAccount("CLIENTE2", "tecnico", Password: temporary);
+            var windowsJob = stored with { Plan = stored.Plan with { Kind = "DEPLOY_WINDOWS", Deployment = stored.Plan.Deployment with { Account = windowsAccount } } };
+            var shown = Provisioning.WithoutSecrets(windowsJob);
+            check(shown.Plan.Deployment!.Account!.Password == "***" && windowsJob.Plan.Deployment!.Account!.Password == temporary && !Wire.Serialize(shown).Contains(temporary), "admin job listings mask the Windows temporary password");
 
             var fileDevice = Add("WINDOWS", Disk("FILES", 8 * MiB), ["FILE_LIST", "FILE_BACKUP", "FILE_RESTORE"], [new("source", "Origem", true, false), new("destination", "Destino", false, true)]);
             if (OperatingSystem.IsWindows())
