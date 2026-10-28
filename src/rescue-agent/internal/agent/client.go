@@ -69,7 +69,9 @@ func NewClient(server, pin string, cert *tls.Certificate) (*Client, error) {
 		c.ServerCertificate = peer
 		return nil
 	}
-	transport := &http.Transport{TLSClientConfig: tlsConfig, Proxy: nil, ResponseHeaderTimeout: 30 * time.Second, MaxIdleConns: 2}
+	// The agent closes idle connections before the server (Kestrel keeps them 130 s), so a
+	// NAT, firewall or virtual switch never holds a half-closed one for the next request.
+	transport := &http.Transport{TLSClientConfig: tlsConfig, Proxy: nil, ResponseHeaderTimeout: 30 * time.Second, TLSHandshakeTimeout: 15 * time.Second, IdleConnTimeout: 30 * time.Second, MaxIdleConns: 2}
 	transport.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
 		host, port, err := net.SplitHostPort(address)
 		if err != nil {
@@ -104,15 +106,16 @@ func (c *Client) Request(ctx context.Context, method, path string, body io.Reade
 	return c.requestLimited(ctx, method, path, body, headers, ChunkSize+65536)
 }
 
-// Waits between attempts of an idempotent chunk download; tests shorten them.
-var fetchRetryDelays = []time.Duration{time.Second, 2 * time.Second, 5 * time.Second, 10 * time.Second, 20 * time.Second}
+// Waits between attempts of an idempotent request, riding out a network outage of about
+// five minutes (switch reboot, Wi-Fi roaming, server restart); tests shorten them.
+var fetchRetryDelays = []time.Duration{time.Second, 2 * time.Second, 5 * time.Second, 10 * time.Second, 20 * time.Second, 30 * time.Second, 30 * time.Second, 30 * time.Second, 30 * time.Second, 30 * time.Second, 30 * time.Second, 30 * time.Second, 30 * time.Second, 30 * time.Second}
 
 // FetchChunk downloads one chunk (media, image or stream) whose hash the caller
 // verifies. The GET changes nothing on the server, so it is retried on
 // transient network failures instead of failing a long download.
 func (c *Client) FetchChunk(ctx context.Context, path string) ([]byte, error) {
 	var data []byte
-	err := retryTransient(ctx, func() (int, error) {
+	err := retryTransient(ctx, c, func() (int, error) {
 		var status int
 		var e error
 		data, status, e = c.Request(ctx, "GET", path, nil, nil)
@@ -125,7 +128,7 @@ func (c *Client) FetchChunk(ctx context.Context, path string) ([]byte, error) {
 // report that overwrites the previous one) when the connection drops, times
 // out or the server answers 408/429/5xx. Other HTTP errors (cancelled job,
 // missing chunk, rejected plan) fail at once, as does a cancelled context.
-func retryTransient(ctx context.Context, request func() (int, error)) error {
+func retryTransient(ctx context.Context, c *Client, request func() (int, error)) error {
 	for attempt := 0; ; attempt++ {
 		status, err := request()
 		if err == nil {
@@ -135,6 +138,8 @@ func retryTransient(ctx context.Context, request func() (int, error)) error {
 		if !transient || ctx.Err() != nil || attempt >= len(fetchRetryDelays) {
 			return err
 		}
+		// The next attempt opens a fresh connection instead of reusing one that may be dead.
+		c.HTTP.CloseIdleConnections()
 		timer := time.NewTimer(fetchRetryDelays[attempt])
 		select {
 		case <-ctx.Done():

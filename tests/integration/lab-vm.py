@@ -73,9 +73,14 @@ class QMP:
         if "QMP" not in json.loads(self.file.readline()):
             raise RuntimeError("QMP inválido")
         self.seq = 0
+        self.lock = threading.Lock()
         self.command("qmp_capabilities")
 
     def command(self, name, arguments=None):
+        with self.lock:
+            return self._command(name, arguments)
+
+    def _command(self, name, arguments=None):
         self.seq += 1
         request = {"execute": name, "id": self.seq}
         if arguments is not None:
@@ -306,8 +311,12 @@ class VM:
     def start(self, cdrom=None, seed=None, scratch=False, memory=4096):
         assert self.process is None or self.process.poll() is not None
         qmp_port, serial_port = free_port(), free_port()
+        # Under WHPX the host CPU model made Windows guests (WinPE) hang mid-download, sleep
+        # forever or blue-screen. A conservative named model (SSE4.2, no x2APIC/TSC-deadline)
+        # keeps them stable; the default qemu64 was stable too, but lacks SSE4 and is slower.
+        cpu = "Nehalem" if self.lab.accel == "whpx" else "max"
         args = [str(QEMU_DIR / "qemu-system-x86_64.exe"), "-L", str(QEMU_DIR / "share"), "-name", f"SLT LAB {self.name}",
-                "-machine", "q35", "-accel", "whpx,kernel-irqchip=off" if self.lab.accel == "whpx" else self.lab.accel, "-cpu", "host" if self.lab.accel == "whpx" else "max", "-m", str(memory), "-smp", "2", "-display", "none", "-vga", "std",
+                "-machine", f"q35,accel={self.lab.accel}", "-cpu", cpu, "-m", str(memory), "-smp", "2", "-display", "none", "-vga", "std",
                 "-rtc", "base=localtime", "-qmp", f"tcp:127.0.0.1:{qmp_port},server=on,wait=off",
                 "-serial", f"tcp:127.0.0.1:{serial_port},server=on,wait=off",
                 "-drive", f"file={self.disk},if=none,id=disk,format=qcow2,cache=writeback",
@@ -329,7 +338,21 @@ class VM:
         self.process = subprocess.Popen(args, stdout=out, stderr=out, creationflags=HIDDEN)
         self.qmp = wait_for(lambda: QMP(qmp_port), "QMP " + self.name, 60)
         self.serial = Serial(serial_port, self.lab.ws / f"{self.name}-serial.log")
+        if self.lab.accel == "whpx":
+            threading.Thread(target=self.nudge, args=(self.process, self.qmp), daemon=True).start()
         log(f"{self.name} iniciada ({self.lab.accel}, {'UEFI' if self.uefi else 'BIOS'}, cd={Path(cdrom).name if cdrom else '-'})")
+
+    def nudge(self, process, qmp):
+        # WHPX lab quirk: an idle Windows guest (WinPE or installed) sometimes stops getting its
+        # timer interrupt and freezes until some input arrives; the agent then sits at 100% CPU
+        # with its timeouts never firing. A 1-pixel mouse wiggle every few seconds keeps it going.
+        while process.poll() is None and qmp is self.qmp:
+            try:
+                for value in (1, -1):
+                    qmp.command("input-send-event", {"events": [{"type": "rel", "data": {"axis": "x", "value": value}}]})
+            except (OSError, RuntimeError, EOFError, ValueError):
+                return
+            time.sleep(3)
 
     def shot(self, label):
         self.shots += 1
@@ -464,6 +487,9 @@ def build_kit(lab, name):
     step = '"%SystemRoot%\\System32\\wpeutil.exe" InitializeNetwork\nif errorlevel 1 goto blocked\n'
     assert text.count(step) == 1
     isolated = step + '"%SystemRoot%\\System32\\wpeutil.exe" WaitForNetwork\nif errorlevel 1 goto blocked\n"%SystemRoot%\\System32\\route.exe" delete 0.0.0.0\n"%SystemRoot%\\System32\\route.exe" print -4\n'
+    # Lab only: QEMU user networking (slirp) stops forwarding a Windows guest's TCP after a few
+    # hundred MB with receive-window autotuning; a fixed window keeps the download flowing.
+    isolated += '"%SystemRoot%\\System32\\netsh.exe" interface tcp set global autotuninglevel=disabled\n'
     start.write_bytes(text.replace(step, isolated).replace("\r\n", "\n").replace("\n", "\r\n").encode("ascii"))
     # Fixture-only: disk 1 is the lab's NEW 16 GiB "pendrive" qcow2 on AHCI port 1; disk 0 is the client.
     (seed / "SLT/scratch-fixture.txt").write_bytes(b"select disk 1\r\nclean\r\nconvert mbr\r\ncreate partition primary\r\nformat quick fs=ntfs label=SLT-Pendrive\r\nassign letter=R\r\nexit\r\n")

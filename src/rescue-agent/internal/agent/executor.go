@@ -43,7 +43,7 @@ func (r *Runner) report(ctx context.Context, p Plan, phase string, processed, to
 	var result struct {
 		CancelRequested bool `json:"cancelRequested"`
 	}
-	err := retryTransient(ctx, func() (int, error) {
+	err := retryTransient(ctx, r.Client, func() (int, error) {
 		return r.Client.JSON(ctx, "POST", "/agent/v1/jobs/"+p.ID+"/progress", map[string]any{"phase": phase, "bytesProcessed": processed, "bytesTotal": total}, &result)
 	})
 	if err != nil {
