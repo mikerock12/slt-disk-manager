@@ -15,6 +15,8 @@ internal static class Program
         try
         {
             var app = new App(); app.InitializeComponent();
+            var captureIndex = Array.IndexOf(args, "--capture");
+            if (captureIndex >= 0 && captureIndex + 1 < args.Length) return Capture(args[captureIndex + 1]);
             var main = new MainWindow();
             Check(main.FindName("Cloning") is ClonePanel && main.FindName("Files") is FilesPanel, "XAML: abas de clonagem e arquivos constroem sem erro");
             Check(Children<TabItem>(main).Count() >= 8, "XAML: navegação principal preservada");
@@ -179,6 +181,34 @@ internal static class Program
             return 0;
         }
         catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
+    }
+    // Documentation screenshots of a lab server: the panel connects through its own
+    // --connection argument, off screen, and each tab is rendered by WPF itself.
+    private static int Capture(string outputDir)
+    {
+        var output = Path.GetFullPath(outputDir); Directory.CreateDirectory(output);
+        var main = new MainWindow { Left = -20000, Top = -20000, Width = 1316, Height = 840, ShowActivated = false, ShowInTaskbar = false };
+        main.Show();
+        Pump(TimeSpan.FromSeconds(12));
+        var tabs = (TabControl)main.FindName("Workspace");
+        foreach (var tab in Children<TabItem>(main).ToList())
+        {
+            tabs.SelectedItem = tab;
+            Pump(TimeSpan.FromSeconds(2));
+            var name = new string(tab.Header.ToString()!.ToLowerInvariant().Normalize(System.Text.NormalizationForm.FormD).Where(c => char.IsAsciiLetterOrDigit(c) || c == ' ').ToArray()).Replace(' ', '-');
+            Render((FrameworkElement)main.Content, 1316, 840, Path.Combine(output, "desktop-" + name + ".png"));
+        }
+        Console.WriteLine("Capturas do painel conectado: " + output + " — " + ((TextBlock)main.FindName("StatusLine")).Text);
+        main.Close();
+        return 0;
+    }
+    private static void Pump(TimeSpan duration)
+    {
+        var frame = new System.Windows.Threading.DispatcherFrame();
+        var timer = new System.Windows.Threading.DispatcherTimer { Interval = duration };
+        timer.Tick += (_, _) => { timer.Stop(); frame.Continue = false; };
+        timer.Start();
+        System.Windows.Threading.Dispatcher.PushFrame(frame);
     }
     private static Device Device(string id, string name, string[] caps, DateTimeOffset now) => new(id, name, "RESCUE", "TRUSTED", now,
         new Inventory(id, name, "Linux fixture", "RESCUE", "0.1.0", caps,
