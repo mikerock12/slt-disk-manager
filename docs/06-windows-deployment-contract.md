@@ -74,3 +74,32 @@ EnrollMode com Enroll delegandoRESCUE e VerifyAssignment aceitando DEPLOY_WINDOW
 - Coordenador: media/model/controller/API/import/CI/embalagem e testesdeintegração.
 - Não tocar arquivosdecolegas semcoordenação. Não declararbootWindows/hardwarehomologado
 sem execuçãoreal. TestesWinPEcomponentes viafixtures/mocks; ISOmídialegal deusuário sólocal.
+
+## Conta inicial, Linux e conversão GPT (versão completa)
+
+`DeploymentOptions.account` opcional: {computerName (1–15, letras/números/hífen),
+userName (1–20 minúsculas, número, _ ou -; nomes reservados bloqueados), locale}. O
+servidor gera a senha temporária (14 caracteres alfanuméricos com maiúscula, minúscula e
+dígito) e a devolve uma única vez em `Job.temporaryPassword`; ela nunca vai para o log.
+Windows: o plano assinado leva a senha, o WinPE grava `%WINDIR%\Panther\unattend.xml`
+(usuário local em Administradores/Administradores conforme o idioma da edição, OOBE
+pulado, ABNT2/pt-BR, `powercfg /hibernate off` no specialize) e o Setup a mascara após uso.
+Linux: o plano leva só o hash SHA-512-crypt; o agente usa `chpasswd -e` e `chage -d 0`.
+
+DEPLOY_LINUX: mídia ISO Ubuntu/Xubuntu em camadas (casper) importada com `kind:"LINUX"`
+(a ISO inteira é o payload, conferida por chunks e SHA256). Cliente SLT Rescue com
+gravação habilitada anuncia DEPLOY_LINUX. O agente exige o firmware do boot igual ao do
+plano, confirmação local `APAGAR`, cria GPT (ESP 512 MiB + ext4) ou MBR (ext4 ativa),
+guarda a ISO na própria raiz nova, extrai a camada padrão de `install-sources.yaml`,
+instala grub-efi/shim do repositório da própria ISO (sem internet), grava fstab por UUID,
+hostname, fuso America/Sao_Paulo, teclado ABNT2, cria a conta, gera initramfs, instala o
+bootloader (NVRAM e caminho removível) e apaga a ISO da raiz antes de concluir.
+
+CONVERT_GPT: cliente WinPE iniciado em UEFI anuncia CONVERT_GPT. O plano exige
+`deployment:{mediaId,imageIndex,firmware:"GPT_UEFI"}` de mídia Windows; o servidor extrai
+`MBR2GPT.EXE` dessa edição e assina seu SHA256 em `deployment.toolSha256`
+(GET `/agent/v1/jobs/{id}/tool`). O agente valida (`/validate`) antes de pedir a
+confirmação local `CONVERTER`, converte (`/convert`), relê a tabela e exige GPT com ESP e
+volume Windows. Dados e partições são preservados; o boot UEFI deve ser conferido.
+
+Os agentes reportam a fase `AWAITING_LOCAL_CONFIRMATION` enquanto aguardam o teclado do cliente.

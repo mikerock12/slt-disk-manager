@@ -40,7 +40,9 @@ func VerifyAssignment(s SignedAssignment, certificate *x509.Certificate, deviceI
 	if !identifierPattern.MatchString(p.ID) || p.DeviceID != deviceID || !p.Consent {
 		return p, errors.New("identidade, consentimento ou id de plano inválido")
 	}
-	if !p.ExpiresAtUTC.After(now) || p.ExpiresAtUTC.After(now.Add(24*time.Hour)) {
+	// Plans last at most 24 h; 14 h of tolerance covers clients whose RTC keeps local time
+	// (Windows default) while the Linux Rescue reads it as UTC.
+	if !p.ExpiresAtUTC.After(now) || p.ExpiresAtUTC.After(now.Add(38*time.Hour)) {
 		return p, errors.New("plano expirado ou validade excessiva")
 	}
 	switch p.Kind {
