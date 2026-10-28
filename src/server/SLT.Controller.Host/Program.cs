@@ -46,6 +46,10 @@ File.WriteAllText(Path.Combine(directory, "server-info.txt"), $"Server: https://
 if (!OperatingSystem.IsWindows()) foreach (var file in Directory.GetFiles(directory)) File.SetUnixFileMode(file, UnixFileMode.UserRead | UnixFileMode.UserWrite);
 var store = new Store(directory);
 var controller = new Controller(store, certs, builder.Configuration["repository"] ?? Path.Combine(directory, "repository"));
+// Batch clone window in 4 MiB chunks held on the server at most (default 64 = 256 MiB).
+var window = int.Parse(builder.Configuration["stream-window-chunks"] ?? "64");
+if (window is < 1 or > 1024) throw new InvalidOperationException("--stream-window-chunks deve ficar entre 1 e 1024 lotes de 4 MiB.");
+controller.StreamWindowChunks = window;
 builder.Services.AddSingleton(controller);
 builder.Services.AddRateLimiter(options =>
 {
@@ -132,6 +136,9 @@ app.MapPut("/agent/v1/jobs/{id}/chunks/{seq:int}", async (string id, int seq, Ht
 app.MapPost("/agent/v1/jobs/{id}/capture-complete", (string id, CaptureCompletion request, HttpContext ctx) => Locked(() => controller.Complete(DeviceId(ctx), id,request.Layout) with{Chunks=[]}));
 app.MapGet("/agent/v1/jobs/{id}/manifest", (string id, HttpContext ctx) => Locked(() => controller.DownloadManifest(DeviceId(ctx), id)));
 app.MapGet("/agent/v1/jobs/{id}/chunks/{seq:int}", (string id, int seq, HttpContext ctx) => Locked(() => Results.Bytes(controller.Download(DeviceId(ctx), id, seq), "application/octet-stream")));
+app.MapPost("/agent/v1/jobs/{id}/stream-start", (string id, StreamStart r, HttpContext ctx) => Locked(() => controller.StreamSourceStart(DeviceId(ctx), id, r)));
+app.MapGet("/agent/v1/jobs/{id}/stream", (string id, HttpContext ctx) => Locked(() => controller.StreamStatusFor(DeviceId(ctx), id)));
+app.MapPost("/agent/v1/jobs/{id}/stream-ack", (string id, StreamAck r, HttpContext ctx) => Locked(() => controller.StreamAcknowledge(DeviceId(ctx), id, r)));
 app.MapGet("/api/v1/audit", () => Locked(() => store.Audit()));
 FileEndpoints.Map(app,controller);
 app.MapGet("/api/v1/dashboard", () => Locked(() => new

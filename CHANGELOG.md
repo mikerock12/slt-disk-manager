@@ -1,5 +1,15 @@
 # Changelog
 
+## Não publicado — clone em lotes
+
+Clone cliente → cliente em lotes, agora padrão no painel: origem e destino ficam ligados
+ao mesmo tempo, o servidor guarda no máximo 256 MiB (ajustável) e apaga cada lote
+depois que o destino confirma a gravação. Clonar discos de 1 TB não exige 1 TB livre
+no servidor nem pasta temporária no Rescue. Vale para EXATO, PRESERVAR e AJUSTAR para
+disco igual ou maior; o ajuste acontece no próprio destino depois de reler e comparar
+todos os dados. Reduzir para disco menor e repetir restaurações continuam no modo com
+imagem completa, mantido como opção. Novo agente Rescue necessário nos dois clientes.
+
 ## 0.1.0-beta.3.3 — 2026-10-28
 
 Corrige a implantação Windows pelo WinPE: o script DiskPart executava

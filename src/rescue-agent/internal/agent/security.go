@@ -51,8 +51,11 @@ func VerifyAssignment(s SignedAssignment, certificate *x509.Certificate, deviceI
 	if p.Kind != "INVENTORY" && (p.DiskFingerprint == "" || p.DiskPath == "" || p.DiskSizeBytes <= 0) {
 		return p, errors.New("identidade do disco incompleta")
 	}
-	if p.Kind == "RESTORE" && (p.ImageID == "" || strings.TrimSpace(p.Challenge) == "") {
+	if p.Kind == "RESTORE" && ((p.ImageID == "") == (p.StreamID == "") || strings.TrimSpace(p.Challenge) == "") {
 		return p, errors.New("restauração sem imagem ou confirmação")
+	}
+	if p.StreamID != "" && (!identifierPattern.MatchString(p.StreamID) || p.ImageID != "" || p.Kind != "CAPTURE" && p.Kind != "RESTORE" || p.Kind == "RESTORE" && p.Clone == nil) {
+		return p, errors.New("clone em lotes com identificador, tipo ou estratégia inválidos")
 	}
 	if p.Clone != nil {
 		switch p.Clone.Strategy {

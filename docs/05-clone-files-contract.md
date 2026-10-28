@@ -34,6 +34,42 @@ POST `/api/v1/clones/{id}/prepare-target` {} -> Job de RESTORE, somente após ca
 Estados: AWAITING_SOURCE_APPROVAL, CAPTURING, IMAGE_READY, AWAITING_TARGET_APPROVAL, RESTORING, COMPLETED, FAILED.
 Vários clones/instalações em PCs distintos são permitidos; locks por máquina/disco e não globais.
 
+## Clonagem em lotes (transfer STREAM)
+
+CloneRequest acrescenta `transfer:"IMAGE"|"STREAM"` (omitido = IMAGE, compatível).
+STREAM não guarda imagem completa: a origem envia chunks de 4 MiB enquanto o destino grava.
+O servidor mantém no máximo `windowChunks` arquivos (padrão 64 = 256 MiB, opção
+`--stream-window-chunks` 1..1024) e apaga cada chunk assim que o destino confirma que o
+gravou com fsync. Só os hashes ficam no catálogo. Não há pasta temporária no Rescue.
+
+Planejamento cria de uma vez CAPTURE (origem) e RESTORE (destino) com o mesmo `streamId`
+no plano assinado; cada um exige sua aprovação normal (AUTORIZAR / APAGAR). Exige
+capability CLONE_STREAM nos dois; PRESERVE_LAYOUT com capacidade diferente exige
+STREAM_LAYOUT e FIT exige STREAM_FIT (sfdisk, ntfsresize/resize2fs, losetup, root) no destino.
+FIT só para destino igual ou maior nesta fase; reduzir continua no modo IMAGE.
+`ClonePreview.serverBytesRequired` informa a janela (STREAM) ou a capacidade da origem (IMAGE).
+Estados da sessão: AWAITING_SOURCE_APPROVAL, AWAITING_TARGET_APPROVAL, STREAMING, COMPLETED, FAILED.
+
+Agente origem: POST `/agent/v1/jobs/{id}/stream-start` {layout} antes de qualquer dado
+(servidor compara com o layout planejado; divergência encerra a transmissão);
+PUT `/chunks/{seq}` em ordem, resposta 429 quando a janela está cheia (aguardar e repetir o
+mesmo chunk); POST `/capture-complete` {layout} retorna state STREAMED após conferir a
+sequência completa e o layout após o envio.
+Agente destino: GET `/agent/v1/jobs/{id}/stream` -> {state,logicalSizeBytes,logicalSectorBytes,
+sourceFingerprint,layout,totalChunks,nextSequence,ackedThrough,sourceStarted,sourceComplete,pending:ImageChunk[]};
+GET `/chunks/{seq}` somente de chunk pendente (hash conferido antes da escrita);
+POST `/stream-ack` {through} após fsync, que descarta os chunks até `through`.
+Resultado de sucesso do destino exige todos os chunks confirmados; falha, cancelamento ou
+reinício do servidor encerram a transmissão, apagam os lotes e cancelam o outro lado.
+
+Destino grava direto no disco seguindo o mesmo mapa da cópia de trabalho do modo IMAGE:
+EXACT copia tudo; PRESERVE copia até a última LBA utilizável e zera o espaço novo; FIT
+maior copia até o fim da partição ajustada, grava o sufixo (recuperação/OEM) já deslocado
+e zera o espaço novo. Depois zera, relê e compara cada região por SHA256, confere o
+filesystem a expandir no tamanho original, reescreve a tabela e expande NTFS/ext4 via loop
+sobre o próprio destino. A origem nunca é alterada. Uma falha deixa o destino parcial;
+não há retomada nesta fase: planeje novo clone.
+
 ## Escopos de arquivos e jobs
 
 Agente Windows: `--file-roots C:\caminho\scopes.json` com array local

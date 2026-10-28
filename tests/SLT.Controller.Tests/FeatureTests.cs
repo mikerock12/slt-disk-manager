@@ -133,6 +133,67 @@ internal static class FeatureTests
             var unavailable = b with { Inventory = b.Inventory! with { Capabilities = ["RESTORE"] } }; db.Put("device", b.Id, unavailable);
             Reject(() => controller.PlanClone(new(a.Id, source.Fingerprint, b.Id, smaller.Fingerprint, "FIT", true)), "clone refuses destination without adaptive engine capability");
 
+            check(ClonePlanning.Preview(source, smaller, "FIT", stream: true).Blockers.Any(x => x.Contains("menor")), "batch clone keeps shrinking in image mode");
+            var grow = ClonePlanning.Preview(source, Disk("GROW", 320 * MiB), "FIT", stream: true);
+            check(grow.Blockers.Length == 0 && grow.ScratchBytesRequired == 0 && grow.ServerBytesRequired == 0 && ClonePlanning.Preview(source, Disk("GROW", 320 * MiB), "FIT").ServerBytesRequired == source.SizeBytes, "batch FIT to larger disk needs neither Rescue scratch nor a full server image");
+            var streamSource = Disk("STREAM_SOURCE", 3 * Controller.ChunkSize + 512); var streamTarget = Disk("STREAM_TARGET", streamSource.SizeBytes);
+            var sa = Add("RESCUE", streamSource, ["CAPTURE", "RESTORE", "CLONE_STREAM"]); var sb = Add("RESCUE", streamTarget, ["CAPTURE", "RESTORE", "CLONE_STREAM"]);
+            var legacy = Add("RESCUE", Disk("LEGACY_TARGET", streamSource.SizeBytes), ["CAPTURE", "RESTORE"]);
+            Reject(() => controller.PlanClone(new(sa.Id, streamSource.Fingerprint, legacy.Id, legacy.Inventory!.Disks[0].Fingerprint, "EXACT_RAW", true, "STREAM")), "batch clone requires CLONE_STREAM on both Rescue agents");
+            controller.StreamWindowChunks = 2;
+            var imagesBefore = db.All<ImageManifest>("image").Count;
+            controller.PlanClone(new(sa.Id, streamSource.Fingerprint, sb.Id, streamTarget.Fingerprint, "EXACT_RAW", true, "STREAM"));
+            var ss = db.All<CloneSession>("clone").Single(c => c.Transfer == "STREAM"); string cap = ss.CaptureJobId, tgt = ss.TargetJobId!, sid = ss.StreamId!;
+            check(controller.CloneState(ss).State == "AWAITING_SOURCE_APPROVAL" && db.All<ImageManifest>("image").Count == imagesBefore && ss.Preview.ServerBytesRequired == 2L * Controller.ChunkSize, "batch clone plans both jobs and reserves only the window, not a full image");
+            Reject(() => controller.PrepareCloneTarget(ss.Id), "batch clone has no separate target preparation");
+            controller.Approve(cap, controller.GetJob(cap).Plan.Challenge);
+            check(controller.CloneState(ss).State == "AWAITING_TARGET_APPROVAL", "batch clone asks for destination authorization after source");
+            Reject(() => controller.Approve(tgt, "AUTORIZAR"), "batch destination still requires its APAGAR challenge");
+            controller.Approve(tgt, controller.GetJob(tgt).Plan.Challenge); controller.Next(sa.Id); controller.Next(sb.Id);
+            check(controller.CloneState(ss).State == "STREAMING", "source and destination run at the same time");
+            var data = RandomNumberGenerator.GetBytes((int)streamSource.SizeBytes);
+            byte[] Part(int seq) => data.AsSpan(seq * Controller.ChunkSize, (int)Math.Min(Controller.ChunkSize, data.Length - (long)seq * Controller.ChunkSize)).ToArray();
+            string H(byte[] x) => Convert.ToHexStringLower(SHA256.HashData(x));
+            Reject(() => controller.Upload(sa.Id, cap, 0, Part(0), H(Part(0))), "batch source must announce verified layout before data");
+            controller.StreamSourceStart(sa.Id, cap, new());
+            controller.Upload(sa.Id, cap, 0, Part(0), H(Part(0))); controller.Upload(sa.Id, cap, 1, Part(1), H(Part(1)));
+            try { controller.Upload(sa.Id, cap, 2, Part(2), H(Part(2))); throw new Exception("Batch window not enforced."); }
+            catch (ApiException e) when (e.Status == 429) { check(true, "server holds at most the configured window of batches"); }
+            var status = controller.StreamStatusFor(sb.Id, tgt);
+            check(status.TotalChunks == 4 && status.Pending.Select(p => p.Sequence).SequenceEqual([0, 1]) && controller.Download(sb.Id, tgt, 0).SequenceEqual(Part(0)), "destination receives verified pending batches");
+            Reject(() => controller.Download(sa.Id, tgt, 0), "batch download restricted to assigned destination");
+            Reject(() => controller.StreamAcknowledge(sb.Id, tgt, new(3)), "destination cannot acknowledge batches not received");
+            controller.StreamAcknowledge(sb.Id, tgt, new(0));
+            check(!File.Exists(Path.Combine(controller.StreamDir(sid), "00000000.bin")) && File.Exists(Path.Combine(controller.StreamDir(sid), "00000001.bin")), "acknowledged batch deleted from server while pending batch is kept");
+            Reject(() => controller.Download(sb.Id, tgt, 0), "discarded batch cannot be requested again");
+            controller.Upload(sa.Id, cap, 2, Part(2), H(Part(2)));
+            try { controller.Upload(sa.Id, cap, 3, Part(3), H(Part(3))); throw new Exception("Batch window not enforced after ack."); }
+            catch (ApiException e) when (e.Status == 429) { }
+            controller.StreamAcknowledge(sb.Id, tgt, new(2)); controller.Upload(sa.Id, cap, 3, Part(3), H(Part(3)));
+            Reject(() => controller.Result(sa.Id, cap, new(true, "fixture", "")), "source cannot finish before declaring all batches sent");
+            controller.Complete(sa.Id, cap); controller.Result(sa.Id, cap, new(true, "fixture", ""));
+            check(controller.GetJob(cap).State == "COMPLETED" && controller.CloneState(ss).State == "STREAMING", "source machine is released while destination drains last batches");
+            Reject(() => controller.Result(sb.Id, tgt, new(true, "fixture", "")), "destination cannot complete before acknowledging every batch");
+            check(controller.Download(sb.Id, tgt, 3).SequenceEqual(Part(3)), "last partial batch delivered");
+            controller.StreamAcknowledge(sb.Id, tgt, new(3)); controller.Result(sb.Id, tgt, new(true, "fixture", ""));
+            check(controller.CloneState(ss).State == "COMPLETED" && controller.GetStream(sid).State == "COMPLETED" && !Directory.Exists(controller.StreamDir(sid)) && db.Chunks(sid, "stream").Count == 4, "completed batch clone leaves no disk data on server and keeps only hashes");
+
+            controller.PlanClone(new(sa.Id, streamSource.Fingerprint, sb.Id, streamTarget.Fingerprint, "EXACT_RAW", true, "STREAM"));
+            var failing = db.All<CloneSession>("clone").Single(c => c.Transfer == "STREAM" && c.Id != ss.Id);
+            controller.Approve(failing.CaptureJobId, controller.GetJob(failing.CaptureJobId).Plan.Challenge); controller.Approve(failing.TargetJobId!, controller.GetJob(failing.TargetJobId!).Plan.Challenge);
+            controller.Next(sa.Id); controller.Next(sb.Id); controller.StreamSourceStart(sa.Id, failing.CaptureJobId, new()); controller.Upload(sa.Id, failing.CaptureJobId, 0, Part(0), H(Part(0)));
+            controller.Result(sb.Id, failing.TargetJobId!, new(false, "falha sintética no destino", ""));
+            check(controller.GetStream(failing.StreamId!).State == "FAILED" && controller.GetJob(failing.CaptureJobId).CancelRequested && !Directory.Exists(controller.StreamDir(failing.StreamId!)) && controller.CloneState(failing).State == "FAILED", "destination failure stops the source and discards pending batches");
+            Reject(() => controller.Upload(sa.Id, failing.CaptureJobId, 1, Part(1), H(Part(1))), "source cannot keep sending after destination failure");
+            controller.Result(sa.Id, failing.CaptureJobId, new(false, "cancelado", ""));
+
+            controller.PlanClone(new(sa.Id, streamSource.Fingerprint, sb.Id, streamTarget.Fingerprint, "EXACT_RAW", true, "STREAM"));
+            var restarted = db.All<CloneSession>("clone").Single(c => c.Transfer == "STREAM" && c.Id != ss.Id && c.Id != failing.Id);
+            controller.Approve(restarted.CaptureJobId, controller.GetJob(restarted.CaptureJobId).Plan.Challenge);
+            _ = new Controller(db, certificates, controller.Repository);
+            check(controller.GetStream(restarted.StreamId!).State == "FAILED" && controller.GetJob(restarted.CaptureJobId).State == "INTERRUPTED" && !Directory.Exists(controller.StreamDir(restarted.StreamId!)), "server restart fails open batch clones and discards their data");
+            controller.Cancel(restarted.TargetJobId!);
+
             var fileDevice = Add("WINDOWS", Disk("FILES", 8 * MiB), ["FILE_LIST", "FILE_BACKUP", "FILE_RESTORE"], [new("source", "Origem", true, false), new("destination", "Destino", false, true)]);
             if (OperatingSystem.IsWindows())
             {

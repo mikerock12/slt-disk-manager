@@ -30,6 +30,7 @@ public sealed partial class Controller
         }
         foreach(var image in db.All<ImageManifest>("image").Where(i=>i.Chunks.Count>0))
         { db.ImportChunks(image.Id,"disk",image.Chunks);db.Put("image",image.Id,image with{Chunks=[]}); }
+        InterruptStreams();
     }
     internal static void Ensure(bool condition, int status, string error) { if (!condition) throw new ApiException(status, error); }
     public Enrollment Enroll(EnrollmentRequest request)
@@ -92,7 +93,8 @@ public sealed partial class Controller
         foreach (var job in Db.All<Job>("job").Where(j => j.Plan.DeviceId == id && Active.Contains(j.State))) Cancel(job.Id);
         Db.Log("admin", "device.revoked", id);
     }
-    public Job Plan(PlanRequest request)
+    public Job Plan(PlanRequest request) => Plan(request, null);
+    private Job Plan(PlanRequest request, string? streamId)
     {
         if(request.Kind is "FILE_LIST" or "FILE_BACKUP" or "FILE_RESTORE") return Files.Plan(request);
         if(request.Kind == "DEPLOY_WINDOWS") return PlanDeployment(request);
@@ -110,13 +112,14 @@ public sealed partial class Controller
             Ensure(d.Mode == "RESCUE" && !disk!.Mounted && !disk.IsSystem, 409, "Imagem exige Rescue offline e disco não montado/não sistema.");
             Ensure(disk!.Serial.Length > 0 || d.Inventory.Notes.Contains("SYNTHETIC_FIXTURE"), 409, "Serial ausente: identidade insuficiente para imagem física.");
         }
-        if (request.Kind == "CAPTURE")
+        if (request.Kind == "CAPTURE" && streamId == null)
         {
             imageId = Wire.Id();
             var reserved = Db.All<Job>("job").Where(j => j.Plan.Kind == "CAPTURE" && (Active.Contains(j.State) || j.State == "AWAITING_APPROVAL")).Sum(j => j.Plan.DiskSizeBytes);
             Ensure(FreeBytes() - reserved > disk!.SizeBytes + 64L * 1024 * 1024, 409, "Espaço insuficiente para imagem raw e reserva de segurança.");
         }
-        if (request.Kind == "RESTORE")
+        if (request.Kind == "RESTORE" && streamId != null) Ensure(!disk!.IsReadOnly, 409, "Disco destino está protegido contra gravação.");
+        if (request.Kind == "RESTORE" && streamId == null)
         {
             Ensure(!disk!.IsReadOnly, 409, "Disco destino está protegido contra gravação.");
             var image = GetImage(imageId);
@@ -128,7 +131,7 @@ public sealed partial class Controller
         var id = Wire.Id();
         var challenge = request.Kind == "RESTORE" ? $"APAGAR {d.Hostname} {disk!.Fingerprint[..12]}" : $"AUTORIZAR {request.Kind} {id[..8]}";
         var plan = new JobPlan(id, request.Kind, d.Id, disk?.Fingerprint ?? "", disk?.Path ?? "", disk?.SizeBytes ?? 0,
-            disk?.LogicalSectorBytes ?? 512, imageId, challenge, request.Kind=="RESTORE" && request.CloneOptions!=null?DateTimeOffset.UtcNow.AddHours(24):DateTimeOffset.UtcNow.AddMinutes(15), true, CloneOptions:request.CloneOptions);
+            disk?.LogicalSectorBytes ?? 512, imageId, challenge, streamId!=null || request.Kind=="RESTORE" && request.CloneOptions!=null?DateTimeOffset.UtcNow.AddHours(24):DateTimeOffset.UtcNow.AddMinutes(15), true, CloneOptions:request.CloneOptions, StreamId:streamId);
         var job = new Job(id, plan, "AWAITING_APPROVAL", DateTimeOffset.UtcNow); Db.Put("job", id, job);
         Db.Log("admin", "job.planned", Wire.Serialize(plan)); return job;
     }
@@ -145,6 +148,7 @@ public sealed partial class Controller
         Ensure(disk != null && disk.Path == job.Plan.DiskPath && disk.SizeBytes == job.Plan.DiskSizeBytes && disk.LogicalSectorBytes == job.Plan.LogicalSectorBytes, 409, "Disco mudou após planejamento.");
         if (job.Plan.Kind is "CAPTURE" or "RESTORE")
             Ensure(d.Mode == "RESCUE" && !disk!.Mounted && !disk.IsSystem && (job.Plan.Kind != "RESTORE" || !disk.IsReadOnly), 409, "Disco indisponível para operação offline.");
+        if (job.Plan.StreamId != null) { ValidateStreamJob(job, d, disk!); return; }
         if (job.Plan.Kind == "RESTORE")
         {
             var image = GetImage(job.Plan.ImageId); Ensure(image.State == "AVAILABLE", 409, "Imagem indisponível ou em verificação.");
@@ -157,7 +161,7 @@ public sealed partial class Controller
         var job = GetJob(id); Ensure(job.State == "AWAITING_APPROVAL", 409, "Tarefa já aprovada ou encerrada.");
         Ensure(SafeEquals(job.Plan.Challenge, challenge), 400, "Confirmação digitada incorreta."); Revalidate(job);
         Ensure(!Db.All<Job>("job").Any(j => j.Id != id && Active.Contains(j.State) && j.Plan.DeviceId == job.Plan.DeviceId), 409, "Máquina já possui tarefa ativa; aguarde conclusão.");
-        if (job.Plan.Kind == "CAPTURE")
+        if (job.Plan.Kind == "CAPTURE" && job.Plan.StreamId == null)
         {
             var p = job.Plan;
             var image = new ImageManifest(1, p.ImageId, $"{Device(p.DeviceId).Hostname} {DateTimeOffset.Now:yyyy-MM-dd HH:mm}", "CREATING", p.DeviceId, p.DiskFingerprint, p.DiskSizeBytes, p.LogicalSectorBytes, DateTimeOffset.UtcNow, [], Device(p.DeviceId).Inventory?.Disks.Single(d=>d.Fingerprint==p.DiskFingerprint).Layout);
@@ -194,11 +198,13 @@ public sealed partial class Controller
     {
         var j = GetJob(id); Ensure(j.Plan.DeviceId == deviceId, 403, "Tarefa pertence a outro agente.");
         Ensure(Active.Contains(j.State), 409, "Resultado já reconciliado/encerrado; não repetir execução.");
-        if (result.Success && j.Plan.Kind == "CAPTURE") Ensure(Db.Get<ImageManifest>("image", j.Plan.ImageId)?.State == "AVAILABLE", 409, "Imagem não finalizada e verificada.");
+        if (j.Plan.StreamId != null) result = StreamResult(j, result);
+        else if (result.Success && j.Plan.Kind == "CAPTURE") Ensure(Db.Get<ImageManifest>("image", j.Plan.ImageId)?.State == "AVAILABLE", 409, "Imagem não finalizada e verificada.");
         if (result.Success && j.Plan.Kind == "FILE_BACKUP") Ensure(Files.Get(j.Plan.File!.BundleId).State == "AVAILABLE",409,"Backup não finalizado/verificado.");
         var state = j.CancelRequested ? "CANCELLED" : result.Success ? "COMPLETED" : "FAILED";
         Db.Put("job", id, j with { State = state, Result = result });
-        if (state != "COMPLETED" && j.Plan.Kind == "CAPTURE" && Db.Get<ImageManifest>("image", j.Plan.ImageId) is {} image && image.State != "AVAILABLE")
+        if (j.Plan.StreamId != null) StreamFinished(j, state, result.Message);
+        else if (state != "COMPLETED" && j.Plan.Kind == "CAPTURE" && Db.Get<ImageManifest>("image", j.Plan.ImageId) is {} image && image.State != "AVAILABLE")
             Db.Put("image", image.Id, image with { State = "FAILED" });
         if(state!="COMPLETED" && j.Plan.Kind=="FILE_BACKUP") Files.Fail(j.Plan.File!.BundleId);
         Db.Log(internalCall ? "system" : deviceId, $"job.{state.ToLowerInvariant()}", $"{id} {result.Message}");
@@ -207,7 +213,9 @@ public sealed partial class Controller
     {
         var j = GetJob(id); Ensure(j.State is "AWAITING_APPROVAL" or "QUEUED" or "RUNNING" or "CANCELLING", 409, "Tarefa já encerrada.");
         j = j with { State = j.State is "RUNNING" or "CANCELLING" ? "CANCELLING" : "CANCELLED", CancelRequested = true };
-        Db.Put("job", id, j); Db.Log("admin", "job.cancel.request", id); return j;
+        Db.Put("job", id, j); Db.Log("admin", "job.cancel.request", id);
+        if (j.Plan.StreamId != null && j.State == "CANCELLED") StreamFinished(j, "CANCELLED", "Cancelada antes de iniciar.");
+        return j;
     }
     public string ImageDir(string id)
     {
@@ -216,7 +224,9 @@ public sealed partial class Controller
     private string ChunkPath(string id, int seq) => Path.Combine(ImageDir(id), $"{seq:D8}.bin");
     public ImageChunk Upload(string deviceId, string jobId, int seq, byte[] bytes, string sha)
     {
-        var j = AgentJob(deviceId, jobId, "CAPTURE"); var image = Db.Get<ImageManifest>("image",j.Plan.ImageId) ?? throw new ApiException(404,"Imagem não encontrada.");
+        var j = AgentJob(deviceId, jobId, "CAPTURE");
+        if (j.Plan.StreamId != null) return StreamUpload(j, seq, bytes, sha);
+        var image = Db.Get<ImageManifest>("image",j.Plan.ImageId) ?? throw new ApiException(404,"Imagem não encontrada.");
         Ensure(image.State == "CREATING" && seq >= 0, 409, "Imagem não está recebendo dados.");
         var hash = Convert.ToHexStringLower(SHA256.HashData(bytes));
         Ensure(SafeEquals(hash, sha), 400, "SHA256 não corresponde aos dados recebidos.");
@@ -237,7 +247,9 @@ public sealed partial class Controller
     }
     public ImageManifest Complete(string deviceId, string jobId, DiskLayout? layout = null)
     {
-        var j = AgentJob(deviceId, jobId, "CAPTURE"); var image = GetImage(j.Plan.ImageId);
+        var j = AgentJob(deviceId, jobId, "CAPTURE");
+        if (j.Plan.StreamId != null) return StreamSourceComplete(j, layout);
+        var image = GetImage(j.Plan.ImageId);
         if(layout!=null){ ClonePlanning.ValidateLayout(layout,image.LogicalSizeBytes); Ensure(layout.SectorSize==image.LogicalSectorBytes,400,"Setor do layout não corresponde à imagem."); image=image with{Layout=layout}; }
         // Each chunk was re-read and hashed before its durable receipt. Checking
         // continuity here avoids re-reading a multi-terabyte image under the DB lock.
@@ -294,12 +306,15 @@ public sealed partial class Controller
     }
     public ImageManifest DownloadManifest(string deviceId, string jobId)
     {
-        var j = AgentJob(deviceId, jobId, "RESTORE"); var m = GetImage(j.Plan.ImageId);
+        var j = AgentJob(deviceId, jobId, "RESTORE"); Ensure(j.Plan.StreamId == null, 409, "Clone em lotes não tem manifesto completo; consulte /stream.");
+        var m = GetImage(j.Plan.ImageId);
         Ensure(m.State == "AVAILABLE", 409, "Imagem indisponível."); return m;
     }
     public byte[] Download(string deviceId, string jobId, int seq)
     {
-        var j=AgentJob(deviceId,jobId,"RESTORE");var image=Db.Get<ImageManifest>("image",j.Plan.ImageId) ?? throw new ApiException(404,"Imagem não encontrada.");
+        var j=AgentJob(deviceId,jobId,"RESTORE");
+        if(j.Plan.StreamId!=null)return StreamDownload(j,seq);
+        var image=Db.Get<ImageManifest>("image",j.Plan.ImageId) ?? throw new ApiException(404,"Imagem não encontrada.");
         Ensure(image.State=="AVAILABLE",409,"Imagem indisponível.");
         var chunk=Db.GetChunk(image.Id,"disk",seq) ?? throw new ApiException(404,"Chunk inválido.");
         var bytes = File.ReadAllBytes(ChunkPath(image.Id, seq));

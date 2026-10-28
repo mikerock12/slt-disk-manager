@@ -43,6 +43,12 @@ def main():
     source = os.urandom(4 * 1024 * 1024 + 512)
     (fixtures / "source.raw").write_bytes(source)
     (fixtures / "target.raw").write_bytes(bytes(len(source)))
+    # Batch clone target lives on a second Rescue agent; it starts with unrelated bytes.
+    stream_fixtures = workspace / "stream-target"
+    stream_fixtures.mkdir()
+    stream_source = os.urandom(3 * 4 * 1024 * 1024 + 512)
+    (fixtures / "stream-source.raw").write_bytes(stream_source)
+    (stream_fixtures / "clone-target.raw").write_bytes(bytes([0xA5]) * len(stream_source))
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
         port = sock.getsockname()[1]
@@ -51,7 +57,7 @@ def main():
     try:
         log = open(workspace / "controller.log", "wb")
         logs.append(log)
-        controller = subprocess.Popen(["dotnet", args.controller, "--state-dir", str(workspace / "server"), "--port", str(port)], stdout=log, stderr=log)
+        controller = subprocess.Popen(["dotnet", args.controller, "--state-dir", str(workspace / "server"), "--port", str(port), "--stream-window-chunks", "1"], stdout=log, stderr=log)
         processes.append(controller)
         connection = wait_for(lambda: json.loads((workspace / "server/connection.json").read_text()), "controller identity")
 
@@ -95,8 +101,8 @@ def main():
         devices = wait_for(lambda: [d for d in request("GET", "/api/v1/devices") if d.get("inventory")], "mTLS inventory")
         device = devices[0]
         disks = device["inventory"]["disks"]
-        source_disk = next(d for d in disks if d["path"].endswith("source.raw"))
-        target_disk = next(d for d in disks if d["path"].endswith("target.raw"))
+        source_disk = next(d for d in disks if os.path.basename(d["path"]) == "source.raw")
+        target_disk = next(d for d in disks if os.path.basename(d["path"]) == "target.raw")
         print("PASS real Go enrollment, client certificate and .NET mTLS inventory")
 
         def execute(kind, disk, image=None):
@@ -117,11 +123,41 @@ def main():
         execute("RESTORE", target_disk, image["id"])
         assert (fixtures / "target.raw").read_bytes() == source
         print("PASS signed RESTORE, hash-before-write and exact full destination equality")
+        log = open(workspace / "rescue-target.log", "wb")
+        logs.append(log)
+        target_agent = subprocess.Popen([args.agent, "--server", f"https://127.0.0.1:{port}", "--server-pin", connection["serverPin"], "--state-dir", str(workspace / "agent-target"), "--fixture-dir", str(stream_fixtures), "--allow-file-write", "--poll-interval", "1s"], stdout=log, stderr=log)
+        processes.append(target_agent)
+        pending = wait_for(lambda: [e for e in request("GET", "/api/v1/enrollments") if e["status"] == "PENDING"], "second Go CSR enrollment")
+        request("POST", "/api/v1/enrollments/" + pending[0]["id"] + "/approve", {"code": pending[0]["code"]})
+        target_device = wait_for(lambda: next((d for d in request("GET", "/api/v1/devices") if d["id"] != device["id"] and d.get("inventory")), None), "second mTLS inventory")
+        stream_disk = next(d for d in device["inventory"]["disks"] if d["path"].endswith("stream-source.raw"))
+        clone_disk = target_device["inventory"]["disks"][0]
+        assert "CLONE_STREAM" in device["inventory"]["capabilities"] and "CLONE_STREAM" in target_device["inventory"]["capabilities"]
+        planned = request("POST", "/api/v1/clones/plan", {"sourceDeviceId": device["id"], "sourceDiskFingerprint": stream_disk["fingerprint"], "targetDeviceId": target_device["id"], "targetDiskFingerprint": clone_disk["fingerprint"], "strategy": "EXACT_RAW", "consent": True, "transfer": "STREAM"})
+        images_before = len(request("GET", "/api/v1/images"))
+        for job in (planned["captureJob"], planned["targetJob"]):
+            request("POST", "/api/v1/jobs/" + job["id"] + "/approve", {"challenge": job["plan"]["challenge"]})
+        stream_dir = workspace / "server" / "repository" / "streams" / planned["session"]["streamId"]
+        peak = 0
+        def finished():
+            nonlocal peak
+            if stream_dir.exists():
+                peak = max(peak, len([f for f in stream_dir.iterdir() if f.suffix == ".bin"]))
+            states = {j["id"]: j["state"] for j in request("GET", "/api/v1/jobs")}
+            done = [states[planned["captureJob"]["id"]], states[planned["targetJob"]["id"]]]
+            return done if all(s in ("COMPLETED", "FAILED", "CANCELLED") for s in done) else None
+        result = wait_for(finished, "batch clone", timeout=120)
+        assert result == ["COMPLETED", "COMPLETED"], result
+        assert (stream_fixtures / "clone-target.raw").read_bytes() == stream_source
+        assert not stream_dir.exists() and peak <= 1 and len(request("GET", "/api/v1/images")) == images_before
+        session = next(s for s in request("GET", "/api/v1/clones") if s["id"] == planned["session"]["id"])
+        assert session["state"] == "COMPLETED" and session["transfer"] == "STREAM"
+        print("PASS batch clone between two Rescue agents: server window 1, batches discarded, destination byte-exact, no image kept")
         request("POST", "/api/v1/devices/" + device["id"] + "/revoke", {})
         wait_for(lambda: agent.poll() is not None, "revoked Go session terminates")
         assert agent.returncode != 0
         print("PASS revocation rejects further authenticated requests")
-        print("6/6 end-to-end scenarios passed. Logs in", workspace)
+        print("7/7 end-to-end scenarios passed. Logs in", workspace)
     finally:
         for process in reversed(processes):
             if process.poll() is None:

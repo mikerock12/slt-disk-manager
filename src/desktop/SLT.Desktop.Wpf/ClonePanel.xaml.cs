@@ -58,6 +58,7 @@ public partial class ClonePanel : UserControl
     private void Disk_SelectionChanged(object sender, SelectionChangedEventArgs e) { if (!_updating && SourceSummary is not null) { Sessions.SelectedItem = null; UpdateDiskSummary(); } }
     private void Strategy_SelectionChanged(object sender, SelectionChangedEventArgs e) { if (!_updating && PreviewSummary is not null) { Sessions.SelectedItem = null; UpdateDiskSummary(); } }
     private string SelectedStrategy => ((ComboBoxItem)Strategy.SelectedItem).Tag.ToString()!;
+    private string SelectedTransfer => (Transfer?.SelectedItem as ComboBoxItem)?.Tag.ToString() ?? "STREAM";
     private void UpdateDiskSummary()
     {
         if (SourceSummary is null) return;
@@ -68,11 +69,19 @@ public partial class ClonePanel : UserControl
         SourcePartitions.ItemsSource = source?.Layout?.Partitions ?? [];
         TargetPartitions.ItemsSource = target?.Layout?.Partitions ?? [];
         var targetDevice = TargetDevice.SelectedItem as Device;
-        var required = SelectedStrategy switch { "FIT" => "RESTORE_FIT", "PRESERVE_LAYOUT" when source?.SizeBytes != target?.SizeBytes => "RESTORE_LAYOUT", _ => "RESTORE" };
-        var capable = targetDevice?.Inventory?.Capabilities.Contains(required) == true;
-        PlanButton.IsEnabled = !_busy && source is not null && target is not null && capable;
-        PreviewSummary.Text = !capable && targetDevice is not null ? $"Destino não anuncia a capacidade {required}. Selecione outra estratégia ou configure o Rescue adequado." :
-            "A origem será capturada inteira, incluindo tabela e todas as partições. FIT adapta apenas em cópia de trabalho; o preview do servidor registra a partição escolhida, deslocamentos e espaço temporário.";
+        var sourceDevice = SourceDevice.SelectedItem as Device;
+        var stream = SelectedTransfer == "STREAM";
+        var required = stream
+            ? SelectedStrategy switch { "FIT" => "STREAM_FIT", "PRESERVE_LAYOUT" when source?.SizeBytes != target?.SizeBytes => "STREAM_LAYOUT", _ => "CLONE_STREAM" }
+            : SelectedStrategy switch { "FIT" => "RESTORE_FIT", "PRESERVE_LAYOUT" when source?.SizeBytes != target?.SizeBytes => "RESTORE_LAYOUT", _ => "RESTORE" };
+        var capable = targetDevice?.Inventory?.Capabilities.Contains(required) == true
+            && (!stream || targetDevice.Inventory.Capabilities.Contains("CLONE_STREAM") && sourceDevice?.Inventory?.Capabilities.Contains("CLONE_STREAM") == true);
+        var shrink = stream && SelectedStrategy == "FIT" && source is not null && target is not null && target.SizeBytes < source.SizeBytes;
+        PlanButton.IsEnabled = !_busy && source is not null && target is not null && capable && !shrink;
+        PreviewSummary.Text = shrink ? "Reduzir para um disco menor ainda exige \"Imagem completa no servidor\": encolher o NTFS/ext4 sem alterar a origem precisa de uma cópia de trabalho." :
+            !capable && targetDevice is not null ? $"Origem/destino não anunciam a capacidade {required}. Atualize o Rescue, selecione outra estratégia ou outra transferência." :
+            stream ? "Em lotes: origem e destino ficam ligados ao mesmo tempo. O servidor guarda só uma janela pequena e apaga cada lote assim que o destino confirma a gravação; não precisa de disco extra no servidor nem de pasta temporária no Rescue. Uma falha interrompe o clone, e é preciso planejar de novo." :
+            "Imagem completa: a origem inteira fica no servidor (espaço igual à capacidade da origem) e pode ser restaurada mais de uma vez. FIT adapta em cópia de trabalho no Rescue destino.";
         TargetPartitionNameColumn.Header = "Destino atual — apagar";
         if (Sessions.SelectedItem is CloneSession selected) ShowPreview(selected.Preview);
     }
@@ -96,7 +105,7 @@ public partial class ClonePanel : UserControl
         var targetDisk = TargetDisk.SelectedItem as DiskInfo ?? throw new InvalidOperationException("Selecione o disco de destino.");
         if (sourceDevice.Id == targetDevice.Id && sourceDisk.Fingerprint == targetDisk.Fingerprint) throw new InvalidOperationException("Origem e destino são o mesmo disco.");
         var response = await Client.PostAsync<ClonePlanResponse>("/api/v1/clones/plan", new
-        { sourceDeviceId = sourceDevice.Id, sourceDiskFingerprint = sourceDisk.Fingerprint, targetDeviceId = targetDevice.Id, targetDiskFingerprint = targetDisk.Fingerprint, strategy = SelectedStrategy, consent = true });
+        { sourceDeviceId = sourceDevice.Id, sourceDiskFingerprint = sourceDisk.Fingerprint, targetDeviceId = targetDevice.Id, targetDiskFingerprint = targetDisk.Fingerprint, strategy = SelectedStrategy, consent = true, transfer = SelectedTransfer });
         if (_refresh is not null) await _refresh();
         if (Sessions.ItemsSource is CloneSession[] all) Sessions.SelectedItem = all.FirstOrDefault(x => x.Id == response.Session.Id);
         ShowPreview(response.Preview);
@@ -119,13 +128,16 @@ public partial class ClonePanel : UserControl
             FillDisks(SourceDevice, SourceDisk, session.SourceDiskFingerprint);
             FillDisks(TargetDevice, TargetDisk, session.TargetDiskFingerprint);
             Strategy.SelectedItem = Strategy.Items.OfType<ComboBoxItem>().FirstOrDefault(i => Equals(i.Tag, session.Strategy));
+            Transfer.SelectedItem = Transfer.Items.OfType<ComboBoxItem>().FirstOrDefault(i => Equals(i.Tag, session.Transfer));
             SourceSummary.Text = Describe(SourceDisk.SelectedItem as DiskInfo);
             TargetSummary.Text = Describe(TargetDisk.SelectedItem as DiskInfo);
         }
         finally { _updating = wasUpdating; }
         var capture = _jobs.FirstOrDefault(j => j.Id == session.CaptureJobId);
         var restore = _jobs.FirstOrDefault(j => j.Id == session.TargetJobId);
-        SessionProgress.Text = $"Captura: {capture?.State ?? "—"} • {capture?.ProgressText ?? "—"}\nDestino: {restore?.State ?? "aguardando imagem validada e nova autorização"} • {restore?.ProgressText ?? "—"}";
+        SessionProgress.Text = session.Transfer == "STREAM"
+            ? $"Origem (envio em lotes): {capture?.State ?? "—"} • {capture?.ProgressText ?? "—"}\nDestino (gravação e verificação): {restore?.State ?? "—"} • {restore?.ProgressText ?? "—"}"
+            : $"Captura: {capture?.State ?? "—"} • {capture?.ProgressText ?? "—"}\nDestino: {restore?.State ?? "aguardando imagem validada e nova autorização"} • {restore?.ProgressText ?? "—"}";
         ShowPreview(session.Preview);
     }
     private void ShowPreview(ClonePreview preview)
@@ -134,7 +146,7 @@ public partial class ClonePanel : UserControl
         if (preview.Blockers.Length > 0) lines.Add("BLOQUEIOS: " + string.Join("; ", preview.Blockers));
         if (preview.Actions.Length > 0) lines.Add("Plano: " + string.Join("; ", preview.Actions));
         if (preview.Warnings.Length > 0) lines.Add("Observações: " + string.Join("; ", preview.Warnings));
-        lines.Add($"Partição a adaptar: {(preview.ResizePartitionNumber > 0 ? preview.ResizePartitionNumber.ToString() : "nenhuma")} • espaço temporário requerido: {Display.Bytes(preview.ScratchBytesRequired)}");
+        lines.Add($"Partição a adaptar: {(preview.ResizePartitionNumber > 0 ? preview.ResizePartitionNumber.ToString() : "nenhuma")} • espaço temporário no Rescue: {Display.Bytes(preview.ScratchBytesRequired)} • espaço no servidor: {Display.Bytes(preview.ServerBytesRequired)}");
         lines.Add("A tabela à direita mostra o layout previsto após o clone. Confira os novos inícios e tamanhos em setores.");
         PreviewSummary.Text = string.Join("\n", lines);
         SourcePartitions.ItemsSource = preview.SourceLayout?.Partitions ?? [];

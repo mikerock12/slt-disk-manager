@@ -4,8 +4,30 @@
 
 Inicie os dois clientes pelo SLT Rescue/Linux de manutenção independente. Confira
 URL/pin e pareie cada um no painel. Origem e destino devem estar sem partições
-montadas. O agente destino deve ter `--allow-physical-write` e, para adaptação,
-`--scratch-dir` apontando para armazenamento saudável separado do destino.
+montadas. O agente destino deve ter `--allow-physical-write`.
+
+### Em lotes (padrão)
+
+Na aba Clonagem, mantenha a transferência **Em lotes**. Origem e destino ficam ligados
+ao mesmo tempo: a origem lê o disco e envia lotes de 4 MiB, o destino grava cada lote
+direto no disco. O servidor guarda no máximo 256 MiB por vez (ajustável com
+`--stream-window-chunks`) e apaga cada lote assim que o destino confirma a gravação.
+Clonar dois HDDs de 1 TB não exige 1 TB livre no servidor nem disco extra no Rescue.
+
+Funciona para EXATO, PRESERVAR e AJUSTAR quando o destino é igual ou maior. No AJUSTAR
+para disco maior, as partições posteriores (recuperação/OEM) já são gravadas deslocadas
+e a partição NTFS/ext4 é expandida no próprio destino depois de reler e comparar todos os
+dados. Autorize a origem e depois o destino (APAGAR no painel e no teclado local do
+Rescue). A origem termina assim que enviar o último lote; o destino segue até verificar.
+Uma queda de rede, de energia ou cancelamento interrompe o clone: o destino fica parcial
+e é preciso planejar de novo, com a origem intacta. Não há imagem para repetir.
+
+### Imagem completa no servidor
+
+Use quando precisar reduzir para um disco menor, restaurar a mesma origem mais de uma
+vez ou guardar a imagem. O servidor precisa de espaço igual à capacidade inteira da
+origem. Para AJUSTAR nesse modo, o agente destino precisa de `--scratch-dir` apontando
+para armazenamento saudável separado do destino.
 
 Na ISO SLT Rescue, use `sudo slt-start` para configurar Ethernet ou Wi-Fi, conferir
 URL/pin e iniciar o agente. Para AJUSTAR, prepare antes um armazenamento temporário

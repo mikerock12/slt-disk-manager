@@ -55,9 +55,25 @@ internal static class Program
             var targetDevice = (ComboBox)clonePanel.FindName("TargetDevice"); targetDevice.SelectedItem = target;
             ((ComboBox)clonePanel.FindName("SourceDisk")).SelectedIndex = 0;
             ((ComboBox)clonePanel.FindName("TargetDisk")).SelectedIndex = 0;
-            Check(!((Button)clonePanel.FindName("PlanButton")).IsEnabled, "PRESERVE_LAYOUT bloqueado sem capability RESTORE_LAYOUT");
-            ((ComboBox)clonePanel.FindName("Strategy")).SelectedIndex = 0;
-            Check(((Button)clonePanel.FindName("PlanButton")).IsEnabled, "EXACT_RAW disponível quando destino anuncia RESTORE");
+            var planButton = (Button)clonePanel.FindName("PlanButton");
+            var strategy = (ComboBox)clonePanel.FindName("Strategy"); var transfer = (ComboBox)clonePanel.FindName("Transfer");
+            Check(transfer.SelectedIndex == 0 && !planButton.IsEnabled, "Clone em lotes é o padrão e exige CLONE_STREAM/STREAM_LAYOUT");
+            transfer.SelectedIndex = 1;
+            Check(!planButton.IsEnabled, "PRESERVE_LAYOUT com imagem bloqueado sem capability RESTORE_LAYOUT");
+            strategy.SelectedIndex = 0;
+            Check(planButton.IsEnabled, "EXACT_RAW com imagem completa disponível quando destino anuncia RESTORE");
+            transfer.SelectedIndex = 0;
+            Check(!planButton.IsEnabled, "Em lotes bloqueado quando origem/destino não anunciam CLONE_STREAM");
+            var streamSource = source with { Inventory = source.Inventory! with { Capabilities = ["CAPTURE", "RESTORE", "CLONE_STREAM"], Disks = [source.Inventory.Disks[0] with { SizeBytes = 8192 }] } };
+            var streamTarget = target with { Inventory = target.Inventory! with { Capabilities = ["RESTORE", "CLONE_STREAM", "STREAM_LAYOUT", "STREAM_FIT"], Disks = [target.Inventory.Disks[0] with { SizeBytes = 4096 }] } };
+            clonePanel.UpdateData([streamSource, streamTarget], [], []);
+            sourceDevice.SelectedItem = streamSource; targetDevice.SelectedItem = streamTarget;
+            ((ComboBox)clonePanel.FindName("SourceDisk")).SelectedIndex = 0; ((ComboBox)clonePanel.FindName("TargetDisk")).SelectedIndex = 0;
+            strategy.SelectedIndex = 0;
+            Check(planButton.IsEnabled, "Em lotes disponível com CLONE_STREAM nos dois Rescue");
+            strategy.SelectedIndex = 2;
+            Check(!planButton.IsEnabled && ((TextBlock)clonePanel.FindName("PreviewSummary")).Text.Contains("Imagem completa no servidor"), "Redução em lotes bloqueada e orienta usar imagem completa");
+            strategy.SelectedIndex = 0;
             var filesPanel = (FilesPanel)main.FindName("Files");
             var fileDevice = source with { Inventory = source.Inventory! with { FileRoots = [new("docs", "Documentos", true, true)] } };
             filesPanel.UpdateData([fileDevice], []);
@@ -112,7 +128,7 @@ internal static class Program
                 var renderSource = source with { Inventory = source.Inventory! with { Disks = [source.Inventory.Disks[0] with { SizeBytes = 500107862016, Layout = layout }] } };
                 var renderTarget = target with { Inventory = target.Inventory! with { Disks = [target.Inventory.Disks[0] with { SizeBytes = 1000204886016, Layout = layout }] } };
                 var preview = new ClonePreview([], ["Fixture de QA: boot em outro hardware requer homologação."],
-                    ["Preservar EFI, MSR, Windows e Recovery; adaptar NTFS 3 em cópia de trabalho.", "Deslocar Recovery e reposicionar GPT secundária antes de validar o destino."], layout, after, 3, 1500000000000);
+                    ["Preservar EFI, MSR, Windows e Recovery; adaptar NTFS 3 em cópia de trabalho.", "Deslocar Recovery e reposicionar GPT secundária antes de validar o destino."], layout, after, 3, 1500000000000, 500107862016);
                 var session = new CloneSession("fixture-clone", source.Id, source.Inventory.Disks[0].Fingerprint, target.Id, target.Inventory.Disks[0].Fingerprint,
                     "FIT", "fixture-capture", null, "fixture-image", "IMAGE_READY", now, preview);
                 clonePanel.UpdateData([renderSource, renderTarget], [session], []);
