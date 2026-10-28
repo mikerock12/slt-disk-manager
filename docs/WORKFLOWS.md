@@ -7,6 +7,35 @@ URL/pin e pareie cada um no painel. Origem e destino devem estar sem partições
 montadas. O agente destino deve ter `--allow-physical-write` e, para adaptação,
 `--scratch-dir` apontando para armazenamento saudável separado do destino.
 
+Na ISO SLT Rescue, use `sudo slt-start` para configurar Ethernet ou Wi-Fi, conferir
+URL/pin e iniciar o agente. Para AJUSTAR, prepare antes um armazenamento temporário
+independente, já formatado e com espaço livre suficiente. Não use a origem, o destino
+ou o pendrive de boot como scratch. Identifique o dispositivo pelo modelo, serial,
+tamanho e UUID; não suponha que `/dev/sdb` será sempre o mesmo disco:
+
+```bash
+lsblk -o NAME,SIZE,MODEL,SERIAL,FSTYPE,UUID,MOUNTPOINTS
+```
+
+Depois de conferir fisicamente o disco extra, monte apenas sua partição de scratch.
+O exemplo abaixo exige substituir UUID_DO_SCRATCH pelo UUID real. Ele não formata
+nem apaga a partição; se houver erro de filesystem, pare e revise esse armazenamento.
+Não monte as partições de origem/destino e não use opções para remover hibernação.
+
+```bash
+sudo mkdir -p /mnt/slt-scratch
+sudo mount /dev/disk/by-uuid/UUID_DO_SCRATCH /mnt/slt-scratch
+findmnt /mnt/slt-scratch
+df -h /mnt/slt-scratch
+sudo mkdir -p /mnt/slt-scratch/SLT
+sudo slt-start
+```
+
+Informe `/mnt/slt-scratch/SLT` no assistente e habilite escrita somente no cliente
+destino. Ao finalizar todas as tarefas, encerre o agente e use
+`sudo umount /mnt/slt-scratch` antes de remover o armazenamento extra. Se estiver
+ocupado, não force a remoção; confira tarefas/processos ainda ativos.
+
 Na aba Clonagem, selecione origem, disco, destino e estratégia:
 
 - EXATO: todos os setores, com a mesma capacidade e tamanho de setor.

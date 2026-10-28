@@ -7,12 +7,27 @@ O gerador cria uma pasta nova; não monta imagens, formata USB nem altera o boot
 ## Preparação
 
 1. Crie seu pendrive oficial de instalação Windows AMD64 com ferramentas licenciadas.
-2. Compile `cmd/slt-winpe-agent` com `GOOS=windows GOARCH=amd64 CGO_ENABLED=0`.
+2. O pacote Windows já inclui `windows-pe/slt-winpe-agent.exe`. Somente no checkout
+   de desenvolvimento, compile `cmd/slt-winpe-agent` com
+   `GOOS=windows GOARCH=amd64 CGO_ENABLED=0` ou use `scripts/build.ps1`.
 3. Separe armazenamento físico **NTFS**, saudável, com espaço para WIM/ESD + 2 GiB.
    Ele nunca pode ser o disco a instalar. FAT32 não fornece a ACL privada necessária;
    RAM X: é recusada para a mídia grande. Confira a letra desse armazenamento no WinPE.
 4. No servidor, gere o kit abaixo. O endereço e o pin são públicos e devem ser
    conferidos diretamente no controlador; não use token administrativo no pendrive.
+
+Na raiz do pacote extraído (ou da pasta de instalação, com o componente offline):
+
+```powershell
+./windows-pe/New-WinPEKit.ps1 `
+  -OutputDirectory "$env:USERPROFILE/Desktop/SLT-WinPE-Kit" `
+  -AgentPath ./windows-pe/slt-winpe-agent.exe `
+  -Server https://192.168.1.10:7443 -ServerPin HASH_SHA256_64_HEXADECIMAIS `
+  -ScratchDirectory 'E:\SLT-Scratch'
+```
+
+A pasta de saída deve ser nova e seu diretório pai deve existir. Ajuste IP, pin e
+letra do scratch para a bancada. No checkout do código-fonte, use este exemplo:
 
 ```powershell
 ./rescue/windows-pe/New-WinPEKit.ps1 `

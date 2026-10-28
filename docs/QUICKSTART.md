@@ -48,9 +48,13 @@ Não são executados CHKDSK de reparo nem testes de escrita no Windows.
 
 ## Captura, restauração e clone
 
-1. Primeiro valide em arquivos sintéticos (`scripts/test-all.ps1 -Integration`).
-2. Inicie Linux de manutenção num disco/USB independente e execute o agente
-   Rescue Linux incluído na pasta `rescue`; confira pin e faça novo pareamento.
+1. Primeiro homologue em VM/discos descartáveis. No checkout de desenvolvimento,
+   `scripts/test-all.ps1 -Integration` executa os testes sintéticos; esse comando
+   exige SDK/fonte e não está incluído no pacote do usuário.
+2. Baixe a ISO SLT Rescue em Releases do repositório, confira seu SHA256 e prepare
+   uma mídia de boot independente usando sua ferramenta de gravação de ISO.
+   Inicie por ela e execute `sudo slt-start`; confira pin e faça novo pareamento.
+   O binário na pasta `rescue` serve para um Linux já preparado, conforme seu README.
 3. O disco de origem deve estar offline, sem partições montadas, com serial e
    fingerprint confiáveis. A imagem RAW exige espaço equivalente à capacidade
    inteira do disco, incluindo setores vazios.
@@ -77,7 +81,7 @@ A aba Instalar Windows importa sua ISO/WIM/ESD e permite escolher edição e des
 WinPE. O kit em windows-pe prepara a inicialização do agente no pendrive oficial,
 sem incluir mídia Microsoft. Clone nos clientes1/2 e instalação no cliente3 podem
 andar em paralelo. Instalação/primeiro boot Windows ainda exigem homologação em VM;
-consulte WORKFLOWS.md e windows-pe/LEIA-ME.md para preparar o ambiente.
+consulte WORKFLOWS.md e windows-pe/README.md para preparar o ambiente.
 
 ## Falhas, consentimento e dados
 
