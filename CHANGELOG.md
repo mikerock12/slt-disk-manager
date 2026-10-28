@@ -1,6 +1,6 @@
 # Changelog
 
-## Não publicado — clone em lotes
+## 0.1.0-beta.4 — 2026-10-28 — clone em lotes
 
 Clone cliente → cliente em lotes, agora padrão no painel: origem e destino ficam ligados
 ao mesmo tempo, o servidor guarda no máximo 256 MiB (ajustável) e apaga cada lote
