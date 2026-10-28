@@ -29,7 +29,7 @@ public record CodeRequest(string Code);
 public record ApprovalRequest(string Challenge);
 public record PlanRequest(string Kind, string DeviceId, string DiskFingerprint, string? ImageId, bool Consent, FileRequest? File = null, [property:JsonPropertyName("clone")] CloneOptions? CloneOptions = null, DeploymentOptions? Deployment = null);
 public record JobPlan(string Id, string Kind, string DeviceId, string DiskFingerprint, string DiskPath,
-    long DiskSizeBytes, int LogicalSectorBytes, string ImageId, string Challenge, DateTimeOffset ExpiresAtUtc, bool Consent, FileRequest? File = null, [property:JsonPropertyName("clone")] CloneOptions? CloneOptions = null, DeploymentOptions? Deployment = null);
+    long DiskSizeBytes, int LogicalSectorBytes, string ImageId, string Challenge, DateTimeOffset ExpiresAtUtc, bool Consent, FileRequest? File = null, [property:JsonPropertyName("clone")] CloneOptions? CloneOptions = null, DeploymentOptions? Deployment = null, string? StreamId = null);
 public record SignedAssignment(string Payload, string Signature);
 public record Progress(string Phase, long BytesProcessed, long BytesTotal);
 public record JobResult(bool Success, string Message, string Details);
@@ -42,10 +42,18 @@ public record DiskLayout(string TableType, int SectorSize, string DiskIdentifier
 public record LayoutPartition(int Number, long StartLba, long LengthLba, string Type, string Uuid, string Name, string Attributes, bool Bootable, string FileSystem, long? MinimumSizeBytes = null);
 public record CloneOptions(string Strategy, int ResizePartitionNumber = 0);
 public record CaptureCompletion(DiskLayout? Layout = null);
-public record CloneRequest(string SourceDeviceId, string SourceDiskFingerprint, string TargetDeviceId, string TargetDiskFingerprint, string Strategy, bool Consent);
-public record ClonePreview(string[] Blockers, string[] Warnings, string[] Actions, DiskLayout? SourceLayout, DiskLayout? TargetLayout, int ResizePartitionNumber, long ScratchBytesRequired);
+public record CloneRequest(string SourceDeviceId, string SourceDiskFingerprint, string TargetDeviceId, string TargetDiskFingerprint, string Strategy, bool Consent, string? Transfer = null);
+public record ClonePreview(string[] Blockers, string[] Warnings, string[] Actions, DiskLayout? SourceLayout, DiskLayout? TargetLayout, int ResizePartitionNumber, long ScratchBytesRequired, long ServerBytesRequired = 0);
 public record CloneSession(string Id, string SourceDeviceId, string SourceDiskFingerprint, string TargetDeviceId, string TargetDiskFingerprint,
-    string Strategy, string CaptureJobId, string? TargetJobId, string ImageId, string State, DateTimeOffset CreatedAtUtc, ClonePreview Preview);
+    string Strategy, string CaptureJobId, string? TargetJobId, string ImageId, string State, DateTimeOffset CreatedAtUtc, ClonePreview Preview, string Transfer = "IMAGE", string? StreamId = null);
+// Batch relay between two online Rescue agents. Chunk hashes stay in the catalog; chunk
+// bytes are deleted as soon as the target acknowledges them durably written.
+public record CloneStream(string Id, string SessionId, string SourceJobId, string TargetJobId, string SourceDeviceId, string SourceFingerprint,
+    long LogicalSizeBytes, int LogicalSectorBytes, DiskLayout? Layout, string State, int WindowChunks, int AckedThrough, bool SourceStarted, bool SourceComplete, DateTimeOffset CreatedAtUtc, string? Error = null);
+public record StreamStatus(string Id, string State, long LogicalSizeBytes, int LogicalSectorBytes, string SourceFingerprint, DiskLayout? Layout,
+    int TotalChunks, int NextSequence, int AckedThrough, bool SourceStarted, bool SourceComplete, List<ImageChunk> Pending);
+public record StreamStart(DiskLayout? Layout = null);
+public record StreamAck(int Through);
 public record FileRootInfo(string Id, string Label, bool CanRead, bool CanWrite);
 public record FileRequest(string RootId, string RelativePath = "", string[]? Paths = null, string BundleId = "", string Name = "", string? Cursor = null, int PageSize = 100);
 public record FileListRequest(string DeviceId, string RootId, string RelativePath, string? Cursor, int PageSize, bool Consent);

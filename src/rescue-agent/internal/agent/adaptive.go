@@ -218,6 +218,12 @@ func validateFilesystem(ctx context.Context, path, fs string, resized bool) erro
 }
 
 func resizeFilesystem(ctx context.Context, path, fs string, oldSize, newSize int64) error {
+	return resizeFilesystemAt(ctx, path, fs, oldSize, newSize, true)
+}
+
+// resizeFilesystemAt resizes a private partition file (file=true) or a loop device
+// already sized to newSize over the target disk (file=false).
+func resizeFilesystemAt(ctx context.Context, path, fs string, oldSize, newSize int64, file bool) error {
 	if newSize == oldSize {
 		return nil
 	}
@@ -226,7 +232,7 @@ func resizeFilesystem(ctx context.Context, path, fs string, oldSize, newSize int
 	}
 	switch fs {
 	case "ntfs":
-		if newSize > oldSize {
+		if file && newSize > oldSize {
 			if err := os.Truncate(path, newSize); err != nil {
 				return err
 			}
@@ -237,8 +243,10 @@ func resizeFilesystem(ctx context.Context, path, fs string, oldSize, newSize int
 		if _, err := tool(ctx, strings.NewReader("y\n"), "ntfsresize", "--size", strconv.FormatInt(newSize, 10), path); err != nil {
 			return err
 		}
-		if err := os.Truncate(path, newSize); err != nil {
-			return err
+		if file {
+			if err := os.Truncate(path, newSize); err != nil {
+				return err
+			}
 		}
 		actual, err := ntfsGeometry(path)
 		if err != nil {
@@ -252,7 +260,7 @@ func resizeFilesystem(ctx context.Context, path, fs string, oldSize, newSize int
 		if _, err := tool(ctx, nil, "e2fsck", "-f", "-p", path); err != nil {
 			return err
 		}
-		if newSize > oldSize {
+		if file && newSize > oldSize {
 			if err := os.Truncate(path, newSize); err != nil {
 				return err
 			}
@@ -260,8 +268,10 @@ func resizeFilesystem(ctx context.Context, path, fs string, oldSize, newSize int
 		if _, err := tool(ctx, nil, "resize2fs", path, strconv.FormatInt(newSize/512, 10)+"s"); err != nil {
 			return err
 		}
-		if err := os.Truncate(path, newSize); err != nil {
-			return err
+		if file {
+			if err := os.Truncate(path, newSize); err != nil {
+				return err
+			}
 		}
 	default:
 		return errors.New("filesystem não redimensionável")

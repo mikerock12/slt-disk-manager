@@ -152,7 +152,13 @@ func NewInventoryWithScratch(ctx context.Context, deviceID, fixtureDir, scratchD
 		return Inventory{}, err
 	}
 	hostname, _ := os.Hostname()
-	capabilities := []string{"INVENTORY", "SMART", "CAPTURE", "RESTORE"}
+	capabilities := []string{"INVENTORY", "SMART", "CAPTURE", "RESTORE", "CLONE_STREAM"}
+	if adaptiveToolsAvailable(false) {
+		capabilities = append(capabilities, "STREAM_LAYOUT")
+		if adaptiveToolsAvailable(true) && loopToolsAvailable() {
+			capabilities = append(capabilities, "STREAM_FIT")
+		}
+	}
 	notes := []string{"Captura raw de disco offline. Restauração física exige aprovação local adicional. Boot e hardware ainda exigem homologação."}
 	if runtime.GOOS == "linux" && adaptiveToolsAvailable(false) {
 		for i := range disks {

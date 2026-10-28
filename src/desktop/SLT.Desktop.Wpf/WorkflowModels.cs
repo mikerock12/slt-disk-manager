@@ -22,11 +22,12 @@ public sealed record DeploymentMedia(string Id, string Name, string FileName, lo
     public string Label => $"{Name} • {Size} • {State}";
 }
 public sealed record ClonePreview(string[] Blockers, string[] Warnings, string[] Actions,
-    DiskLayout? SourceLayout, DiskLayout? TargetLayout, int ResizePartitionNumber, long ScratchBytesRequired);
+    DiskLayout? SourceLayout, DiskLayout? TargetLayout, int ResizePartitionNumber, long ScratchBytesRequired, long ServerBytesRequired = 0);
 public sealed record CloneSession(string Id, string SourceDeviceId, string SourceDiskFingerprint,
     string TargetDeviceId, string TargetDiskFingerprint, string Strategy, string CaptureJobId,
-    string? TargetJobId, string ImageId, string State, DateTimeOffset CreatedAtUtc, ClonePreview Preview)
+    string? TargetJobId, string ImageId, string State, DateTimeOffset CreatedAtUtc, ClonePreview Preview, string Transfer = "IMAGE", string? StreamId = null)
 {
+    public string TransferLabel => Transfer == "STREAM" ? "Em lotes" : "Imagem";
     public string Created => CreatedAtUtc.ToLocalTime().ToString("dd/MM HH:mm:ss");
     [JsonIgnore] public string SourceName { get; set; } = "";
     [JsonIgnore] public string TargetName { get; set; } = "";

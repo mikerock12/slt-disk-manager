@@ -61,8 +61,9 @@ slt_start_main() {
       printf 'Digite PERMITIR GRAVACAO para habilitar essa capacidade nesta sessão: '
       IFS= read -r confirmation || return 2
       [[ "$confirmation" == 'PERMITIR GRAVACAO' ]] || { echo 'Gravação não habilitada.' >&2; return 2; }
-      printf 'Pasta temporária saudável, já preparada FORA do destino (obrigatória para adaptar tamanho).\n'
-      printf 'Caminho absoluto, ou vazio para restauração exata sem adaptação: '
+      printf 'Clone em lotes (padrão do painel) grava direto no destino e não usa pasta temporária.\n'
+      printf 'Pasta temporária FORA do destino só para restaurar imagem completa com adaptação de tamanho.\n'
+      printf 'Caminho absoluto, ou vazio para clone em lotes ou restauração exata: '
       IFS= read -r scratch || return 2
       arguments+=(--allow-physical-write)
       if [[ -n "$scratch" ]]; then

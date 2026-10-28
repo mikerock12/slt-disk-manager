@@ -56,6 +56,24 @@ type Plan struct {
 	Consent            bool               `json:"consent"`
 	Clone              *CloneOptions      `json:"clone,omitempty"`
 	Deployment         *DeploymentOptions `json:"deployment,omitempty"`
+	StreamID           string             `json:"streamId,omitempty"`
+}
+
+// StreamStatus is the server view of a batch clone: hashes of the batches not yet
+// acknowledged by the target. Acknowledged batch bytes no longer exist on the server.
+type StreamStatus struct {
+	ID                 string       `json:"id"`
+	State              string       `json:"state"`
+	LogicalSizeBytes   int64        `json:"logicalSizeBytes"`
+	LogicalSectorBytes int          `json:"logicalSectorBytes"`
+	SourceFingerprint  string       `json:"sourceFingerprint"`
+	Layout             *DiskLayout  `json:"layout,omitempty"`
+	TotalChunks        int          `json:"totalChunks"`
+	NextSequence       int          `json:"nextSequence"`
+	AckedThrough       int          `json:"ackedThrough"`
+	SourceStarted      bool         `json:"sourceStarted"`
+	SourceComplete     bool         `json:"sourceComplete"`
+	Pending            []ImageChunk `json:"pending"`
 }
 
 type SignedAssignment struct {

@@ -56,12 +56,15 @@ Não são executados CHKDSK de reparo nem testes de escrita no Windows.
    Inicie por ela e execute `sudo slt-start`; confira pin e faça novo pareamento.
    O binário na pasta `rescue` serve para um Linux já preparado, conforme seu README.
 3. O disco de origem deve estar offline, sem partições montadas, com serial e
-   fingerprint confiáveis. A imagem RAW exige espaço equivalente à capacidade
-   inteira do disco, incluindo setores vazios.
-4. Crie e aprove CAPTURE. Aguarde tarefa COMPLETED e imagem AVAILABLE.
-5. Use a aba Clonagem para coordenar os dois clientes, preservar layout em disco
-   maior ou ajustar NTFS/ext4 em disco menor/maior. RESTORE RAW exato exige a mesma
-   capacidade e tamanho de setor lógico. Consulte WORKFLOWS.md para requisitos de scratch.
+   fingerprint confiáveis.
+4. Na aba Clonagem, a transferência **Em lotes** (padrão) liga origem e destino ao
+   mesmo tempo: o servidor guarda só uma janela de 256 MiB e apaga cada lote depois
+   que o destino o grava, sem disco extra. Serve para EXATO, PRESERVAR e AJUSTAR para
+   disco igual ou maior. Autorize a origem e depois o destino.
+5. **Imagem completa no servidor** fica para reduzir para disco menor, restaurar a
+   mesma origem várias vezes ou guardar a imagem: exige espaço igual à capacidade
+   inteira da origem; crie e aprove CAPTURE e aguarde imagem AVAILABLE. RESTORE RAW
+   exato exige a mesma capacidade e setor lógico. Consulte WORKFLOWS.md.
 6. Digite o identificador `APAGAR ...` no painel. O Rescue precisa ter sido iniciado
    com `--allow-physical-write` e exige a mesma confirmação no teclado local.
 7. Aguarde a releitura/verificação. Igualdade de bytes não comprova boot em outro

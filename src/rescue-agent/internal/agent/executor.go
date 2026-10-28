@@ -94,8 +94,16 @@ func (r *Runner) execute(ctx context.Context, p Plan) (string, error) {
 		}
 		return string(data), nil
 	case "CAPTURE":
+		if p.StreamID != "" {
+			return "Origem enviada em lotes; o servidor descarta cada lote após a gravação no destino", r.sendStream(ctx, p, d)
+		}
 		return "Imagem raw capturada e validada no repositório", r.capture(ctx, p, d)
 	case "RESTORE":
+		if p.StreamID != "" {
+			err := r.receiveStream(ctx, p, d)
+			details, _ := json.Marshal(r.LastRestoreReport)
+			return string(details), err
+		}
 		err := r.restore(ctx, p, d)
 		details, _ := json.Marshal(r.LastRestoreReport)
 		return string(details), err

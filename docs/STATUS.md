@@ -1,6 +1,6 @@
 # Matriz de entrega e homologação
 
-Esta é a beta 0.1.0-beta.3.3, não o aceite integral da seção 25 da especificação.
+Esta é a beta 0.1.0-beta.4, não o aceite integral da seção 25 da especificação.
 Downloads e evidências atuais em ENTREGA-2026-10-28.md; registros anteriores são históricos.
 
 | Requisito | Estado nesta entrega | Evidência/limite |
@@ -17,7 +17,8 @@ Downloads e evidências atuais em ENTREGA-2026-10-28.md; registros anteriores s�
 | Reboot Windows→Rescue | Pendente | Boot USB assistido, sem alterações automáticas no firmware |
 | CAPTURE/RESTORE raw | Implementado | Testes de chunks, corrupção e revalidação; físico não homologado |
 | Clone A→servidor→B | Assistente integrado | Captura validada + plano destino; GPT/MBR, NTFS/ext4 menor/maior em CI Linux |
-| Clone direto/batch | Pendente | Fora do transporte atual |
+| Clone em lotes A→B | Implementado na beta.4 | Janela limitada no servidor e descarte após confirmação; EXATO/PRESERVAR/AJUSTAR maior; testes Controller, Go, E2E dois agentes e Linux real em CI; redução ainda só com imagem; sem retomada após falha; físico não homologado |
+| Clone em lote para vários destinos | Pendente | Um destino por clone |
 | Partclone inteligente | Script local candidato | Não integra catálogo/transporte do Controller |
 | ddrescue com mapfile | Script local candidato | Retomada local; não integra fila do Controller |
 | Explorar/copiar arquivos remotamente | Implementado | Escopos locais; listagem paginada, backup/envio e importação local; E2E5/5 |
