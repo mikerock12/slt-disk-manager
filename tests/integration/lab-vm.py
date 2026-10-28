@@ -182,7 +182,7 @@ class Lab:
         self.state_path = self.ws / "lab.json"
         self.state = json.loads(self.state_path.read_text()) if self.state_path.exists() else {"createdAtUtc": datetime.now(timezone.utc).isoformat(), "port": free_port(), "evidence": {}}
         self.save()
-        self.processes, self.handles = [], []
+        self.processes, self.handles, self.vms = [], [], []
         self.accel = self.detect_accel()
         self.connection = None
 
@@ -275,6 +275,8 @@ class Lab:
         return next((e for e in self.api("GET", "/api/v1/enrollments") if e["mode"] == mode and e["status"] == "PENDING" and e["id"] not in exclude), None)
 
     def close(self):
+        for vm in self.vms:
+            vm.stop()
         for p in reversed(self.processes):
             if p.poll() is None:
                 p.terminate()
@@ -299,12 +301,13 @@ class VM:
         self.scratch = lab.ws / f"{name}-pendrive.qcow2"
         self.process = self.qmp = self.serial = None
         self.shots = 0
+        lab.vms.append(self)
 
     def start(self, cdrom=None, seed=None, scratch=False, memory=4096):
         assert self.process is None or self.process.poll() is not None
         qmp_port, serial_port = free_port(), free_port()
         args = [str(QEMU_DIR / "qemu-system-x86_64.exe"), "-L", str(QEMU_DIR / "share"), "-name", f"SLT LAB {self.name}",
-                "-machine", f"q35,accel={self.lab.accel}", "-m", str(memory), "-smp", "2", "-display", "none", "-vga", "std",
+                "-machine", f"q35,accel={self.lab.accel}", "-cpu", "host" if self.lab.accel == "whpx" else "max", "-m", str(memory), "-smp", "2", "-display", "none", "-vga", "std",
                 "-rtc", "base=localtime", "-qmp", f"tcp:127.0.0.1:{qmp_port},server=on,wait=off",
                 "-serial", f"tcp:127.0.0.1:{serial_port},server=on,wait=off",
                 "-drive", f"file={self.disk},if=none,id=disk,format=qcow2,cache=writeback",
@@ -414,10 +417,9 @@ def rescue_start_agent(lab, vm, write, used):
         vm.serial.send("1")
     match = vm.serial.expect(r"código (\d{8})", 180, start)
     enrollment = wait_for(lambda: next((e for e in lab.api("GET", "/api/v1/enrollments") if e["mode"] == "RESCUE" and e["status"] == "PENDING" and e["code"] == match.group(1) and e["id"] not in used), None), "pareamento Rescue " + vm.name, 120)
-    lab.api("POST", f"/api/v1/enrollments/{enrollment['id']}/approve", {"code": match.group(1)})
+    approved = lab.api("POST", f"/api/v1/enrollments/{enrollment['id']}/approve", {"code": match.group(1)})
     used.add(enrollment["id"])
-    approved = wait_for(lambda: next((e for e in lab.api("GET", "/api/v1/enrollments") if e["id"] == enrollment["id"] and e["status"] == "APPROVED"), None), "aprovação", 30)
-    device = wait_for(lambda: next((d for d in lab.api("GET", "/api/v1/devices") if d["id"] == approved.get("deviceId") and d.get("inventory")), None), "inventário Rescue " + vm.name, 180)
+    device = wait_for(lambda: next((d for d in lab.api("GET", "/api/v1/devices") if d["id"] == approved["deviceId"] and d.get("inventory")), None), "inventário Rescue " + vm.name, 180)
     log(f"{vm.name} pareado no Rescue (código conferido no console {match.group(1)}): {device['id']}")
     return device
 
@@ -486,10 +488,9 @@ def winpe_pair(lab, vm, used):
             vm.shot("winpe")
         return lab.pending_enrollment("WINPE", used)
     enrollment = wait_for(find, "pareamento WinPE " + vm.name, 2400, 3)
-    lab.api("POST", f"/api/v1/enrollments/{enrollment['id']}/approve", {"code": enrollment["code"]})
+    approved = lab.api("POST", f"/api/v1/enrollments/{enrollment['id']}/approve", {"code": enrollment["code"]})
     used.add(enrollment["id"])
-    approved = wait_for(lambda: next((e for e in lab.api("GET", "/api/v1/enrollments") if e["id"] == enrollment["id"] and e["status"] == "APPROVED"), None), "aprovação", 30)
-    device = wait_for(lambda: next((d for d in lab.api("GET", "/api/v1/devices") if d["id"] == approved.get("deviceId") and d.get("inventory")), None), "inventário WinPE " + vm.name, 300)
+    device = wait_for(lambda: next((d for d in lab.api("GET", "/api/v1/devices") if d["id"] == approved["deviceId"] and d.get("inventory")), None), "inventário WinPE " + vm.name, 300)
     vm.shot("winpe-pareado")
     log(f"{vm.name} pareado no WinPE: {device['id']} firmware={[n for n in device['inventory']['notes'] if 'firmware' in n]}")
     return device

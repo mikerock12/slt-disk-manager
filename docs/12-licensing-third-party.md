@@ -23,3 +23,16 @@ Não são distribuídos Windows, WinPE, WIM, ISO Microsoft, chaves de ativação
 drivers Windows de fabricantes. O firmware Linux fornecido pelos pacotes Debian
 acompanha a ISO sob as respectivas licenças. O operador fornece mídia Windows e licenças legítimas. Os perfis
 documentados não contornam criptografia, Secure Boot nem ativação.
+
+## Ferramentas embutidas no pacote Windows
+
+- `server/tools/7-Zip`: 7-Zip (Igor Pavlov), GNU LGPL com cláusulas BSD e restrição
+  unRAR em `License.txt`, copiado da instalação oficial do ambiente de build e usado
+  só para ler ISO/WIM/ESD importadas pelo operador e extrair `MBR2GPT.EXE` dessa mídia.
+- `client/tools/smartmontools`: `smartctl.exe` 7.5, GNU GPL versão 2 ou posterior
+  (`COPYING.txt`), extraído do instalador oficial
+  `smartmontools-7.5.win32-setup.exe` cujo SHA256 é fixado em
+  `scripts/package-release.ps1`. Código-fonte correspondente:
+  https://github.com/smartmontools/smartmontools/releases/tag/RELEASE_7_5.
+- O runtime .NET autocontido inclui o runtime C++ que ele usa; o UCRT vem do Windows
+  10/11 e é conferido pelo instalador. Nenhum virtualizador é instalado ou necessário.

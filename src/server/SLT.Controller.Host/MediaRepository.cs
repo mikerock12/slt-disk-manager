@@ -40,8 +40,8 @@ public sealed class MediaRepository
             WindowsImage[]? linux=null;
             if(ext==".iso")
             {
-                var seven=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),"7-Zip","7z.exe");
-                Require(File.Exists(seven),"Instale 7-Zip para extrair ISO, ou importe diretamente sources/install.esd ou install.wim.");
+                var seven=SevenZip();
+                Require(File.Exists(seven),"7-Zip não encontrado no pacote do servidor (tools\\7-Zip) nem instalado; reinstale o servidor ou importe diretamente sources/install.esd ou install.wim.");
                 linux=ReadLinuxIso(seven,source);
             }
             if(linux!=null)
@@ -52,7 +52,7 @@ public sealed class MediaRepository
             }
             else if(ext==".iso")
             {
-                var seven=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),"7-Zip","7z.exe");
+                var seven=SevenZip();
                 string? member=null;
                 foreach(var candidate in new[]{"sources/install.esd","sources/install.wim"})
                 {
@@ -108,6 +108,12 @@ public sealed class MediaRepository
         var version=System.Text.RegularExpressions.Regex.Match(name,@"\b\d{2}\.\d{2}(\.\d+)?\b").Value;
         return [new(1,name,"Linux em camadas (casper/"+squash+"); instalação pelo SLT Rescue","AMD64",version,Math.Max(16L*1024*1024*1024,bytes+bytes/2+4L*1024*1024*1024),"pt-BR")];
     }
+    // The server package ships 7-Zip in tools-Zip; an installed 7-Zip is only a fallback.
+    public static string SevenZip()
+    {
+        var bundled=Path.Combine(AppContext.BaseDirectory,"tools","7-Zip","7z.exe");
+        return File.Exists(bundled)?bundled:Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),"7-Zip","7z.exe");
+    }
     private static ProcessStartInfo Start(string exe,string[] args)
     {var p=new ProcessStartInfo(exe){UseShellExecute=false,CreateNoWindow=true,RedirectStandardOutput=true,RedirectStandardInput=true};foreach(var a in args)p.ArgumentList.Add(a);return p;}
     private static string ReadLimited(StreamReader reader,int maximum)
@@ -147,8 +153,8 @@ public sealed class MediaRepository
         var dir=Path.Combine(MediaPath(media.Id),"tools",index.ToString(System.Globalization.CultureInfo.InvariantCulture));var path=Path.Combine(dir,name);
         if(!File.Exists(path))
         {
-            var seven=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),"7-Zip","7z.exe");
-            Require(File.Exists(seven),"Instale 7-Zip para extrair a ferramenta da mídia Windows.");
+            var seven=SevenZip();
+            Require(File.Exists(seven),"7-Zip não encontrado no pacote do servidor (tools\\7-Zip) nem instalado.");
             Directory.CreateDirectory(dir);
             using var process=Process.Start(Start(seven,["e","-y","-bso0","-bsp0","-o"+dir,Path.Combine(MediaPath(media.Id),media.FileName),$"{index}/Windows/System32/{name}"])) ?? throw new IOException("7-Zip não iniciou.");
             process.StandardInput.Close();_=ReadLimited(process.StandardOutput,1024*1024);
