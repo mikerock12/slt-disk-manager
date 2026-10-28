@@ -450,6 +450,9 @@ func (r *winPERunner) deploy(ctx context.Context, p Plan) (details string, deplo
 	if err != nil {
 		return "", err
 	}
+	if err = r.report(ctx, p, "AWAITING_LOCAL_CONFIRMATION", 0, disk.SizeBytes); err != nil {
+		return "", err
+	}
 	fmt.Fprintf(r.options.Output, "\nAPAGAR disco %s | %s | serial %s | %d bytes.\nImagem: %s, edição %d. Confirme LOCALMENTE digitando %q: ", disk.Path, disk.Model, disk.Serial, disk.SizeBytes, media.Name, p.Deployment.ImageIndex, p.Challenge)
 	text, err := bufio.NewReader(io.LimitReader(r.options.Input, 4097)).ReadString('\n')
 	if err != nil || strings.TrimSpace(text) != p.Challenge {

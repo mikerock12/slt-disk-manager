@@ -163,6 +163,9 @@ func (r *winPERunner) convert(ctx context.Context, p Plan) (string, error) {
 	if err = r.command(ctx, p, "VALIDATING", tool, args("/validate")); err != nil {
 		return "", fmt.Errorf("MBR2GPT recusou o disco; nada foi alterado: %w", err)
 	}
+	if err = r.report(ctx, p, "AWAITING_LOCAL_CONFIRMATION", 0, disk.SizeBytes); err != nil {
+		return "", err
+	}
 	fmt.Fprintf(r.options.Output, "\nCONVERTER disco %s | %s | serial %s | %d bytes para GPT/UEFI.\nConfirme LOCALMENTE digitando %q: ", disk.Path, disk.Model, disk.Serial, disk.SizeBytes, p.Challenge)
 	text, err := bufio.NewReader(io.LimitReader(r.options.Input, 4097)).ReadString('\n')
 	if err != nil || strings.TrimSpace(text) != p.Challenge {

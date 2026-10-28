@@ -162,6 +162,9 @@ func (r *Runner) openDisk(ctx context.Context, p Plan, d Disk, write bool) (*os.
 		}
 	}
 	if write && !fixture {
+		if err := r.report(ctx, p, "AWAITING_LOCAL_CONFIRMATION", 0, d.SizeBytes); err != nil {
+			return nil, err
+		}
 		fmt.Fprintf(r.Options.Output, "\nATENÇÃO: sobrescrever disco %s | %s | serial %s | %d bytes.\nDigite a confirmação exata %q no teclado desta máquina: ", d.Path, d.Model, d.Serial, d.SizeBytes, p.Challenge)
 		line, err := bufio.NewReader(r.Options.Input).ReadString('\n')
 		if err != nil {
