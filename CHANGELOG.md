@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.0-beta.3.3 — 2026-10-28
+
+Corrige a implantação Windows pelo WinPE: o script DiskPart executava
+`online disk` sempre, e o DiskPart abortava (0x80042595) em disco já online,
+o caso comum, antes de particionar. Agora o comando só é usado quando o disco
+está offline. Em VM BIOS/MBR sintética, DiskPart, DISM, BCDBoot e bootsect
+concluíram e o Windows iniciou pelo destino; OOBE, UEFI/GPT e hardware ainda
+não foram comprovados. Não use a implantação Windows da beta.3.2.
+
+
 ## 0.1.0-beta.3.2 — 2026-10-27
 
 Distribuição com instalador EXE por componentes e ISO Rescue BIOS/UEFI com

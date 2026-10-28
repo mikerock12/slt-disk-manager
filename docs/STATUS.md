@@ -1,6 +1,6 @@
 # Matriz de entrega e homologação
 
-Esta é a beta 0.1.0-beta.3.2, não o aceite integral da seção 25 da especificação.
+Esta é a beta 0.1.0-beta.3.3, não o aceite integral da seção 25 da especificação.
 Downloads e evidências atuais em ENTREGA-2026-10-27.md; registros anteriores são históricos.
 
 | Requisito | Estado nesta entrega | Evidência/limite |
@@ -22,7 +22,7 @@ Downloads e evidências atuais em ENTREGA-2026-10-27.md; registros anteriores s�
 | ddrescue com mapfile | Script local candidato | Retomada local; não integra fila do Controller |
 | Explorar/copiar arquivos remotamente | Implementado | Escopos locais; listagem paginada, backup/envio e importação local; E2E5/5 |
 | Particionamento/formatação remoto | Limitado ao deployment WinPE | Somente perfil Windows WinPE tipado; sem particionador arbitrário |
-| Instalação Windows/Linux | Windows WinPE implementado; Linux pendente | ISO/ESD local importado e quatro edições lidas; aplicação/boot real ainda não homologados |
+| Instalação Windows/Linux | Windows WinPE implementado; Linux pendente | Correção DiskPart na beta.3.3; VM BIOS/MBR completou DiskPart/DISM/BCDBoot e iniciou o Windows; OOBE, UEFI e hardware não homologados |
 | PXE/Rescue local | Pendente | USB/boot manual primeiro |
 | Contas/RBAC | Pendente | Uma credencial administrativa local, sem multiusuário |
 | Auditoria/plano/locks/anti-replay | Implementado | Registro encadeado; não é WORM nem auditoria externa |
