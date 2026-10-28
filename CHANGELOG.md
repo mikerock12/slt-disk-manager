@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.0-beta.3.2 — 2026-10-27
+
+Distribuição com instalador EXE por componentes e ISO Rescue BIOS/UEFI com
+firmware Ethernet/Wi-Fi, NetworkManager e assistente de conexão/pareamento.
+Corrige exemplos do WinPE para os caminhos do pacote instalado e documenta
+montagem do armazenamento temporário separado para clone adaptável.
+Mantém os motores e testes da beta.3.1; documentos públicos omitem referências
+de backups privados. A beta.3.1 já publicada permanece preservada.
+
+
 ## 0.1.0-beta.3 — 2026-10-27
 
 Clone integral cliente→servidor→cliente com GPT/MBR e ajuste NTFS/ext4 em cópia
