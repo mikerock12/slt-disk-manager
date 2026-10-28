@@ -338,7 +338,7 @@ func (r *winPERunner) download(ctx context.Context, p Plan, m DeploymentMedia, d
 		if err = r.report(ctx, p, "DOWNLOADING_MEDIA", copied, m.SizeBytes); err != nil {
 			return "", err
 		}
-		data, _, e := r.client.Request(ctx, "GET", fmt.Sprintf("/agent/v1/jobs/%s/media/chunks/%d", p.ID, chunk.Sequence), nil, nil)
+		data, e := r.client.FetchChunk(ctx, fmt.Sprintf("/agent/v1/jobs/%s/media/chunks/%d", p.ID, chunk.Sequence))
 		if e != nil {
 			return "", e
 		}

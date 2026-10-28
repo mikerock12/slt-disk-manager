@@ -104,6 +104,47 @@ func (c *Client) Request(ctx context.Context, method, path string, body io.Reade
 	return c.requestLimited(ctx, method, path, body, headers, ChunkSize+65536)
 }
 
+// Waits between attempts of an idempotent chunk download; tests shorten them.
+var fetchRetryDelays = []time.Duration{time.Second, 2 * time.Second, 5 * time.Second, 10 * time.Second, 20 * time.Second}
+
+// FetchChunk downloads one chunk (media, image or stream) whose hash the caller
+// verifies. The GET changes nothing on the server, so it is retried on
+// transient network failures instead of failing a long download.
+func (c *Client) FetchChunk(ctx context.Context, path string) ([]byte, error) {
+	var data []byte
+	err := retryTransient(ctx, func() (int, error) {
+		var status int
+		var e error
+		data, status, e = c.Request(ctx, "GET", path, nil, nil)
+		return status, e
+	})
+	return data, err
+}
+
+// retryTransient repeats a request that is safe to repeat (a GET or a progress
+// report that overwrites the previous one) when the connection drops, times
+// out or the server answers 408/429/5xx. Other HTTP errors (cancelled job,
+// missing chunk, rejected plan) fail at once, as does a cancelled context.
+func retryTransient(ctx context.Context, request func() (int, error)) error {
+	for attempt := 0; ; attempt++ {
+		status, err := request()
+		if err == nil {
+			return nil
+		}
+		transient := status == 0 || status == http.StatusRequestTimeout || status == http.StatusTooManyRequests || status >= 500
+		if !transient || ctx.Err() != nil || attempt >= len(fetchRetryDelays) {
+			return err
+		}
+		timer := time.NewTimer(fetchRetryDelays[attempt])
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
 // Whole-disk manifests grow with the number of 4 MiB chunks. JSON operations
 // explicitly select this bound; an HTTP Content-Type supplied by the peer can
 // never relax the binary transfer limit. Plan/signature limits remain separate.

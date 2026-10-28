@@ -43,7 +43,9 @@ func (r *Runner) report(ctx context.Context, p Plan, phase string, processed, to
 	var result struct {
 		CancelRequested bool `json:"cancelRequested"`
 	}
-	_, err := r.Client.JSON(ctx, "POST", "/agent/v1/jobs/"+p.ID+"/progress", map[string]any{"phase": phase, "bytesProcessed": processed, "bytesTotal": total}, &result)
+	err := retryTransient(ctx, func() (int, error) {
+		return r.Client.JSON(ctx, "POST", "/agent/v1/jobs/"+p.ID+"/progress", map[string]any{"phase": phase, "bytesProcessed": processed, "bytesTotal": total}, &result)
+	})
 	if err != nil {
 		return err
 	}
@@ -286,7 +288,7 @@ func (r *Runner) restore(ctx context.Context, p Plan, d Disk) error {
 		if err = r.report(ctx, p, "RESTORING", c.OffsetBytes, m.LogicalSizeBytes); err != nil {
 			return err
 		}
-		data, _, err := r.Client.Request(ctx, "GET", fmt.Sprintf("/agent/v1/jobs/%s/chunks/%d", p.ID, c.Sequence), nil, nil)
+		data, err := r.Client.FetchChunk(ctx, fmt.Sprintf("/agent/v1/jobs/%s/chunks/%d", p.ID, c.Sequence))
 		if err != nil {
 			return err
 		}
@@ -355,7 +357,7 @@ func (r *Runner) restoreAdapted(ctx context.Context, p Plan, d Disk, m Manifest)
 			source.Close()
 			return err
 		}
-		data, _, e := r.Client.Request(ctx, "GET", fmt.Sprintf("/agent/v1/jobs/%s/chunks/%d", p.ID, c.Sequence), nil, nil)
+		data, e := r.Client.FetchChunk(ctx, fmt.Sprintf("/agent/v1/jobs/%s/chunks/%d", p.ID, c.Sequence))
 		if e != nil {
 			source.Close()
 			return e

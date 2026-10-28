@@ -758,7 +758,7 @@ func (r *Runner) receiveStream(ctx context.Context, p Plan, d Disk) error {
 			if strings.EqualFold(c.SHA256, zeroHash(c.SizeBytes)) {
 				data = make([]byte, c.SizeBytes)
 			} else {
-				data, _, err = r.Client.Request(ctx, "GET", fmt.Sprintf("/agent/v1/jobs/%s/chunks/%d", p.ID, c.Sequence), nil, nil)
+				data, err = r.Client.FetchChunk(ctx, fmt.Sprintf("/agent/v1/jobs/%s/chunks/%d", p.ID, c.Sequence))
 				if err != nil {
 					return err
 				}

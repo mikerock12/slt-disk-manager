@@ -285,7 +285,7 @@ func (r *Runner) downloadMedia(ctx context.Context, p Plan, media DeploymentMedi
 		if err = r.report(ctx, p, "DOWNLOADING_MEDIA", copied, media.SizeBytes); err != nil {
 			return err
 		}
-		data, _, e := r.Client.Request(ctx, "GET", fmt.Sprintf("/agent/v1/jobs/%s/media/chunks/%d", p.ID, chunk.Sequence), nil, nil)
+		data, e := r.Client.FetchChunk(ctx, fmt.Sprintf("/agent/v1/jobs/%s/media/chunks/%d", p.ID, chunk.Sequence))
 		if e != nil {
 			return e
 		}
