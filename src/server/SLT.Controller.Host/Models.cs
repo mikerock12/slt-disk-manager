@@ -34,7 +34,7 @@ public record SignedAssignment(string Payload, string Signature);
 public record Progress(string Phase, long BytesProcessed, long BytesTotal);
 public record JobResult(bool Success, string Message, string Details);
 public record Job(string Id, JobPlan Plan, string State, DateTimeOffset CreatedAtUtc,
-    DateTimeOffset? ApprovedAtUtc = null, Progress? Progress = null, JobResult? Result = null, bool CancelRequested = false);
+    DateTimeOffset? ApprovedAtUtc = null, Progress? Progress = null, JobResult? Result = null, bool CancelRequested = false, string? TemporaryPassword = null);
 public record ImageChunk(int Sequence, long OffsetBytes, int SizeBytes, string Sha256);
 public record ImageManifest(int SchemaVersion, string Id, string Name, string State, string SourceDeviceId,
     string SourceFingerprint, long LogicalSizeBytes, int LogicalSectorBytes, DateTimeOffset CreatedAtUtc, List<ImageChunk> Chunks, DiskLayout? Layout = null);
@@ -62,8 +62,11 @@ public record FileBundle(int SchemaVersion, string Id, string Name, string State
 public record BundleStart(List<BundleEntry> Entries, long TotalBytes);
 public record LocalImport(string Path, string Name, bool Consent);
 public record MediaImport(string Path, string Name);
-public record DeploymentOptions(string MediaId, int ImageIndex, string Firmware, bool RebootAfterInstall = false);
-public record WindowsImage(int Index, string Name, string Description, string Architecture, string Version, long MinimumSizeBytes);
-public record DeploymentMedia(string Id, string Name, string FileName, long SizeBytes, string Sha256, List<ImageChunk> Chunks, WindowsImage[] Images, string State, DateTimeOffset CreatedAtUtc, string? Error = null);
+public record DeploymentOptions(string MediaId, int ImageIndex, string Firmware, bool RebootAfterInstall = false, DeploymentAccount? Account = null, string? ToolSha256 = null);
+// Initial local account. Windows unattend needs the temporary password itself; Linux receives
+// only its SHA-512-crypt hash. The operator changes it after the first logon.
+public record DeploymentAccount(string ComputerName, string UserName, string? Password = null, string? PasswordHash = null, string Locale = "pt-BR", string TimeZone = "");
+public record WindowsImage(int Index, string Name, string Description, string Architecture, string Version, long MinimumSizeBytes, string Language = "");
+public record DeploymentMedia(string Id, string Name, string FileName, long SizeBytes, string Sha256, List<ImageChunk> Chunks, WindowsImage[] Images, string State, DateTimeOffset CreatedAtUtc, string? Error = null, string Kind = "WINDOWS");
 public record AuditEvent(long Id, DateTimeOffset TimestampUtc, string Actor, string Action, string Details, string PreviousHash, string EventHash);
 public sealed class ApiException(int status, string message) : Exception(message) { public int Status { get; } = status; }

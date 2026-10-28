@@ -37,10 +37,22 @@ public sealed class MediaRepository
         {
             using var lease=SecuredPath.OpenAbsolute(source,true);var info=lease.Info;
             var path=Path.Combine(MediaPath(media.Id),"install"+(ext==".iso"?".esd":ext));
+            WindowsImage[]? linux=null;
             if(ext==".iso")
             {
                 var seven=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),"7-Zip","7z.exe");
                 Require(File.Exists(seven),"Instale 7-Zip para extrair ISO, ou importe diretamente sources/install.esd ou install.wim.");
+                linux=ReadLinuxIso(seven,source);
+            }
+            if(linux!=null)
+            {
+                // Layered Ubuntu-family live ISO: the whole verified ISO is the deployment payload.
+                path=Path.Combine(MediaPath(media.Id),"media.iso");
+                using var input=lease.ReadStream();using var output=new FileStream(path,FileMode.CreateNew,FileAccess.Write,FileShare.None);input.CopyTo(output);output.Flush(true);
+            }
+            else if(ext==".iso")
+            {
+                var seven=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),"7-Zip","7z.exe");
                 string? member=null;
                 foreach(var candidate in new[]{"sources/install.esd","sources/install.wim"})
                 {
@@ -67,14 +79,34 @@ public sealed class MediaRepository
             }
             else {using var input=lease.ReadStream();using var output=new FileStream(path,FileMode.CreateNew,FileAccess.Write,FileShare.None);input.CopyTo(output);output.Flush(true);}
             // ISO lease remains open without share-write/delete until extraction finishes.
-            using var file=File.OpenRead(path);var images=ReadImages(file);file.Position=0;
+            using var file=File.OpenRead(path);var images=linux??ReadImages(file);file.Position=0;
             var chunks=new List<ImageChunk>();using var hash=IncrementalHash.CreateHash(HashAlgorithmName.SHA256);long offset=0;var buffer2=new byte[Controller.ChunkSize];
             while(offset<file.Length){var count=(int)Math.Min(buffer2.Length,file.Length-offset);file.ReadExactly(buffer2.AsSpan(0,count));hash.AppendData(buffer2,0,count);chunks.Add(new(chunks.Count,offset,count,Convert.ToHexStringLower(SHA256.HashData(buffer2.AsSpan(0,count)))));offset+=count;}
-            media=media with{FileName=Path.GetFileName(path),SizeBytes=file.Length,Sha256=Convert.ToHexStringLower(hash.GetHashAndReset()),Chunks=chunks,Images=images,State="AVAILABLE"};
+            media=media with{FileName=Path.GetFileName(path),SizeBytes=file.Length,Sha256=Convert.ToHexStringLower(hash.GetHashAndReset()),Chunks=chunks,Images=images,State="AVAILABLE",Kind=linux!=null?"LINUX":"WINDOWS"};
             File.WriteAllText(Path.Combine(MediaPath(media.Id),"manifest.json"),Wire.Serialize(media));
             lock(owner.Gate){owner.Db.ImportChunks(media.Id,"media",chunks);owner.Db.Put("media",media.Id,media with{Chunks=[]});owner.Db.Log("system","media.import.completed",media.Id);}
         }
         catch(Exception e){lock(owner.Gate){owner.Db.Put("media",media.Id,media with{State="FAILED",Error=e.Message});owner.Db.Log("system","media.import.failed",$"{media.Id} {e.Message}");}}
+    }
+    private static string? ReadIsoText(string seven,string iso,string member)
+    {
+        using var process=Process.Start(Start(seven,["e","-so",iso,member])) ?? throw new IOException("7-Zip não iniciou.");
+        process.StandardInput.Close();var text=ReadLimited(process.StandardOutput,64*1024);process.WaitForExit();
+        return process.ExitCode==0 && text.Length>0 ? text : null;
+    }
+    // Ubuntu-family layered live ISO (casper): name, layer size and default source.
+    public static WindowsImage[]? ReadLinuxIso(string seven,string iso)
+    {
+        var sources=ReadIsoText(seven,iso,"casper/install-sources.yaml");var info=ReadIsoText(seven,iso,".disk/info");
+        if(sources==null||info==null)return null;
+        var lines=sources.Split('\n').Select(l=>l.Trim()).ToArray();
+        var squash=lines.FirstOrDefault(l=>l.StartsWith("path:",StringComparison.Ordinal))?[5..].Trim();
+        var size=lines.FirstOrDefault(l=>l.StartsWith("size:",StringComparison.Ordinal))?[5..].Trim();
+        Require(squash is {Length:>0 and <=64} && squash.EndsWith(".squashfs",StringComparison.Ordinal) && squash.All(ch=>char.IsAsciiLetterOrDigit(ch)||ch is '.' or '-' or '_'),"ISO Linux sem camada squashfs padrão reconhecida.");
+        Require(long.TryParse(size,out var bytes)&&bytes is >0 and <1L<<40,"Tamanho da camada Linux inválido.");
+        var name=info.Split('\n')[0].Trim();Require(name.Length is >0 and <=200 && !name.Any(char.IsControl),"Identificação da ISO Linux inválida.");
+        var version=System.Text.RegularExpressions.Regex.Match(name,@"\b\d{2}\.\d{2}(\.\d+)?\b").Value;
+        return [new(1,name,"Linux em camadas (casper/"+squash+"); instalação pelo SLT Rescue","AMD64",version,Math.Max(16L*1024*1024*1024,bytes+bytes/2+4L*1024*1024*1024),"pt-BR")];
     }
     private static ProcessStartInfo Start(string exe,string[] args)
     {var p=new ProcessStartInfo(exe){UseShellExecute=false,CreateNoWindow=true,RedirectStandardOutput=true,RedirectStandardInput=true};foreach(var a in args)p.ArgumentList.Add(a);return p;}
@@ -100,17 +132,43 @@ public sealed class MediaRepository
             var windows=element.Element("WINDOWS");Require(windows!=null,"Edição sem metadados Windows.");
             Require(long.TryParse(Text(element,"TOTALBYTES"),out var total)&&total>0 && total<1L<<40,"Tamanho de edição inválido.");
             var arch=Text(windows,"ARCH") switch{"9"=>"AMD64","0"=>"X86","12"=>"ARM64",_=>"UNKNOWN"};
-            var version=windows!.Element("VERSION");
-            result.Add(new(index,Safe(Text(element,"NAME")),Safe(Text(element,"DESCRIPTION")),arch,Safe(string.Join('.',new[]{"MAJOR","MINOR","BUILD","SPBUILD"}.Select(n=>Text(version,n)))),Math.Max(32L*1024*1024*1024,total+8L*1024*1024*1024)));
+            var version=windows!.Element("VERSION");var language=windows.Element("LANGUAGES")?.Element("DEFAULT")?.Value??"";
+            Require(language.Length<=16 && language.All(ch=>char.IsAsciiLetterOrDigit(ch)||ch=='-'),"Idioma de edição inválido.");
+            result.Add(new(index,Safe(Text(element,"NAME")),Safe(Text(element,"DESCRIPTION")),arch,Safe(string.Join('.',new[]{"MAJOR","MINOR","BUILD","SPBUILD"}.Select(n=>Text(version,n)))),Math.Max(32L*1024*1024*1024,total+8L*1024*1024*1024),language));
         }
         Require(result.Count==count,"Contagem de edições difere do cabeçalho.");return result.ToArray();
     }
+    // Microsoft tools are catalog-signed and cannot be verified offline in WinPE, so the tool
+    // comes from the operator's legitimate Windows media and travels with its signed SHA256.
+    public (string Path,string Sha256) Tool(string mediaId,int index,string name)
+    {
+        Require(name is "MBR2GPT.EXE","Ferramenta não permitida.");
+        var media=Get(mediaId);Require(media.State=="AVAILABLE"&&media.Kind=="WINDOWS"&&media.Images.Any(i=>i.Index==index),"Mídia Windows/edição indisponível para a ferramenta.");
+        var dir=Path.Combine(MediaPath(media.Id),"tools",index.ToString(System.Globalization.CultureInfo.InvariantCulture));var path=Path.Combine(dir,name);
+        if(!File.Exists(path))
+        {
+            var seven=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),"7-Zip","7z.exe");
+            Require(File.Exists(seven),"Instale 7-Zip para extrair a ferramenta da mídia Windows.");
+            Directory.CreateDirectory(dir);
+            using var process=Process.Start(Start(seven,["e","-y","-bso0","-bsp0","-o"+dir,Path.Combine(MediaPath(media.Id),media.FileName),$"{index}/Windows/System32/{name}"])) ?? throw new IOException("7-Zip não iniciou.");
+            process.StandardInput.Close();_=ReadLimited(process.StandardOutput,1024*1024);
+            if(!process.WaitForExit(120000)){process.Kill(true);process.WaitForExit();}
+            Require(process.ExitCode==0&&File.Exists(path),"A mídia Windows não contém "+name+" nesta edição.");
+        }
+        Require(new FileInfo(path).Length is >0 and <=16*1024*1024,"Ferramenta extraída com tamanho inválido.");
+        using var file=File.OpenRead(path);return (path,Convert.ToHexStringLower(SHA256.HashData(file)));
+    }
+    public byte[] ToolDownload(string device,string jobId)
+    {
+        var job=owner.AgentJob(device,jobId,"CONVERT_GPT");var options=job.Plan.Deployment!;var tool=Tool(options.MediaId,options.ImageIndex,"MBR2GPT.EXE");
+        var bytes=File.ReadAllBytes(tool.Path);Require(Convert.ToHexStringLower(SHA256.HashData(bytes))==options.ToolSha256,"Ferramenta alterada após o planejamento; execução bloqueada.");return bytes;
+    }
     public DeploymentMedia Get(string id)=>owner.Db.Get<DeploymentMedia>("media",id)??throw new ApiException(404,"Mídia não encontrada.");
     public DeploymentMedia Manifest(string device,string jobId)
-    {var job=owner.AgentJob(device,jobId,"DEPLOY_WINDOWS");var media=Get(job.Plan.Deployment!.MediaId);Require(media.State=="AVAILABLE","Mídia indisponível.");return media with{Chunks=owner.Db.Chunks(media.Id,"media")};}
+    {var job=owner.AgentJob(device,jobId,"DEPLOY_WINDOWS","DEPLOY_LINUX");var media=Get(job.Plan.Deployment!.MediaId);Require(media.State=="AVAILABLE","Mídia indisponível.");return media with{Chunks=owner.Db.Chunks(media.Id,"media")};}
     public byte[] Download(string device,string jobId,int seq)
     {
-        var job=owner.AgentJob(device,jobId,"DEPLOY_WINDOWS");var media=Get(job.Plan.Deployment!.MediaId);Require(media.State=="AVAILABLE","Mídia indisponível.");
+        var job=owner.AgentJob(device,jobId,"DEPLOY_WINDOWS","DEPLOY_LINUX");var media=Get(job.Plan.Deployment!.MediaId);Require(media.State=="AVAILABLE","Mídia indisponível.");
         var chunk=owner.Db.GetChunk(media.Id,"media",seq)??throw new ApiException(404,"Chunk fora da mídia.");
         using var file=File.OpenRead(Path.Combine(MediaPath(media.Id),media.FileName));file.Position=chunk.OffsetBytes;var bytes=new byte[chunk.SizeBytes];file.ReadExactly(bytes);
         Require(Convert.ToHexStringLower(SHA256.HashData(bytes))==chunk.Sha256,"Mídia alterada/corrompida; download bloqueado.");return bytes;
@@ -124,14 +182,32 @@ public sealed partial class Controller
         Ensure(request.Consent,400,"Autorização do responsável obrigatória para apagar o disco.");
         var d=Device(request.DeviceId);var disk=d.Inventory?.Disks.SingleOrDefault(x=>x.Fingerprint==request.DiskFingerprint)??throw new ApiException(409,"Disco não encontrado.");
         var options=request.Deployment??throw new ApiException(400,"Escolha mídia, edição e firmware.");
-        ValidateDeployment(d,disk,options);var id=Wire.Id();
-        var plan=new JobPlan(id,"DEPLOY_WINDOWS",d.Id,disk.Fingerprint,disk.Path,disk.SizeBytes,disk.LogicalSectorBytes,"",$"APAGAR {d.Hostname} {disk.Fingerprint[..12]}",DateTimeOffset.UtcNow.AddHours(24),true,Deployment:options);
-        var job=new Job(id,plan,"AWAITING_APPROVAL",DateTimeOffset.UtcNow);Db.Put("job",id,job);Db.Log("admin","deployment.planned",Wire.Serialize(plan));return job;
+        var linux=request.Kind=="DEPLOY_LINUX";string? password=null;
+        if(options.Account!=null)
+        {
+            var account=Provisioning.Validate(options.Account,linux);password=Provisioning.TemporaryPassword();
+            if(!linux && Media.Get(options.MediaId).Images.SingleOrDefault(i=>i.Index==options.ImageIndex)?.Language is {Length:>0} language)account=account with{Locale=language};
+            options=options with{Account=linux?account with{PasswordHash=Provisioning.Sha512Crypt(password,Provisioning.RandomSalt())}:account with{Password=password}};
+        }
+        Ensure(!linux||options.Account!=null,400,"Instalação Linux exige usuário inicial.");
+        ValidateDeployment(d,disk,options,request.Kind);var id=Wire.Id();
+        var plan=new JobPlan(id,request.Kind,d.Id,disk.Fingerprint,disk.Path,disk.SizeBytes,disk.LogicalSectorBytes,"",$"APAGAR {d.Hostname} {disk.Fingerprint[..12]}",DateTimeOffset.UtcNow.AddHours(24),true,Deployment:options);
+        var job=new Job(id,plan,"AWAITING_APPROVAL",DateTimeOffset.UtcNow);Db.Put("job",id,job);
+        var masked=options.Account is {} a?options with{Account=a with{Password=a.Password==null?null:"***",PasswordHash=a.PasswordHash==null?null:"***"}}:options;
+        Db.Log("admin","deployment.planned",Wire.Serialize(plan with{Deployment=masked}));
+        // The temporary password is returned once to the operator and never logged.
+        return job with{TemporaryPassword=password};
     }
-    private void ValidateDeployment(Device d,DiskInfo disk,DeploymentOptions options)
+    private void ValidateDeployment(Device d,DiskInfo disk,DeploymentOptions options,string kind)
     {
-        Ensure(d.Mode=="WINPE" && d.TrustStatus=="TRUSTED" && d.LastSeenAtUtc>DateTimeOffset.UtcNow.AddSeconds(-45)&&d.Inventory?.Capabilities.Contains("DEPLOY_WINDOWS")==true,409,"Instalação exige agente WinPE autorizado e online.");
-        Ensure(!disk.IsSystem&&!disk.IsReadOnly&&disk.Serial.Length>0&&disk.Model.Length>0&&disk.Path.StartsWith(@"\\.\PhysicalDrive",StringComparison.Ordinal),409,"Disco protegido ou sem identidade física suficiente.");
+        if(kind=="DEPLOY_LINUX")
+        {
+            Ensure(d.Mode=="RESCUE" && d.TrustStatus=="TRUSTED" && d.LastSeenAtUtc>DateTimeOffset.UtcNow.AddSeconds(-45)&&d.Inventory?.Capabilities.Contains("DEPLOY_LINUX")==true,409,"Instalação Linux exige SLT Rescue autorizado, online e com gravação habilitada.");
+            Ensure(!disk.IsSystem&&!disk.IsReadOnly&&!disk.Mounted&&disk.Serial.Length>0&&disk.Path.StartsWith("/",StringComparison.Ordinal),409,"Disco protegido, montado ou sem identidade física suficiente.");
+        }
+        Ensure(Media.Get(options.MediaId).Kind==(kind=="DEPLOY_LINUX"?"LINUX":"WINDOWS"),409,"Mídia não corresponde ao sistema solicitado.");
+        if(kind!="DEPLOY_LINUX")Ensure(d.Mode=="WINPE" && d.TrustStatus=="TRUSTED" && d.LastSeenAtUtc>DateTimeOffset.UtcNow.AddSeconds(-45)&&d.Inventory?.Capabilities.Contains("DEPLOY_WINDOWS")==true,409,"Instalação exige agente WinPE autorizado e online.");
+        if(kind!="DEPLOY_LINUX")Ensure(!disk.IsSystem&&!disk.IsReadOnly&&disk.Serial.Length>0&&disk.Model.Length>0&&disk.Path.StartsWith(@"\\.\PhysicalDrive",StringComparison.Ordinal),409,"Disco protegido ou sem identidade física suficiente.");
         Ensure(options.Firmware is "GPT_UEFI" or "MBR_BIOS",400,"Firmware inválido.");
         Ensure(options.Firmware!="MBR_BIOS"||disk.SizeBytes<=2L*1024*1024*1024*1024,409,"MBR limitado a 2 TiB neste perfil.");
         var media=Media.Get(options.MediaId);var image=media.Images.SingleOrDefault(i=>i.Index==options.ImageIndex);
@@ -140,6 +216,6 @@ public sealed partial class Controller
     private void RevalidateDeployment(Job job)
     {
         var d=Device(job.Plan.DeviceId);var disk=d.Inventory?.Disks.SingleOrDefault(x=>x.Fingerprint==job.Plan.DiskFingerprint);
-        Ensure(disk!=null&&disk.Path==job.Plan.DiskPath&&disk.SizeBytes==job.Plan.DiskSizeBytes&&disk.LogicalSectorBytes==job.Plan.LogicalSectorBytes,409,"Identidade do destino mudou.");ValidateDeployment(d,disk!,job.Plan.Deployment!);
+        Ensure(disk!=null&&disk.Path==job.Plan.DiskPath&&disk.SizeBytes==job.Plan.DiskSizeBytes&&disk.LogicalSectorBytes==job.Plan.LogicalSectorBytes,409,"Identidade do destino mudou.");ValidateDeployment(d,disk!,job.Plan.Deployment!,job.Plan.Kind);
     }
 }

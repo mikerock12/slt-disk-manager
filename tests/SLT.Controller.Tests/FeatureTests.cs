@@ -200,6 +200,45 @@ internal static class FeatureTests
             check(controller.GetStream(restarted.StreamId!).State == "FAILED" && controller.GetJob(restarted.CaptureJobId).State == "INTERRUPTED" && !Directory.Exists(controller.StreamDir(restarted.StreamId!)), "server restart fails open batch clones and discards their data");
             controller.Cancel(restarted.TargetJobId!);
 
+            check(Provisioning.Sha512Crypt("Hello world!", "saltstring") == "$6$saltstring$svn8UoSVapNtMuq1ukKS4tPQd8iKwSMHWjl/O817G3uBnIFNjnQJuesI68u4OTLiBFdcbYEdFCoEOfaS35inz1", "SHA-512-crypt matches the reference vector");
+            var temporary = Provisioning.TemporaryPassword();
+            check(temporary.Length == 14 && temporary.Any(char.IsAsciiLetterUpper) && temporary.Any(char.IsAsciiLetterLower) && temporary.Any(char.IsAsciiDigit), "temporary password meets Windows complexity");
+            var linuxMedia = new DeploymentMedia(Wire.Id(), "Xubuntu fixture", "media.iso", 4096, new string('a', 64), [], [new(1, "Xubuntu 26.04", "fixture", "AMD64", "26.04", 16L * 1024 * MiB, "pt-BR")], "AVAILABLE", DateTimeOffset.UtcNow, Kind: "LINUX");
+            db.Put("media", linuxMedia.Id, linuxMedia);
+            var linuxDisk = Disk("LINUX_TARGET", 64L * 1024 * MiB) with { Path = "/dev/sda" }; linuxDisk = linuxDisk with { Fingerprint = linuxDisk.ComputeFingerprint() };
+            var linuxClient = Add("RESCUE", linuxDisk, ["INVENTORY", "CAPTURE", "RESTORE", "DEPLOY_LINUX"]);
+            var linuxOptions = new DeploymentOptions(linuxMedia.Id, 1, "GPT_UEFI", false, new("cliente1", "tecnico"));
+            Reject(() => controller.Plan(new("DEPLOY_LINUX", linuxClient.Id, linuxDisk.Fingerprint, null, true, Deployment: linuxOptions with { Account = null })), "Linux installation requires an initial account");
+            Reject(() => controller.Plan(new("DEPLOY_LINUX", linuxClient.Id, linuxDisk.Fingerprint, null, true, Deployment: linuxOptions with { Account = new("cliente1", "root") })), "reserved account names rejected");
+            Reject(() => controller.Plan(new("DEPLOY_LINUX", linuxClient.Id, linuxDisk.Fingerprint, null, true, Deployment: linuxOptions with { Account = new("cliente1", "tecnico", Password: "chosen") })), "operator cannot inject a password; the server generates it");
+            var linuxJob = controller.Plan(new("DEPLOY_LINUX", linuxClient.Id, linuxDisk.Fingerprint, null, true, Deployment: linuxOptions));
+            var stored = controller.GetJob(linuxJob.Id);
+            check(linuxJob.TemporaryPassword is { Length: 14 } && stored.TemporaryPassword == null && stored.Plan.Deployment!.Account!.Password == null && stored.Plan.Deployment.Account.PasswordHash!.StartsWith("$6$") && stored.Plan.Deployment.Account.TimeZone == "America/Sao_Paulo", "Linux plan carries only the password hash; the password is returned once");
+            check(!db.Audit().Any(e => e.Details.Contains(linuxJob.TemporaryPassword!) || e.Details.Contains(stored.Plan.Deployment.Account.PasswordHash!)), "temporary password and hash never reach the audit log");
+            check(stored.Plan.Challenge.StartsWith("APAGAR ") && stored.Plan.Kind == "DEPLOY_LINUX", "Linux installation requires destination APAGAR challenge");
+            Reject(() => controller.Plan(new("DEPLOY_WINDOWS", linuxClient.Id, linuxDisk.Fingerprint, null, true, Deployment: linuxOptions)), "Linux media cannot be planned as Windows installation");
+            Reject(() => controller.Plan(new("CONVERT_GPT", linuxClient.Id, linuxDisk.Fingerprint, null, true)), "MBR to GPT conversion requires a UEFI WinPE agent");
+            var uefiDisk = Disk("UEFI_TARGET", 64L * 1024 * MiB) with { Path = @"\\.\PhysicalDrive0" }; uefiDisk = uefiDisk with { Fingerprint = uefiDisk.ComputeFingerprint() };
+            var uefiPe = Add("WINPE", uefiDisk, ["INVENTORY", "CONVERT_GPT"]);
+            Reject(() => controller.Plan(new("CONVERT_GPT", uefiPe.Id, uefiDisk.Fingerprint, null, false)), "conversion requires explicit consent");
+            var winMedia = new DeploymentMedia(Wire.Id(), "Windows fixture", "install.esd", 4096, new string('b', 64), [], [new(1, "Windows 10 Pro", "fixture", "AMD64", "10.0", 32L * 1024 * MiB, "pt-BR")], "AVAILABLE", DateTimeOffset.UtcNow);
+            db.Put("media", winMedia.Id, winMedia);
+            Reject(() => controller.Plan(new("CONVERT_GPT", uefiPe.Id, uefiDisk.Fingerprint, null, true)), "conversion requires Windows media that provides MBR2GPT");
+            var toolDir = Path.Combine(controller.Repository, "media", winMedia.Id, "tools", "1"); Directory.CreateDirectory(toolDir);
+            var toolBytes = RandomNumberGenerator.GetBytes(2048); File.WriteAllBytes(Path.Combine(toolDir, "MBR2GPT.EXE"), toolBytes);
+            Reject(() => controller.Plan(new("CONVERT_GPT", uefiPe.Id, uefiDisk.Fingerprint, null, true, Deployment: new(linuxMedia.Id, 1, "GPT_UEFI"))), "conversion tool cannot come from Linux media");
+            var conversion = controller.Plan(new("CONVERT_GPT", uefiPe.Id, uefiDisk.Fingerprint, null, true, Deployment: new(winMedia.Id, 1, "GPT_UEFI")));
+            check(conversion.Plan.Deployment!.ToolSha256 == Convert.ToHexStringLower(SHA256.HashData(toolBytes)), "signed conversion plan binds the MBR2GPT hash from operator media");
+            Reject(() => controller.Approve(conversion.Id, "APAGAR"), "conversion requires its own CONVERTER challenge");
+            controller.Approve(conversion.Id, conversion.Plan.Challenge);
+            check(conversion.Plan.Challenge.StartsWith("CONVERTER ") && controller.Next(uefiPe.Id) != null && controller.GetJob(conversion.Id).State == "RUNNING", "approved CONVERT_GPT dispatches as signed typed job");
+            check(controller.Media.ToolDownload(uefiPe.Id, conversion.Id).SequenceEqual(toolBytes), "WinPE receives the exact planned MBR2GPT");
+            Reject(() => controller.Media.ToolDownload(linuxClient.Id, conversion.Id), "conversion tool restricted to the assigned WinPE agent");
+            File.WriteAllBytes(Path.Combine(toolDir, "MBR2GPT.EXE"), new byte[2048]);
+            Reject(() => controller.Media.ToolDownload(uefiPe.Id, conversion.Id), "tool changed after planning is blocked");
+            controller.Result(uefiPe.Id, conversion.Id, new(true, "fixture", ""));
+            controller.Cancel(linuxJob.Id);
+
             var fileDevice = Add("WINDOWS", Disk("FILES", 8 * MiB), ["FILE_LIST", "FILE_BACKUP", "FILE_RESTORE"], [new("source", "Origem", true, false), new("destination", "Destino", false, true)]);
             if (OperatingSystem.IsWindows())
             {

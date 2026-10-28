@@ -457,6 +457,14 @@ func (nativeWinPE) VerifyVolumes(number int, firmware string, system, windows by
 	}
 	return nil
 }
+func (nativeWinPE) DriveLayout(number int) ([]byte, error) {
+	h, err := peOpen(fmt.Sprintf(`\\.\PhysicalDrive%d`, number))
+	if err != nil {
+		return nil, err
+	}
+	defer syscall.CloseHandle(h)
+	return peIO(h, 0x70050, nil, 48+256*144)
+}
 func (nativeWinPE) VerifyApplied(windows byte) error {
 	for _, name := range []string{`Windows\System32\config\SYSTEM`, `Windows\System32\ntoskrnl.exe`} {
 		if err := peRegular(fmt.Sprintf("%c:\\%s", windows, name)); err != nil {

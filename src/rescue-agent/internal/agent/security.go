@@ -44,7 +44,7 @@ func VerifyAssignment(s SignedAssignment, certificate *x509.Certificate, deviceI
 		return p, errors.New("plano expirado ou validade excessiva")
 	}
 	switch p.Kind {
-	case "INVENTORY", "SMART", "CAPTURE", "RESTORE", "DEPLOY_WINDOWS":
+	case "INVENTORY", "SMART", "CAPTURE", "RESTORE", "DEPLOY_WINDOWS", "DEPLOY_LINUX", "CONVERT_GPT":
 	default:
 		return p, errors.New("tipo de tarefa não permitido")
 	}
@@ -67,10 +67,21 @@ func VerifyAssignment(s SignedAssignment, certificate *x509.Certificate, deviceI
 			return p, errors.New("FIT exige partição selecionada")
 		}
 	}
-	if p.Kind == "DEPLOY_WINDOWS" {
+	if p.Kind == "DEPLOY_WINDOWS" || p.Kind == "DEPLOY_LINUX" {
 		d := p.Deployment
 		if d == nil || !identifierPattern.MatchString(d.MediaID) || d.ImageIndex < 1 || d.ImageIndex > 1000 || (d.Firmware != "GPT_UEFI" && d.Firmware != "MBR_BIOS") || strings.TrimSpace(p.Challenge) == "" || (p.LogicalSectorBytes != 512 && p.LogicalSectorBytes != 4096) {
-			return p, errors.New("implantação Windows sem mídia, índice, firmware, setor ou confirmação válidos")
+			return p, errors.New("implantação sem mídia, índice, firmware, setor ou confirmação válidos")
+		}
+		if err := validateAccount(d.Account, p.Kind == "DEPLOY_LINUX"); err != nil {
+			return p, err
+		}
+		if d.ToolSHA256 != "" {
+			return p, errors.New("ferramenta auxiliar em tipo de job diferente")
+		}
+	} else if p.Kind == "CONVERT_GPT" {
+		d := p.Deployment
+		if d == nil || !identifierPattern.MatchString(d.MediaID) || d.Firmware != "GPT_UEFI" || d.Account != nil || !sha256Pattern.MatchString(d.ToolSHA256) || strings.TrimSpace(p.Challenge) == "" {
+			return p, errors.New("conversão sem ferramenta assinada, firmware UEFI ou confirmação contextual")
 		}
 	} else if p.Deployment != nil {
 		return p, errors.New("opções de implantação em tipo de job diferente")
@@ -209,3 +220,43 @@ func atomicPrivateFile(path string, data []byte) error {
 	}
 	return syncDirectory(filepath.Dir(path))
 }
+
+var accountNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,19}$`)
+var computerNamePattern = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9-]{0,13}[A-Za-z0-9])?$`)
+var passwordHashPattern = regexp.MustCompile(`^\$6\$[./0-9A-Za-z]{1,16}\$[./0-9A-Za-z]{86}$`)
+
+// validateAccount keeps every value that reaches unattend.xml, chpasswd or a chroot command
+// to a strict, signed alphabet.
+func validateAccount(a *DeploymentAccount, linux bool) error {
+	if a == nil {
+		if linux {
+			return errors.New("instalação Linux exige usuário inicial")
+		}
+		return nil
+	}
+	if !accountNamePattern.MatchString(a.UserName) || !computerNamePattern.MatchString(a.ComputerName) {
+		return errors.New("usuário ou nome do computador inválido")
+	}
+	switch a.Locale {
+	case "pt-BR", "en-US", "es-ES":
+	default:
+		return errors.New("idioma não suportado")
+	}
+	if linux {
+		if a.Password != "" || !passwordHashPattern.MatchString(a.PasswordHash) || a.TimeZone != "America/Sao_Paulo" {
+			return errors.New("conta Linux deve trazer só o hash SHA-512 e fuso suportado")
+		}
+		return nil
+	}
+	if a.PasswordHash != "" || len(a.Password) < 8 || len(a.Password) > 64 || a.TimeZone != "E. South America Standard Time" {
+		return errors.New("conta Windows sem senha temporária ou fuso suportado")
+	}
+	for _, ch := range a.Password {
+		if ch < '0' || ch > 'z' || (ch > '9' && ch < 'A') || (ch > 'Z' && ch < 'a') {
+			return errors.New("senha temporária com caractere não permitido")
+		}
+	}
+	return nil
+}
+
+var sha256Pattern = regexp.MustCompile(`^[0-9a-f]{64}$`)

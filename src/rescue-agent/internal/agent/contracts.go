@@ -108,10 +108,23 @@ type CloneOptions struct {
 }
 
 type DeploymentOptions struct {
-	MediaID            string `json:"mediaId"`
-	ImageIndex         int    `json:"imageIndex"`
-	Firmware           string `json:"firmware"`
-	RebootAfterInstall bool   `json:"rebootAfterInstall"`
+	MediaID            string             `json:"mediaId"`
+	ImageIndex         int                `json:"imageIndex"`
+	Firmware           string             `json:"firmware"`
+	RebootAfterInstall bool               `json:"rebootAfterInstall"`
+	Account            *DeploymentAccount `json:"account,omitempty"`
+	ToolSHA256         string             `json:"toolSha256,omitempty"`
+}
+
+// DeploymentAccount is the initial local account. Windows unattend needs the temporary
+// password; Linux receives only its SHA-512-crypt hash.
+type DeploymentAccount struct {
+	ComputerName string `json:"computerName"`
+	UserName     string `json:"userName"`
+	Password     string `json:"password,omitempty"`
+	PasswordHash string `json:"passwordHash,omitempty"`
+	Locale       string `json:"locale"`
+	TimeZone     string `json:"timeZone"`
 }
 
 type DiskLayout struct {

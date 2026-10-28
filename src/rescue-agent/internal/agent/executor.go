@@ -58,6 +58,9 @@ func (r *Runner) inventory(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	if r.Options.AllowPhysicalWrite && r.Options.FixtureDir == "" && linuxDeployToolsAvailable() {
+		v.Capabilities = append(v.Capabilities, "DEPLOY_LINUX")
+	}
 	_, err = r.Client.JSON(ctx, "POST", "/agent/v1/inventory", v, nil)
 	return err
 }
@@ -70,7 +73,7 @@ func (r *Runner) execute(ctx context.Context, p Plan) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	d, err := ValidateDisk(p, disks, p.Kind == "RESTORE")
+	d, err := ValidateDisk(p, disks, p.Kind == "RESTORE" || p.Kind == "DEPLOY_LINUX")
 	if err != nil {
 		return "", err
 	}
@@ -98,6 +101,8 @@ func (r *Runner) execute(ctx context.Context, p Plan) (string, error) {
 			return "Origem enviada em lotes; o servidor descarta cada lote após a gravação no destino", r.sendStream(ctx, p, d)
 		}
 		return "Imagem raw capturada e validada no repositório", r.capture(ctx, p, d)
+	case "DEPLOY_LINUX":
+		return r.deployLinux(ctx, p, d)
 	case "RESTORE":
 		if p.StreamID != "" {
 			err := r.receiveStream(ctx, p, d)

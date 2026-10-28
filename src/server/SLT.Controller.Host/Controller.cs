@@ -97,7 +97,8 @@ public sealed partial class Controller
     private Job Plan(PlanRequest request, string? streamId)
     {
         if(request.Kind is "FILE_LIST" or "FILE_BACKUP" or "FILE_RESTORE") return Files.Plan(request);
-        if(request.Kind == "DEPLOY_WINDOWS") return PlanDeployment(request);
+        if(request.Kind is "DEPLOY_WINDOWS" or "DEPLOY_LINUX") return PlanDeployment(request);
+        if(request.Kind == "CONVERT_GPT") return PlanConversion(request);
         if(request.Kind == "RESTORE" && request.CloneOptions == null) request = request with { CloneOptions = new("EXACT_RAW") };
         Ensure(request.Kind is "INVENTORY" or "SMART" or "CAPTURE" or "RESTORE", 400, "Operação não implementada nesta versão.");
         Ensure(request.Consent, 400, "Registre autorização do responsável antes de criar uma tarefa.");
@@ -142,7 +143,8 @@ public sealed partial class Controller
         Ensure(d.TrustStatus == "TRUSTED" && d.LastSeenAtUtc > DateTimeOffset.UtcNow.AddSeconds(-45), 409, "Agente offline/revogado.");
         Ensure(d.Inventory?.Capabilities.Contains(job.Plan.Kind) == true, 409, "Capacidade indisponível.");
         if(job.Plan.File != null){ Files.Revalidate(job); return; }
-        if(job.Plan.Kind == "DEPLOY_WINDOWS"){ RevalidateDeployment(job); return; }
+        if(job.Plan.Kind is "DEPLOY_WINDOWS" or "DEPLOY_LINUX"){ RevalidateDeployment(job); return; }
+        if(job.Plan.Kind == "CONVERT_GPT"){ RevalidateConversion(job); return; }
         if (job.Plan.Kind == "INVENTORY") return;
         var disk = d.Inventory!.Disks.SingleOrDefault(x => x.Fingerprint == job.Plan.DiskFingerprint);
         Ensure(disk != null && disk.Path == job.Plan.DiskPath && disk.SizeBytes == job.Plan.DiskSizeBytes && disk.LogicalSectorBytes == job.Plan.LogicalSectorBytes, 409, "Disco mudou após planejamento.");

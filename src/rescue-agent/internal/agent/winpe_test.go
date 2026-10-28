@@ -262,7 +262,10 @@ type peFakePlatform struct {
 	block          bool
 	finished       chan struct{}
 	mu             sync.Mutex
+	layout         []byte
 }
+
+func (f *peFakePlatform) DriveLayout(int) ([]byte, error) { return f.layout, nil }
 
 func (f *peFakePlatform) Check(context.Context) (string, error) { return "GPT_UEFI", nil }
 func (f *peFakePlatform) PrivateState(string) error             { return nil }
