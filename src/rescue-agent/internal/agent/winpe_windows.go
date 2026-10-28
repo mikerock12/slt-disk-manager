@@ -199,7 +199,8 @@ func peDisk(number int) (Disk, error) {
 		return Disk{}, errors.New("atributos de proteção não identificados")
 	}
 	readOnly := binary.LittleEndian.Uint64(attrs[8:])&2 != 0
-	disk := Disk{ID: fmt.Sprintf("disk-%d", number), Path: path, Model: model, Serial: serial, SizeBytes: size, LogicalSectorBytes: logical, PhysicalSectorBytes: physical, IsReadOnly: readOnly, Health: "NOT_QUERIED", Partitions: []Partition{}}
+	offline := binary.LittleEndian.Uint64(attrs[8:])&1 != 0
+	disk := Disk{ID: fmt.Sprintf("disk-%d", number), Path: path, Model: model, Serial: serial, SizeBytes: size, LogicalSectorBytes: logical, PhysicalSectorBytes: physical, IsReadOnly: readOnly, Offline: offline, Health: "NOT_QUERIED", Partitions: []Partition{}}
 	disk.Fingerprint = Fingerprint(disk)
 	return disk, nil
 }

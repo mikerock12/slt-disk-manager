@@ -82,6 +82,16 @@ class QMP:
             self.key({" ": "spc", "-": "minus"}.get(char, char.lower()), char.isupper())
         self.key("ret")
 
+    def type_fixture_command(self, text):
+        # Only hard-coded fixture diagnostic commands call this method. The test
+        # answer file selects en-US keyboard; no arbitrary command is accepted.
+        symbols={" ":("spc",False),"-":("minus",False),"/":("slash",False),"\\":("backslash",False),":":("semicolon",True),"%":("5",True),"(":("9",True),")":("0",True),"@":("2",True),".":("dot",False)}
+        for char in text:
+            if char.isascii() and char.isalnum(): self.key(char.lower(),char.isupper())
+            elif char in symbols: self.key(*symbols[char])
+            else: raise ValueError("Unexpected fixed diagnostic character")
+        self.key("ret")
+
     def screenshot(self, path):
         try:
             self.command("screendump", {"filename": str(path), "format": "png"})
@@ -133,8 +143,6 @@ def main():
     iso = safe_local_file(args.iso, ".iso")
     agent = safe_local_file(args.agent, ".exe")
     controller_dll = safe_local_file(args.controller, ".dll")
-    relay = safe_local_file(ROOT / "tests/integration/windows-pe-vm-relay.py", ".py")
-    python = safe_local_file(sys.executable, ".exe")
     runtime_parent = (ROOT / "runtime").resolve()
     if not runtime_parent.is_relative_to(ROOT.resolve()):
         raise ValueError("Runtime root must stay within the repository")
@@ -152,7 +160,7 @@ def main():
         subprocess.run([str(image_tool), "create", "-f", "qcow2", str(path), size], check=True, creationflags=CREATE_HIDDEN)
     report = {"startedAtUtc": datetime.now(timezone.utc).isoformat(), "workspace": str(workspace),
               "acceleration": "TCG", "ramMiB": 3072, "cpus": 2, "isoReadOnly": True,
-              "hostDevicesAttached": False, "peBoot": False, "mtlsInventory": False,
+              "hostDevicesAttached": False, "networkMode":"user NAT; guest default route removed in fixture; IPv6 backend disabled", "peBoot": False, "mtlsInventory": False,
               "deploymentCompleted": False, "firstBootVerified": False,
               "writableDisks": [str(target), str(scratch)]}
     (workspace / "evidence.json").write_text(json.dumps(report, indent=2))
@@ -164,6 +172,12 @@ def main():
         (workspace / "evidence.json").write_text(json.dumps(report, indent=2))
 
     try:
+        private_controller=workspace / "controller-bin"
+        shutil.copytree(controller_dll.parent,private_controller,ignore=shutil.ignore_patterns("state","runtime","logs","*.db","*.pfx","*.pem","*.key","connection.json"))
+        controller_dll=private_controller / controller_dll.name
+        report["agentSha256"]=hashlib.sha256(agent.read_bytes()).hexdigest()
+        report["controllerDllSha256"]=hashlib.sha256(controller_dll.read_bytes()).hexdigest()
+        save()
         port, qmp_port = free_port(), free_port()
         server_log = open(workspace / "controller.log", "wb")
         logs.append(server_log)
@@ -193,12 +207,18 @@ def main():
         media = request("POST", "/api/v1/media/import", {"path": str(iso), "name": "PRIVATE WinPE VM operator media"}) if args.deploy else None
         kit = seed / "kit"
         subprocess.run(["pwsh", "-NoProfile", "-File", str(ROOT / "rescue/windows-pe/New-WinPEKit.ps1"),
-                        "-OutputDirectory", str(kit), "-AgentPath", str(agent), "-Server", f"https://10.0.2.100:{port}",
+                        "-OutputDirectory", str(kit), "-AgentPath", str(agent), "-Server", f"https://10.0.2.2:{port}",
                         "-ServerPin", connection["serverPin"], "-ScratchDirectory", "R:\\SLT-Scratch"], check=True, creationflags=CREATE_HIDDEN)
         for item in kit.iterdir():
             shutil.move(str(item), str(seed / item.name))
         kit.rmdir()  # Only the now-empty NEW fixture directory.
         marker = json.loads((seed / "SLT/kit-manifest.json").read_text(encoding="utf-8-sig"))["locatorMarker"]
+        fixture_start=seed / "SLT/Start-SLT.cmd"
+        start_text=fixture_start.read_text()
+        network_step='"%SystemRoot%\\System32\\wpeutil.exe" InitializeNetwork\nif errorlevel 1 goto blocked\n'
+        if start_text.count(network_step)!=1: raise ValueError("Unexpected kit network initialization")
+        isolated_network=network_step+'"%SystemRoot%\\System32\\wpeutil.exe" WaitForNetwork\nif errorlevel 1 goto blocked\nif not exist "%SystemRoot%\\System32\\route.exe" goto blocked\n"%SystemRoot%\\System32\\route.exe" delete 0.0.0.0\n"%SystemRoot%\\System32\\route.exe" print -4\n'
+        write_text(fixture_start,start_text.replace(network_step,isolated_network))
         # Fixture-only scratch initialization. This script is never copied into a product kit.
         # Disk 1 is exclusively our new 12GiB scratch.qcow2; no physical host disk exists in this VM.
         write_text(seed / "SLT/scratch-fixture.txt", "select disk 1\nclean\nconvert mbr\ncreate partition primary\nformat quick fs=ntfs label=SLT-VM-Scratch\nassign letter=R\nexit\n")
@@ -208,6 +228,9 @@ def main():
         # marker, invoke the fixture scratch preparer and always hold Setup if not found.
         xml = ET.parse(seed / "Autounattend.xml")
         xml.find(".//{urn:schemas-microsoft-com:unattend}Path").text = 'cmd.exe /d /c "for %d in (C D E F G H I J K L M N O P Q R S T U V W X Y Z) do @if exist %d:\\SLT\\' + marker + ' call %d:\\SLT\\Boot-VM.cmd & cmd.exe /d /k echo SLT VM stopped; no implicit Setup."'
+        settings=xml.find("{urn:schemas-microsoft-com:unattend}settings")
+        keyboard=ET.SubElement(settings,"{urn:schemas-microsoft-com:unattend}component",{"name":"Microsoft-Windows-International-Core-WinPE","processorArchitecture":"amd64","publicKeyToken":"31bf3856ad364e35","language":"neutral","versionScope":"nonSxS"})
+        ET.SubElement(keyboard,"{urn:schemas-microsoft-com:unattend}InputLocale").text="0409:00000409"
         ET.register_namespace("", "urn:schemas-microsoft-com:unattend")
         ET.register_namespace("wcm", "http://schemas.microsoft.com/WMIConfig/2002/State")
         xml.write(seed / "Autounattend.xml", encoding="utf-8", xml_declaration=True)
@@ -218,14 +241,17 @@ def main():
         safe_local_file(boot / "bootsect.exe", ".exe")
         qemu_log = open(workspace / "qemu.log", "wb")
         logs.append(qemu_log)
-        forward = f'user,id=lan,restrict=on,ipv6=off,guestfwd=tcp:10.0.2.100:{port}-cmd:"{python}" "{relay}" {port}'
+        # No bridge/TAP/passthrough and no inbound forwarding. The test-only PE
+        # bootstrap removes its default route before starting the unmodified agent.
+        # Windows builds of GLib may omit the helper needed by guestfwd-cmd.
+        forward = 'user,id=lan,ipv6=off'
         command = [str(qemu), "-L", str(qemu.parent / "share"), "-name", "SLT SYNTHETIC WinPE VM",
                    "-machine", "pc,accel=tcg", "-cpu", "max", "-smp", "2", "-m", "3072", "-display", "none",
                    "-drive", f"file={target},format=qcow2,if=none,id=target", "-device", "ide-hd,drive=target,bus=ide.0,unit=0,serial=SLT-VM-TARGET",
                    "-drive", f"file={scratch},format=qcow2,if=none,id=scratch", "-device", "ide-hd,drive=scratch,bus=ide.0,unit=1,serial=SLT-VM-SCRATCH",
                    "-drive", f"file={iso},format=raw,readonly=on,media=cdrom,if=none,id=windows", "-device", "ide-cd,drive=windows,bus=ide.1,unit=0",
                    "-drive", f"file=fat:{seed},format=raw,readonly=on,if=none,id=seed", "-device", "piix3-usb-uhci", "-device", "usb-storage,drive=seed,removable=on,serial=SLT-VM-KIT",
-                   "-netdev", forward, "-device", "e1000,netdev=lan", "-serial", f"file:{workspace / 'serial.log'}",
+                   "-netdev", forward, "-device", "e1000,id=fixture-nic,netdev=lan", "-serial", f"file:{workspace / 'serial.log'}",
                    "-qmp", f"tcp:127.0.0.1:{qmp_port},server=on,wait=off", "-boot", "order=c,once=d,menu=off", "-rtc", "base=localtime", "-no-shutdown"]
         # This is deliberately a fixed allowlist: no host devices, passthrough, writable
         # directory export, network bridge, acceleration driver or inherited user options.
@@ -240,8 +266,24 @@ def main():
         print("VM running with TCG; waiting for Windows PE enrollment...", flush=True)
         last_capture = 0
 
+        def fixture_control(diagnostics=False):
+            path=workspace / "control.json"
+            if not path.is_file(): return
+            action=json.loads(path.read_text()).get("action")
+            path.unlink()
+            if action=="stop": raise RuntimeError("Operator stopped synthetic VM test")
+            if action=="capture": qmp.screenshot(workspace / "requested-screen.png")
+            elif diagnostics and action=="open-console": qmp.key("f10",True)
+            elif diagnostics and action in ("show-network","show-clock","start-fixture"):
+                commands={"show-network":"route print -4","show-clock":"time /t","start-fixture":'for %d in (C D E F G H I J K L M N O P Q R S T U V W X Y Z) do @if exist %d:\\SLT\\'+marker+' call %d:\\SLT\\Boot-VM.cmd'}
+                qmp.type_fixture_command(commands[action])
+            elif action!="capture": raise ValueError("Unknown or disallowed fixture action")
+            report.setdefault("fixtureActions",[]).append({"action":action,"atUtc":datetime.now(timezone.utc).isoformat()})
+            save()
+
         def enrollment_ready():
             nonlocal last_capture
+            fixture_control(True)
             if time.monotonic()-last_capture > 60:
                 qmp.screenshot(workspace / "latest-screen.png")
                 last_capture = time.monotonic()
@@ -272,6 +314,7 @@ def main():
         save()
         def local_prompt_ready():
             nonlocal last_capture
+            fixture_control()
             if time.monotonic()-last_capture > 30:
                 qmp.screenshot(workspace / "latest-screen.png")
                 last_capture = time.monotonic()
@@ -287,6 +330,7 @@ def main():
 
         def deployment_done():
             nonlocal last_capture
+            fixture_control()
             value = request("GET", "/api/v1/jobs/"+job["id"])
             report["job"] = value
             save()
@@ -298,6 +342,9 @@ def main():
 
         result = wait_for(deployment_done, "DISM/BCDBoot completed", deadline, processes)
         report["deploymentCompleted"] = result["state"] == "COMPLETED"
+        if report["deploymentCompleted"]:
+            qmp.command("set_link",{"name":"fixture-nic","up":False})
+            report["networkDisconnectedAfterDeployment"]=True
         save()
         if not report["deploymentCompleted"]:
             raise RuntimeError(str(result.get("result")))

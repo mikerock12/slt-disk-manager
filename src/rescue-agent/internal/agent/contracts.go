@@ -27,6 +27,7 @@ type Disk struct {
 	Health              string      `json:"health"`
 	Partitions          []Partition `json:"partitions"`
 	Layout              *DiskLayout `json:"layout,omitempty"`
+	Offline             bool        `json:"-"` // Local WinPE state only; never part of the wire contract.
 }
 
 type Inventory struct {
