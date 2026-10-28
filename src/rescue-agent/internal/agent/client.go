@@ -101,6 +101,15 @@ func NewClient(server, pin string, cert *tls.Certificate) (*Client, error) {
 }
 
 func (c *Client) Request(ctx context.Context, method, path string, body io.Reader, headers map[string]string) ([]byte, int, error) {
+	return c.requestLimited(ctx, method, path, body, headers, ChunkSize+65536)
+}
+
+// Whole-disk manifests grow with the number of 4 MiB chunks. JSON operations
+// explicitly select this bound; an HTTP Content-Type supplied by the peer can
+// never relax the binary transfer limit. Plan/signature limits remain separate.
+const maximumJSONResponseBytes int64 = 256 * 1024 * 1024
+
+func (c *Client) requestLimited(ctx context.Context, method, path string, body io.Reader, headers map[string]string, maximum int64) ([]byte, int, error) {
 	req, err := http.NewRequestWithContext(ctx, method, c.base+path, body)
 	if err != nil {
 		return nil, 0, err
@@ -114,11 +123,14 @@ func (c *Client) Request(ctx context.Context, method, path string, body io.Reade
 		return nil, 0, err
 	}
 	defer r.Body.Close()
-	data, err := io.ReadAll(io.LimitReader(r.Body, ChunkSize+65537))
+	if r.ContentLength > maximum {
+		return nil, r.StatusCode, errors.New("resposta excede limite")
+	}
+	data, err := io.ReadAll(io.LimitReader(r.Body, maximum+1))
 	if err != nil {
 		return nil, r.StatusCode, err
 	}
-	if len(data) > ChunkSize+65536 {
+	if int64(len(data)) > maximum {
 		return nil, r.StatusCode, errors.New("resposta excede limite")
 	}
 	if r.StatusCode < 200 || r.StatusCode >= 300 {
@@ -136,7 +148,7 @@ func (c *Client) JSON(ctx context.Context, method, path string, input, output an
 		}
 		reader = bytes.NewReader(data)
 	}
-	data, status, err := c.Request(ctx, method, path, reader, nil)
+	data, status, err := c.requestLimited(ctx, method, path, reader, nil, maximumJSONResponseBytes)
 	if err != nil {
 		return status, err
 	}
@@ -150,6 +162,7 @@ type credentials struct {
 	DeviceID       string `json:"deviceId"`
 	CertificatePEM string `json:"certificatePem"`
 	KeyPEM         string `json:"keyPem"`
+	Mode           string `json:"mode,omitempty"`
 }
 type enrollment struct {
 	ID           string    `json:"id"`
@@ -157,9 +170,17 @@ type enrollment struct {
 	KeyPEM       string    `json:"keyPem"`
 	Code         string    `json:"code"`
 	ExpiresAtUTC time.Time `json:"expiresAtUtc"`
+	Mode         string    `json:"mode,omitempty"`
 }
 
 func Enroll(ctx context.Context, c *Client, stateDir string, output io.Writer) (string, *tls.Certificate, error) {
+	return EnrollMode(ctx, c, stateDir, output, "RESCUE")
+}
+
+func EnrollMode(ctx context.Context, c *Client, stateDir string, output io.Writer, mode string) (string, *tls.Certificate, error) {
+	if mode != "RESCUE" && mode != "WINPE" {
+		return "", nil, errors.New("modo de pareamento não suportado")
+	}
 	if err := os.MkdirAll(stateDir, 0700); err != nil {
 		return "", nil, err
 	}
@@ -171,6 +192,13 @@ func Enroll(ctx context.Context, c *Client, stateDir string, output io.Writer) (
 		var saved credentials
 		if err = json.Unmarshal(data, &saved); err != nil {
 			return "", nil, err
+		}
+		savedMode := saved.Mode
+		if savedMode == "" {
+			savedMode = "RESCUE"
+		}
+		if savedMode != mode {
+			return "", nil, errors.New("diretório de identidade pertence a outro modo de agente")
 		}
 		cert, err := tls.X509KeyPair([]byte(saved.CertificatePEM), []byte(saved.KeyPEM))
 		if err != nil {
@@ -193,6 +221,13 @@ func Enroll(ctx context.Context, c *Client, stateDir string, output io.Writer) (
 		if err = json.Unmarshal(data, &pending); err != nil {
 			return "", nil, err
 		}
+		pendingMode := pending.Mode
+		if pendingMode == "" {
+			pendingMode = "RESCUE"
+		}
+		if pendingMode != mode {
+			return "", nil, errors.New("pareamento pendente pertence a outro modo de agente")
+		}
 		if time.Now().After(pending.ExpiresAtUTC) {
 			pending = enrollment{}
 		}
@@ -200,6 +235,7 @@ func Enroll(ctx context.Context, c *Client, stateDir string, output io.Writer) (
 		return "", nil, err
 	}
 	if pending.ID == "" {
+		pending.Mode = mode
 		key, err := rsa.GenerateKey(rand.Reader, 3072)
 		if err != nil {
 			return "", nil, err
@@ -220,7 +256,7 @@ func Enroll(ctx context.Context, c *Client, stateDir string, output io.Writer) (
 			Code         string    `json:"code"`
 			ExpiresAtUTC time.Time `json:"expiresAtUtc"`
 		}
-		_, err = c.JSON(ctx, "POST", "/agent/v1/enroll", map[string]string{"hostname": hostname, "mode": "RESCUE", "csrPem": string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: der})), "secret": pending.Secret}, &result)
+		_, err = c.JSON(ctx, "POST", "/agent/v1/enroll", map[string]string{"hostname": hostname, "mode": mode, "csrPem": string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: der})), "secret": pending.Secret}, &result)
 		if err != nil {
 			return "", nil, err
 		}
@@ -232,7 +268,7 @@ func Enroll(ctx context.Context, c *Client, stateDir string, output io.Writer) (
 			return "", nil, err
 		}
 	}
-	fmt.Fprintf(output, "Pareamento Rescue: código %s. Confira e aprove no painel do servidor.\n", pending.Code)
+	fmt.Fprintf(output, "Pareamento %s: código %s. Confira e aprove no painel do servidor.\n", mode, pending.Code)
 	for {
 		if !time.Now().Before(pending.ExpiresAtUTC) {
 			return "", nil, errors.New("pareamento expirou; execute novamente")
@@ -262,7 +298,7 @@ func Enroll(ctx context.Context, c *Client, stateDir string, output io.Writer) (
 			if leaf.Subject.CommonName != result.DeviceID {
 				return "", nil, errors.New("certificado não corresponde ao deviceId")
 			}
-			saved := credentials{DeviceID: result.DeviceID, CertificatePEM: result.CertificatePEM, KeyPEM: pending.KeyPEM}
+			saved := credentials{DeviceID: result.DeviceID, CertificatePEM: result.CertificatePEM, KeyPEM: pending.KeyPEM, Mode: mode}
 			data, _ := json.Marshal(saved)
 			if err = atomicPrivateFile(path, data); err != nil {
 				return "", nil, err

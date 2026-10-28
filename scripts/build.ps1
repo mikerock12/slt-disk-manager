@@ -17,6 +17,8 @@ try {
     try {
         & $goPath build -trimpath -o ../../artifacts/slt-rescue-agent-fixture.exe ./cmd/slt-rescue-agent
         if ($LASTEXITCODE -ne 0) { throw 'Build Go Windows falhou.' }
+        & $goPath build -trimpath -o ../../artifacts/slt-winpe-agent.exe ./cmd/slt-winpe-agent
+        if ($LASTEXITCODE -ne 0) { throw 'Build agente WinPE falhou.' }
         $env:GOOS='linux'; $env:GOARCH='amd64'; $env:CGO_ENABLED='0'
         & $goPath build -trimpath -o ../../artifacts/slt-rescue-agent-linux-amd64 ./cmd/slt-rescue-agent
         if ($LASTEXITCODE -ne 0) { throw 'Build Go Linux falhou.' }

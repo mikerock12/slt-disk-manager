@@ -1,0 +1,24 @@
+<UserControl x:Class="SLT.Desktop.DeploymentPanel"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+ xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+ <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"><StackPanel MaxWidth="1120" HorizontalAlignment="Stretch">
+  <TextBlock Text="Instalar Windows no cliente" FontSize="23" FontWeight="SemiBold" Margin="0,0,0,8"/>
+  <TextBlock Text="Inicie o cliente pelo pendrive Windows com o kit SLT WinPE e aprove seu pareamento. Clones e cópias em outros computadores continuam em paralelo." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,20"/>
+  <Border Background="{StaticResource PanelBrush}" Padding="16" Margin="0,0,0,18"><StackPanel>
+   <TextBlock Text="1. Mídia de instalação no servidor" FontSize="17" FontWeight="SemiBold" Margin="0,0,0,10"/>
+   <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBox x:Name="MediaPath" ToolTip="Caminho local de ISO, WIM ou ESD no servidor" Margin="0,0,10,0"/><Button Grid.Column="1" Content="Escolher ISO / WIM / ESD…" Style="{StaticResource SecondaryButton}" Click="PickMedia_Click"/></Grid>
+   <Grid Margin="0,10,0,0"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBox x:Name="MediaName" Text="Windows 10" ToolTip="Nome no catálogo" Margin="0,0,10,0"/><Button x:Name="ImportButton" Grid.Column="1" Content="Importar mídia" Click="Import_Click"/></Grid>
+   <TextBlock Text="A importação prepara e verifica a imagem em segundo plano. Aguarde AVAILABLE antes de instalar. Use sua mídia licenciada; ela permanece no repositório local." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="0,10,0,0"/>
+  </StackPanel></Border>
+  <TextBlock Text="2. Destino e edição" FontSize="17" FontWeight="SemiBold" Margin="0,0,0,10"/>
+  <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
+   <StackPanel Margin="0,0,14,0"><TextBlock Text="Computador em WinPE" Style="{StaticResource Caption}"/><ComboBox x:Name="TargetDevice" DisplayMemberPath="Label" Padding="7" SelectionChanged="TargetDevice_SelectionChanged" Margin="0,0,0,10"/><TextBlock Text="Disco a apagar" Style="{StaticResource Caption}"/><ComboBox x:Name="TargetDisk" DisplayMemberPath="Label" Padding="7" SelectionChanged="SelectionChanged" Margin="0,0,0,10"/><TextBlock x:Name="DiskIdentity" TextWrapping="Wrap" FontFamily="Consolas" FontSize="12" Foreground="{StaticResource MutedBrush}"/></StackPanel>
+   <StackPanel Grid.Column="1"><TextBlock Text="Mídia importada" Style="{StaticResource Caption}"/><ComboBox x:Name="Media" DisplayMemberPath="Label" Padding="7" SelectionChanged="Media_SelectionChanged" Margin="0,0,0,10"/><TextBlock Text="Edição Windows" Style="{StaticResource Caption}"/><ComboBox x:Name="Edition" DisplayMemberPath="Label" Padding="7" SelectionChanged="SelectionChanged" Margin="0,0,0,10"/><TextBlock Text="Firmware do cliente" Style="{StaticResource Caption}"/><ComboBox x:Name="Firmware" SelectedIndex="0" Padding="7" Margin="0,0,0,10"><ComboBoxItem Content="UEFI — GPT" Tag="GPT_UEFI"/><ComboBoxItem Content="BIOS / Legacy — MBR" Tag="MBR_BIOS"/></ComboBox></StackPanel>
+  </Grid>
+  <Border Background="#33261E" Padding="15" Margin="0,18,0,12"><TextBlock Text="Todos os dados e partições do disco selecionado serão apagados. Confira modelo, serial, tamanho e identidade. A instalação prepara boot, mas primeiro boot, drivers e OOBE precisam ser conferidos no cliente." TextWrapping="Wrap" Foreground="#FFD4A3"/></Border>
+  <CheckBox x:Name="Consent" Content="Conferi o cliente e autorizo apagar seu disco para instalar esta edição do Windows." Margin="0,0,0,10"/>
+  <CheckBox x:Name="Reboot" Content="Reiniciar o cliente após instalação e confirmação do resultado pelo servidor." Margin="0,0,0,14"/>
+  <Button x:Name="PlanButton" Content="Examinar plano de instalação…" HorizontalAlignment="Left" IsEnabled="False" Click="Plan_Click"/>
+  <TextBlock x:Name="Status" Text="Selecione um cliente WinPE pareado e uma mídia AVAILABLE. O cliente exige também confirmação local antes de apagar o disco." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="0,14,0,10"/>
+ </StackPanel></ScrollViewer>
+</UserControl>

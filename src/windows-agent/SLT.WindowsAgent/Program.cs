@@ -5,7 +5,7 @@ using SLT.WindowsAgent;
 
 if (args.Contains("--help", StringComparer.Ordinal))
 {
-    Console.WriteLine("SLT Windows Agent 0.1.0\n  --server https://IP-LAN:7443 --server-pin SHA256 [--state-dir DIR] [--once]\n  [--smartctl C:\\caminho\\smartctl.exe] [--poll-seconds 10]\n  --collect-only: imprime inventário local somente leitura, sem conectar ao servidor.\n  Para serviço, use o instalador em deploy/. Nunca inclua token administrativo neste cliente.");
+    Console.WriteLine("SLT Windows Agent 0.1.0\n  --server https://IP-LAN:7443 --server-pin SHA256 [--state-dir DIR] [--once]\n  [--smartctl C:\\caminho\\smartctl.exe] [--poll-seconds 10] [--file-roots C:\\scopes.json]\n  --collect-only: imprime inventário local somente leitura, sem conectar ao servidor.\n  Para serviço, use o instalador em deploy/. Nunca inclua token administrativo neste cliente.");
     return 0;
 }
 try

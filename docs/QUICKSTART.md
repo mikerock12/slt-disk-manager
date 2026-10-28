@@ -55,8 +55,9 @@ Não são executados CHKDSK de reparo nem testes de escrita no Windows.
    fingerprint confiáveis. A imagem RAW exige espaço equivalente à capacidade
    inteira do disco, incluindo setores vazios.
 4. Crie e aprove CAPTURE. Aguarde tarefa COMPLETED e imagem AVAILABLE.
-5. Em outra máquina/disco, crie RESTORE a partir dessa imagem. O destino deve
-   ter capacidade suficiente e o mesmo tamanho de setor lógico.
+5. Use a aba Clonagem para coordenar os dois clientes, preservar layout em disco
+   maior ou ajustar NTFS/ext4 em disco menor/maior. RESTORE RAW exato exige a mesma
+   capacidade e tamanho de setor lógico. Consulte WORKFLOWS.md para requisitos de scratch.
 6. Digite o identificador `APAGAR ...` no painel. O Rescue precisa ter sido iniciado
    com `--allow-physical-write` e exige a mesma confirmação no teclado local.
 7. Aguarde a releitura/verificação. Igualdade de bytes não comprova boot em outro
@@ -65,6 +66,18 @@ Não são executados CHKDSK de reparo nem testes de escrita no Windows.
 O USB que hospeda o Rescue e os discos montados/sistema são bloqueados. Não há
 transição automática de boot do Windows nesta versão. Não desative Secure Boot
 como procedimento padrão; use mídia compatível validada no laboratório.
+
+## Arquivos e Windows em outro cliente
+
+Configure as pastas autorizadas no cliente conforme WORKFLOWS.md e use a aba
+Arquivos para backups selecionados e envios. Importe arquivos/pastas do próprio
+servidor no catálogo e escolha uma pasta nova no cliente para recebê-los.
+
+A aba Instalar Windows importa sua ISO/WIM/ESD e permite escolher edição e destino
+WinPE. O kit em windows-pe prepara a inicialização do agente no pendrive oficial,
+sem incluir mídia Microsoft. Clone nos clientes1/2 e instalação no cliente3 podem
+andar em paralelo. Instalação/primeiro boot Windows ainda exigem homologação em VM;
+consulte WORKFLOWS.md e windows-pe/LEIA-ME.md para preparar o ambiente.
 
 ## Falhas, consentimento e dados
 

@@ -79,6 +79,8 @@ app.Use(async (ctx, next) =>
         else if (ctx.Request.Path.StartsWithSegments("/agent") && !ctx.Request.Path.StartsWithSegments("/agent/v1/enroll"))
         {
             lock (controller.Gate) ctx.Items["deviceId"] = controller.Authenticate(ctx.Connection.ClientCertificate);
+            if(ctx.Request.Method=="POST" && ctx.Request.Path.Value?.EndsWith("/bundle",StringComparison.Ordinal)==true && ctx.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>() is {} sizeLimit)
+                sizeLimit.MaxRequestBodySize=64L*1024*1024;
         }
         ctx.Response.Headers.CacheControl = "no-store";
         ctx.Response.Headers["X-Content-Type-Options"] = "nosniff";
@@ -127,10 +129,11 @@ app.MapPut("/agent/v1/jobs/{id}/chunks/{seq:int}", async (string id, int seq, Ht
     { if (memory.Length + count > Controller.ChunkSize) throw new ApiException(413, "Chunk excede 4 MiB."); memory.Write(buffer, 0, count); }
     return Locked(() => controller.Upload(DeviceId(ctx), id, seq, memory.ToArray(), ctx.Request.Headers["X-Content-SHA256"].ToString()));
 });
-app.MapPost("/agent/v1/jobs/{id}/capture-complete", (string id, HttpContext ctx) => Locked(() => controller.Complete(DeviceId(ctx), id)));
+app.MapPost("/agent/v1/jobs/{id}/capture-complete", (string id, CaptureCompletion request, HttpContext ctx) => Locked(() => controller.Complete(DeviceId(ctx), id,request.Layout) with{Chunks=[]}));
 app.MapGet("/agent/v1/jobs/{id}/manifest", (string id, HttpContext ctx) => Locked(() => controller.DownloadManifest(DeviceId(ctx), id)));
 app.MapGet("/agent/v1/jobs/{id}/chunks/{seq:int}", (string id, int seq, HttpContext ctx) => Locked(() => Results.Bytes(controller.Download(DeviceId(ctx), id, seq), "application/octet-stream")));
 app.MapGet("/api/v1/audit", () => Locked(() => store.Audit()));
+FileEndpoints.Map(app,controller);
 app.MapGet("/api/v1/dashboard", () => Locked(() => new
 {
     devices = store.All<Device>("device").Count,

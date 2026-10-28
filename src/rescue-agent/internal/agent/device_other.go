@@ -20,3 +20,7 @@ func openExclusiveDisk(path string, write, fixture bool) (*os.File, error) {
 
 // Other operating systems run fixture tests only; directory fsync is Linux-specific.
 func syncDirectory(path string) error { return nil }
+
+func checkScratchStorage(path string, required int64, diskPath string) error {
+	return errors.New("clonagem adaptada exige Linux; Windows fixture suporta somente RAW")
+}

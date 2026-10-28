@@ -1,0 +1,19 @@
+SLT DISK MANAGER — BETA DE LABORATÓRIO
+
+Escolha servidor/painel na bancada ou somente cliente Windows no computador atendido.
+Os runtimes necessários estão incluídos. O instalador é por usuário e não altera
+firewall, serviços, boot ou discos. Os atalhos pedem a configuração da rede local.
+
+Clonagem e instalação de Windows apagam integralmente o disco de destino.
+Confirme a autorização, os discos e os backups antes de aprovar qualquer tarefa.
+Cada gravação exige confirmação no painel e no teclado do cliente offline.
+
+Os testes automáticos usam arquivos e discos virtuais. Boot Rescue BIOS/UEFI foi
+testado em VM. Instalação/primeiro boot Windows e hardware físico ainda precisam
+de homologação. Não confunda hashes de conteúdo com garantia de boot no novo PC.
+
+Rescue usa drivers Linux/firmware; a compatibilidade depende do hardware.
+Windows/WinPE e respectivas licenças não acompanham este instalador.
+
+Leia QUICKSTART.md, docs/WORKFLOWS.md e docs/STATUS.md antes de operar.
+Binários ainda não têm assinatura digital do proprietário; confira origem e SHA256.

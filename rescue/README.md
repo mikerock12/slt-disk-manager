@@ -1,6 +1,11 @@
 # Mídia SLT Rescue
 
-`scripts/build-debian-live.sh` prepara uma ISO Debian Live amd64 usando `live-build`. Execute em uma máquina/VM Debian descartável como root, com rede para os repositórios Debian. O ambiente Windows do desenvolvimento não construiu nem homologou esta ISO.
+Para instalação Windows pela mídia oficial do operador, consulte
+[`windows-pe/README.md`](windows-pe/README.md). O agente Go WinPE é separado do
+Rescue Linux e exige novo pareamento, plano assinado e confirmação local.
+O gerador de kit não inclui Windows/ADK nem modifica USB ou boot do computador.
+
+`scripts/build-debian-live.sh` prepara uma ISO Debian Live amd64 usando `live-build`. Execute em uma máquina/VM Debian descartável como root, com rede para os repositórios Debian. O primeiro build remoto foi concluído e iniciou BIOS e UEFI em QEMU no [CI40456449172](https://github.com/mikerock12/slt-disk-manager/actions/runs/40456449172), sem discos de dados/rede e com CLI e motores verificados. Alterações seguintes em login e rede exigem novo CI; essa evidência não comprova hardware físico, Wi-Fi real ou boot de um Windows clonado.
 
 ```sh
 # No Debian/Ubuntu de build:
@@ -20,11 +25,79 @@ Após boot, abra terminal local e use:
 sudo slt-rescue-agent --server https://IP_DO_SERVIDOR:7443 --server-pin HASH_CONFERIDO_NO_SERVIDOR
 ```
 
+Também está disponível o assistente local em português:
+
+```sh
+sudo slt-start
+```
+
+O usuário da sessão Live é `technician`; quando uma tela de login solicitar senha,
+use `live`, o padrão documentado pelo
+[Debian Live](https://live-team.pages.debian.net/live-manual/html/live-manual/customizing-run-time-behaviours.en.html).
+O console pode entrar automaticamente nesse usuário sem privilégios. Não existe
+autologin como root. O pacote `user-setup` é incluído explicitamente; o teste de
+boot confere que `technician` existe e consegue usar o sudo local configurado pelo
+Live. A conta e sua senha são próprias da sessão descartável, sem senha do
+servidor, chave administrativa ou certificado compartilhado na ISO.
+
+O assistente começa mostrando as interfaces e oferece **configurar Wi-Fi/Ethernet**
+por `nmtui`, sem exigir comandos de senha. Conecte o cabo ou escolha a rede Wi-Fi;
+então use a opção de aguardar conexão. O teste aguarda até 20 segundos e permite
+tentar novamente ou sair. As conexões são geridas por NetworkManager, com
+`wpasupplicant`, `wireless-regdb` e `iw`; os antigos clientes ifupdown/isc-dhcp não
+são selecionados pelo build. A configuração não consulta um serviço WAN para
+verificar internet. Na sessão Live padrão, perfis/senhas ficam no sistema
+temporário em RAM, sem inclusão na ISO, no Git ou no backup das fontes.
+
+A mídia inclui o kernel Debian amd64 com seus módulos e os pacotes oficiais
+`firmware-linux`, `firmware-linux-nonfree`, `firmware-realtek`, `firmware-iwlwifi`,
+`firmware-atheros`, `firmware-brcm80211`, `firmware-mediatek`,
+`firmware-misc-nonfree`, `firmware-bnx2` e `firmware-bnx2x`. Os nomes foram
+conferidos no [catálogo Debian trixie](https://packages.debian.org/source/trixie/firmware-nonfree).
+Eles ampliam cobertura Intel, Realtek, Qualcomm/Atheros, Broadcom e MediaTek;
+não garantem todos os adaptadores nem substituem teste da placa do cliente.
+O smoke de boot verifica presença dos pacotes, ferramentas de rede e conta local;
+não simula uma conexão Wi-Fi nem declara drivers de hardware homologados.
+
+O build publica `packages.tsv` com versões binárias/fontes e arquitetura,
+`source-index.tsv` com índices Snapshot Debian por versão exata e um arquivo
+`package-copyrights.tar.gz` contendo os avisos copyright presentes no sistema.
+São evidências dos pacotes distribuídos, não uma afirmação de que todos têm a
+mesma licença ou de que o arquivo substitui fontes correspondentes quando exigidas.
+
+No assistente, informe o endereço HTTPS IPv4/nome do servidor e o pin conferido
+no servidor. Pressionar Enter no modo mantém apenas inventário, diagnóstico e
+captura autorizada, sem habilitar gravação física. Nada é capturado
+automaticamente. Para usar esse cliente como destino de clone, escolha o modo 2
+e digite `PERMITIR GRAVACAO`. Informe então uma pasta temporária absoluta já
+preparada em armazenamento saudável, fora do disco destino. O assistente não
+monta nem formata armazenamento; sem essa pasta, a adaptação de tamanho fica
+indisponível. O agente ainda verifica capacidade, filesystem e vínculo com o
+destino antes de preparar qualquer clone.
+
+Após conectar, confira o código de pareamento no cliente e aprove no painel do
+servidor. Cada operação continua dependendo de plano assinado e autorização
+contextual; gravação física pede outra confirmação local para o disco daquele
+job. Os parâmetros de conexão não são salvos pelo assistente. `Ctrl+C` encerra o
+agente. Para diagnóstico de rede, `ip -br address` apenas mostra os endereços;
+configure a rede da bancada antes de conectar se não houver endereço obtido.
+
 Pareamento é separado por agente, conferido fisicamente. A imagem não embute servidor, token, chave privada global ou credenciais de cliente. Em Live sem persistência, a credencial e o ledger desaparecem no desligamento: revogue a identidade anterior no servidor e pareie novamente. Para uso continuado, mantenha o diretório de estado em mídia privada persistente.
 
 Restaurar precisa de `--allow-physical-write` e confirmação no teclado do cliente. Inicialmente use apenas inventário/SMART em hardware real; captura/restauração devem ser homologadas em VM/discos descartáveis. Firmware UEFI, Secure Boot, drivers VMD/RAID e conectividade permanecem dependentes do hardware.
 
 `smartmontools`, `gddrescue` e `partclone` constam na mídia para uso autorizado local, mas apenas SMART de leitura e captura/restauração RAW estão integrados ao protocolo. Revisar licenças do Debian e de terceiros antes da redistribuição comercial.
+
+O agente também implementa `PRESERVE_LAYOUT` e `FIT` quando iniciado com `--scratch-dir` em armazenamento persistente saudável, separado do destino. São necessários `sfdisk` (pacote `fdisk`), `blkid`, `ntfsresize`, `ntfs-3g.probe`, `resize2fs` e `e2fsck`. A adaptação ocorre numa cópia privada antes de abrir o disco destino; o guia detalhado e as restrições estão em `src/rescue-agent/README.md`. A presença do código não comprova boot ou homologação de hardware.
+
+Para executar a suíte de integração de motores num runner Linux dedicado:
+
+```sh
+sudo apt-get install fdisk util-linux ntfs-3g e2fsprogs dosfstools
+sudo env PATH="$PATH" bash rescue/scripts/test-adaptive-linux.sh
+```
+
+Todos os discos da suíte são arquivos temporários; o teste de loop só desconecta o dispositivo que ele criou após comprovar seu backing_file. Não usa `losetup -D` nem enumera discos reais como destinos.
 
 ## Manutenção local avançada
 

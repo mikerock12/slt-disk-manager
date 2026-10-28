@@ -26,6 +26,7 @@ type Disk struct {
 	Mounted             bool        `json:"mounted"`
 	Health              string      `json:"health"`
 	Partitions          []Partition `json:"partitions"`
+	Layout              *DiskLayout `json:"layout,omitempty"`
 }
 
 type Inventory struct {
@@ -41,17 +42,19 @@ type Inventory struct {
 }
 
 type Plan struct {
-	ID                 string    `json:"id"`
-	Kind               string    `json:"kind"`
-	DeviceID           string    `json:"deviceId"`
-	DiskFingerprint    string    `json:"diskFingerprint"`
-	DiskPath           string    `json:"diskPath"`
-	DiskSizeBytes      int64     `json:"diskSizeBytes"`
-	LogicalSectorBytes int       `json:"logicalSectorBytes"`
-	ImageID            string    `json:"imageId"`
-	Challenge          string    `json:"challenge"`
-	ExpiresAtUTC       time.Time `json:"expiresAtUtc"`
-	Consent            bool      `json:"consent"`
+	ID                 string             `json:"id"`
+	Kind               string             `json:"kind"`
+	DeviceID           string             `json:"deviceId"`
+	DiskFingerprint    string             `json:"diskFingerprint"`
+	DiskPath           string             `json:"diskPath"`
+	DiskSizeBytes      int64              `json:"diskSizeBytes"`
+	LogicalSectorBytes int                `json:"logicalSectorBytes"`
+	ImageID            string             `json:"imageId"`
+	Challenge          string             `json:"challenge"`
+	ExpiresAtUTC       time.Time          `json:"expiresAtUtc"`
+	Consent            bool               `json:"consent"`
+	Clone              *CloneOptions      `json:"clone,omitempty"`
+	Deployment         *DeploymentOptions `json:"deployment,omitempty"`
 }
 
 type SignedAssignment struct {
@@ -77,4 +80,51 @@ type Manifest struct {
 	LogicalSectorBytes int          `json:"logicalSectorBytes"`
 	CreatedAtUTC       time.Time    `json:"createdAtUtc"`
 	Chunks             []ImageChunk `json:"chunks"`
+	Layout             *DiskLayout  `json:"layout,omitempty"`
+}
+
+type CloneOptions struct {
+	Strategy              string `json:"strategy"`
+	ResizePartitionNumber int    `json:"resizePartitionNumber"`
+}
+
+type DeploymentOptions struct {
+	MediaID            string `json:"mediaId"`
+	ImageIndex         int    `json:"imageIndex"`
+	Firmware           string `json:"firmware"`
+	RebootAfterInstall bool   `json:"rebootAfterInstall"`
+}
+
+type DiskLayout struct {
+	TableType      string            `json:"tableType"`
+	SectorSize     int               `json:"sectorSize"`
+	DiskIdentifier string            `json:"diskIdentifier"`
+	FirstUsableLba int64             `json:"firstUsableLba"`
+	LastUsableLba  int64             `json:"lastUsableLba"`
+	Partitions     []LayoutPartition `json:"partitions"`
+}
+
+type LayoutPartition struct {
+	Number           int    `json:"number"`
+	StartLba         int64  `json:"startLba"`
+	LengthLba        int64  `json:"lengthLba"`
+	Type             string `json:"type"`
+	UUID             string `json:"uuid"`
+	Name             string `json:"name"`
+	Attributes       string `json:"attributes"`
+	Bootable         bool   `json:"bootable"`
+	FileSystem       string `json:"fileSystem"`
+	MinimumSizeBytes *int64 `json:"minimumSizeBytes,omitempty"`
+}
+
+type RestoreReport struct {
+	Strategy             string      `json:"strategy"`
+	DataVerified         bool        `json:"dataVerified"`
+	TableVerified        bool        `json:"tableVerified"`
+	BootPayloadPreserved bool        `json:"bootPayloadPreserved"`
+	BootVerified         bool        `json:"bootVerified"`
+	BytesWritten         int64       `json:"bytesWritten"`
+	SourceLayout         *DiskLayout `json:"sourceLayout,omitempty"`
+	TargetLayout         *DiskLayout `json:"targetLayout,omitempty"`
+	Warnings             []string    `json:"warnings"`
 }

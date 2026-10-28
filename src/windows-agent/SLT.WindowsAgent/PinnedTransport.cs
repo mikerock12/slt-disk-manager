@@ -7,7 +7,7 @@ using System.Text.Json;
 
 namespace SLT.WindowsAgent;
 
-public sealed class PinnedTransport : IDisposable
+public sealed class PinnedTransport : IDisposable, IFileJobTransport
 {
     private readonly HttpClient client;
     private readonly string pin;
@@ -64,6 +64,33 @@ public sealed class PinnedTransport : IDisposable
         await EnsureSuccess(response, ct);
         return await response.Content.ReadFromJsonAsync<T>(Wire.Json, ct);
     }
+    public async Task<byte[]> DownloadBytes(string path, CancellationToken ct)
+    {
+        using var response = await client.GetAsync(path, HttpCompletionOption.ResponseHeadersRead, ct);
+        await EnsureSuccess(response, ct);
+        if (response.Content.Headers.ContentLength > FileJobExecutor.ChunkSize) throw new IOException("Chunk excede limite.");
+        await using var body = await response.Content.ReadAsStreamAsync(ct);
+        using var result = new MemoryStream();
+        var buffer = new byte[65536];
+        int count;
+        while ((count = await body.ReadAsync(buffer, ct)) != 0)
+        {
+            if (result.Length + count > FileJobExecutor.ChunkSize) throw new IOException("Chunk excede limite.");
+            await result.WriteAsync(buffer.AsMemory(0, count), ct);
+        }
+        return result.ToArray();
+    }
+    public async Task<FileChunk> UploadBytes(string path, byte[] bytes, string sha256, CancellationToken ct)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Put, path) { Content = new ByteArrayContent(bytes) };
+        request.Headers.Add("X-Content-SHA256", sha256);
+        using var response = await client.SendAsync(request, ct);
+        await EnsureSuccess(response, ct);
+        return await response.Content.ReadFromJsonAsync<FileChunk>(Wire.Json, ct) ?? throw new IOException("Recibo de chunk vazio.");
+    }
+    async Task<FileBundle> IFileJobTransport.Publish(string path, object body, CancellationToken ct) => await Post<FileBundle>(path, body, ct);
+    async Task<FileBundle> IFileJobTransport.Manifest(string path, CancellationToken ct) => await Get<FileBundle>(path, ct) ?? throw new IOException("Bundle vazio.");
+    async Task<bool> IFileJobTransport.Progress(string path, JobProgress progress, CancellationToken ct) => (await Post<ProgressResponse>(path, progress, ct)).CancelRequested;
     private static async Task EnsureSuccess(HttpResponseMessage response, CancellationToken ct)
     {
         if (response.IsSuccessStatusCode) return;
@@ -76,7 +103,7 @@ public sealed class PinnedTransport : IDisposable
 
     public static JobPlan VerifySignedAssignment(SignedAssignment assignment, X509Certificate2 serverCertificate, string deviceId, DateTimeOffset now)
     {
-        if (assignment.Payload.Length > 128 * 1024 || assignment.Signature.Length > 4096)
+        if (assignment.Payload.Length > 4 * 1024 * 1024 || assignment.Signature.Length > 4096)
             throw new InvalidOperationException("Plano excede limite permitido.");
         var payload = Convert.FromBase64String(assignment.Payload);
         var signature = Convert.FromBase64String(assignment.Signature);
@@ -90,7 +117,13 @@ public sealed class PinnedTransport : IDisposable
         if (!Guid.TryParse(plan.Id, out _) || plan.DeviceId != deviceId || !plan.Consent ||
             plan.ExpiresAtUtc <= now || plan.ExpiresAtUtc > now.AddHours(24))
             throw new InvalidOperationException("Plano expirado ou com identidade/autorização inválida.");
-        if (plan.Kind is not ("INVENTORY" or "SMART")) throw new InvalidOperationException("Agente Windows aceita somente INVENTORY e SMART.");
+        if (plan.Kind is not ("INVENTORY" or "SMART" or "FILE_LIST" or "FILE_BACKUP" or "FILE_RESTORE"))
+            throw new InvalidOperationException("Tipo de job não permitido no agente Windows.");
+        if (plan.Kind.StartsWith("FILE_", StringComparison.Ordinal))
+        {
+            if (plan.File is null) throw new InvalidOperationException("Job de arquivo sem escopo assinado.");
+            FileSafety.ValidateRequest(plan.Kind, plan.File);
+        }
         return plan;
     }
     public void Dispose() { client.Dispose(); ServerCertificate?.Dispose(); clientIdentity?.Dispose(); }

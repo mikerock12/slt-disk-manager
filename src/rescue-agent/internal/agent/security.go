@@ -44,7 +44,7 @@ func VerifyAssignment(s SignedAssignment, certificate *x509.Certificate, deviceI
 		return p, errors.New("plano expirado ou validade excessiva")
 	}
 	switch p.Kind {
-	case "INVENTORY", "SMART", "CAPTURE", "RESTORE":
+	case "INVENTORY", "SMART", "CAPTURE", "RESTORE", "DEPLOY_WINDOWS":
 	default:
 		return p, errors.New("tipo de tarefa não permitido")
 	}
@@ -53,6 +53,24 @@ func VerifyAssignment(s SignedAssignment, certificate *x509.Certificate, deviceI
 	}
 	if p.Kind == "RESTORE" && (p.ImageID == "" || strings.TrimSpace(p.Challenge) == "") {
 		return p, errors.New("restauração sem imagem ou confirmação")
+	}
+	if p.Clone != nil {
+		switch p.Clone.Strategy {
+		case "EXACT_RAW", "PRESERVE_LAYOUT", "FIT":
+		default:
+			return p, errors.New("estratégia de clonagem não permitida")
+		}
+		if p.Clone.Strategy == "FIT" && p.Clone.ResizePartitionNumber < 1 {
+			return p, errors.New("FIT exige partição selecionada")
+		}
+	}
+	if p.Kind == "DEPLOY_WINDOWS" {
+		d := p.Deployment
+		if d == nil || !identifierPattern.MatchString(d.MediaID) || d.ImageIndex < 1 || d.ImageIndex > 1000 || (d.Firmware != "GPT_UEFI" && d.Firmware != "MBR_BIOS") || strings.TrimSpace(p.Challenge) == "" || (p.LogicalSectorBytes != 512 && p.LogicalSectorBytes != 4096) {
+			return p, errors.New("implantação Windows sem mídia, índice, firmware, setor ou confirmação válidos")
+		}
+	} else if p.Deployment != nil {
+		return p, errors.New("opções de implantação em tipo de job diferente")
 	}
 	return p, nil
 }
@@ -117,8 +135,32 @@ func ValidateManifest(m Manifest, p Plan) error {
 	if m.SchemaVersion != 1 || m.State != "AVAILABLE" || m.ID != p.ImageID {
 		return errors.New("imagem incompleta, incompatível ou diferente do plano")
 	}
-	if m.LogicalSizeBytes <= 0 || m.LogicalSizeBytes > p.DiskSizeBytes || m.LogicalSectorBytes != p.LogicalSectorBytes {
+	if m.LogicalSizeBytes <= 0 || m.LogicalSectorBytes != p.LogicalSectorBytes {
 		return errors.New("imagem maior que destino ou setor incompatível")
+	}
+	switch cloneStrategy(p) {
+	case "EXACT_RAW":
+		if m.LogicalSizeBytes != p.DiskSizeBytes {
+			return errors.New("EXACT_RAW exige mesma capacidade")
+		}
+	case "LEGACY_RAW", "PRESERVE_LAYOUT":
+		if m.LogicalSizeBytes > p.DiskSizeBytes {
+			return errors.New("imagem maior que destino")
+		}
+	case "FIT":
+		if p.DiskSizeBytes <= 0 || p.Clone.ResizePartitionNumber < 1 {
+			return errors.New("destino ou partição FIT inválidos")
+		}
+	default:
+		return errors.New("estratégia desconhecida")
+	}
+	if cloneStrategy(p) == "FIT" || cloneStrategy(p) == "PRESERVE_LAYOUT" {
+		if err := ValidateLayout(m.Layout, m.LogicalSizeBytes); err != nil {
+			return err
+		}
+		if m.Layout.SectorSize != m.LogicalSectorBytes {
+			return errors.New("layout e manifest possuem setores diferentes")
+		}
 	}
 	if m.SourceDeviceID == p.DeviceID && m.SourceFingerprint == p.DiskFingerprint {
 		return errors.New("origem e destino são o mesmo disco")

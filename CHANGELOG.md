@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.1.0-beta.3 — 2026-10-27
+
+Clone integral cliente→servidor→cliente com GPT/MBR e ajuste NTFS/ext4 em cópia
+de trabalho; motores Linux testados em discos sintéticos menores/maiores.
+Gerenciador de arquivos com raízes autorizadas, backup e envio bidirecional,
+importação local e proteção contra links/substituição de destino existente.
+Catálogo ISO/WIM/ESD e agente Go WinPE com plano assinado, confirmação local,
+DISM/BCDBoot e execução paralela entre máquinas distintas.
+
+Windows10 ISO local lida com quatro edições AMD64; instalação/primeiro boot
+Windows e hardware permanecem sem homologação. Nova proteção na limpeza de
+testes evita erro de aplicação por arquivo temporário bloqueado.
+
+
 ## 0.1.0-beta.2 — 2026-10-26
 
 Primeira beta local: Controller, Desktop, Windows client e Rescue Go; TLS/mTLS,
