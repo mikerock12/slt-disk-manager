@@ -32,7 +32,7 @@ Downloads e evidências atuais em ENTREGA-2026-10-28.md; registros anteriores s�
 | Instalador EXE Windows | Implementado e testado | Componentes servidor/cliente/offline; per-user; desinstalação preserva estado gerado |
 | MSI/assinatura de binários | Pendente | ZIP e instalador Inno disponíveis; sem certificado de assinatura do proprietário |
 | GitHub/CI remoto/PR/merge/destaque | Publicado e fixado | PR1/PR2/PR3 mesclados; beta.3.3 publicada com CI40698928108 Windows/Linux e ISO40698928184 SUCCESS |
-| Backup Google Drive | Atualização final em execução | Backup anterior conferido; novo inclui fonte+Git bundle e distribuíveis/ISO Linux, com reunidor SHA256; sem dados de clientes |
+| Backup Google Drive | Concluído e conferido (beta.3.3) | Drive privado: fonte+Git bundle e os oito assets da release com manifesto SHA256; tamanhos/hashes e permissão só do proprietário conferidos; sem dados de clientes nem mídia Microsoft |
 
 Homologação restante: Windows 10/11 em VMs UEFI, Linux ext4, SATA/NVMe em discos
 descartáveis, perda de rede/energia, filesystem após restore e primeiro boot.
