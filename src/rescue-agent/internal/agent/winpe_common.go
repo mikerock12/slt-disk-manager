@@ -73,11 +73,17 @@ func WinPEDiskNumber(path string) (int, error) {
 	}
 	return n, nil
 }
-func BuildWinPEDiskPart(disk int, firmware string, system, windows byte) (string, error) {
+func BuildWinPEDiskPart(disk int, firmware string, system, windows byte, offline bool) (string, error) {
 	if disk < 0 || disk > 4095 || system < 'D' || system > 'Z' || windows < 'D' || windows > 'Z' || system == windows || system == 'X' || windows == 'X' {
 		return "", errors.New("número ou letras de destino inválidos")
 	}
-	lines := []string{fmt.Sprintf("select disk %d", disk), "online disk", "clean"}
+	lines := []string{fmt.Sprintf("select disk %d", disk)}
+	// DiskPart /s aborts on "online disk" for a disk already online (0x80042595), so
+	// bring it online only when IOCTL attributes reported it offline. No noerr.
+	if offline {
+		lines = append(lines, "online disk")
+	}
+	lines = append(lines, "clean")
 	switch firmware {
 	case "GPT_UEFI":
 		lines = append(lines, "convert gpt", "create partition efi size=260", "format quick fs=fat32 label=SLT-System", fmt.Sprintf("assign letter=%c", system), "create partition msr size=16", "create partition primary", "format quick fs=ntfs label=Windows", fmt.Sprintf("assign letter=%c", windows))
@@ -89,7 +95,7 @@ func BuildWinPEDiskPart(disk int, firmware string, system, windows byte) (string
 	return strings.Join(append(lines, "exit"), "\r\n") + "\r\n", nil
 }
 func BuildWinPECommands(media, scratch string, index int, firmware string, system, windows byte) ([]WinPECommand, error) {
-	if _, err := BuildWinPEDiskPart(0, firmware, system, windows); err != nil {
+	if _, err := BuildWinPEDiskPart(0, firmware, system, windows, false); err != nil {
 		return nil, err
 	}
 	if index < 1 || index > 1000 || !safeWinPEPath(media) || !safeWinPEPath(scratch) {
@@ -422,8 +428,7 @@ func (r *winPERunner) deploy(ctx context.Context, p Plan) (details string, deplo
 	if err != nil {
 		return "", err
 	}
-	script, err := BuildWinPEDiskPart(number, firmware, system, windows)
-	if err != nil {
+	if _, err = BuildWinPEDiskPart(number, firmware, system, windows, disk.Offline); err != nil {
 		return "", err
 	}
 	dir := filepath.Join(r.options.ScratchDir, "slt-deploy-"+p.ID)
@@ -456,10 +461,16 @@ func (r *winPERunner) deploy(ctx context.Context, p Plan) (details string, deplo
 	if err != nil {
 		return "", err
 	}
-	if _, err = validateWinPETarget(p, disks); err != nil {
+	confirmed, err := validateWinPETarget(p, disks)
+	if err != nil {
 		return "", err
 	}
 	if err = r.platform.Scratch(r.options.ScratchDir, 2*1024*1024*1024, number); err != nil {
+		return "", err
+	}
+	// Online state comes from the revalidation right before writing, not the earlier scan.
+	script, err := BuildWinPEDiskPart(number, firmware, system, windows, confirmed.Offline)
+	if err != nil {
 		return "", err
 	}
 	scriptPath := filepath.Join(dir, "partitions.txt")

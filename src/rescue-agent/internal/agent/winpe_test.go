@@ -49,11 +49,19 @@ func TestWinPEOutsidePEIsBlocked(t *testing.T) {
 }
 func TestWinPECommandsAreTyped(t *testing.T) {
 	for _, firmware := range []string{"GPT_UEFI", "MBR_BIOS"} {
-		script, err := BuildWinPEDiskPart(7, firmware, 'S', 'W')
+		script, err := BuildWinPEDiskPart(7, firmware, 'S', 'W', false)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !strings.HasPrefix(script, "select disk 7\r\n") || !strings.Contains(script, "clean\r\n") || strings.Contains(script, "noerr") {
+		// Online disks must not get "online disk": DiskPart /s aborts with 0x80042595.
+		if !strings.HasPrefix(script, "select disk 7\r\nclean\r\n") || strings.Contains(script, "online disk") || strings.Contains(script, "noerr") {
+			t.Fatal(script)
+		}
+		script, err = BuildWinPEDiskPart(7, firmware, 'S', 'W', true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.HasPrefix(script, "select disk 7\r\nonline disk\r\nclean\r\n") || strings.Contains(script, "noerr") {
 			t.Fatal(script)
 		}
 		commands, err := BuildWinPECommands(`E:\scratch\install.esd`, `E:\scratch`, 1, firmware, 'S', 'W')
@@ -82,7 +90,7 @@ func TestWinPECommandsAreTyped(t *testing.T) {
 			t.Fatalf("path válido rejeitado %q", path)
 		}
 	}
-	if _, err := BuildWinPEDiskPart(7, "GPT_UEFI", 'X', 'W'); err == nil {
+	if _, err := BuildWinPEDiskPart(7, "GPT_UEFI", 'X', 'W', false); err == nil {
 		t.Fatal("volume RAM aceito")
 	}
 	if _, err := BuildWinPECommands(`E:\a.esd`, `E:\scratch`, 0, "GPT_UEFI", 'S', 'W'); err == nil {
