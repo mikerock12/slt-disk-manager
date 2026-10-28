@@ -222,10 +222,11 @@ public sealed partial class Controller
         Ensure(Guid.TryParse(id, out _), 400, "ID de imagem inválido."); return Path.Combine(Repository, "images", id);
     }
     private string ChunkPath(string id, int seq) => Path.Combine(ImageDir(id), $"{seq:D8}.bin");
-    public ImageChunk Upload(string deviceId, string jobId, int seq, byte[] bytes, string sha)
+    public ImageChunk Upload(string deviceId, string jobId, int seq, byte[] bytes, string sha, bool zero = false)
     {
         var j = AgentJob(deviceId, jobId, "CAPTURE");
-        if (j.Plan.StreamId != null) return StreamUpload(j, seq, bytes, sha);
+        if (j.Plan.StreamId != null) return StreamUpload(j, seq, bytes, sha, zero);
+        Ensure(!zero, 400, "Lote zerado só é aceito no clone em lotes.");
         var image = Db.Get<ImageManifest>("image",j.Plan.ImageId) ?? throw new ApiException(404,"Imagem não encontrada.");
         Ensure(image.State == "CREATING" && seq >= 0, 409, "Imagem não está recebendo dados.");
         var hash = Convert.ToHexStringLower(SHA256.HashData(bytes));

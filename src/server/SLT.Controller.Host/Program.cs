@@ -131,7 +131,7 @@ app.MapPut("/agent/v1/jobs/{id}/chunks/{seq:int}", async (string id, int seq, Ht
     using var memory = new MemoryStream(); var buffer = new byte[65536]; int count;
     while ((count = await ctx.Request.Body.ReadAsync(buffer, ctx.RequestAborted)) > 0)
     { if (memory.Length + count > Controller.ChunkSize) throw new ApiException(413, "Chunk excede 4 MiB."); memory.Write(buffer, 0, count); }
-    return Locked(() => controller.Upload(DeviceId(ctx), id, seq, memory.ToArray(), ctx.Request.Headers["X-Content-SHA256"].ToString()));
+    return Locked(() => controller.Upload(DeviceId(ctx), id, seq, memory.ToArray(), ctx.Request.Headers["X-Content-SHA256"].ToString(), ctx.Request.Headers["X-Content-Zero"].ToString() == "1"));
 });
 app.MapPost("/agent/v1/jobs/{id}/capture-complete", (string id, CaptureCompletion request, HttpContext ctx) => Locked(() => controller.Complete(DeviceId(ctx), id,request.Layout) with{Chunks=[]}));
 app.MapGet("/agent/v1/jobs/{id}/manifest", (string id, HttpContext ctx) => Locked(() => controller.DownloadManifest(DeviceId(ctx), id)));

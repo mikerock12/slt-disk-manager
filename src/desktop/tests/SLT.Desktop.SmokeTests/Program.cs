@@ -72,7 +72,13 @@ internal static class Program
             strategy.SelectedIndex = 0;
             Check(planButton.IsEnabled, "Em lotes disponível com CLONE_STREAM nos dois Rescue");
             strategy.SelectedIndex = 2;
-            Check(!planButton.IsEnabled && ((TextBlock)clonePanel.FindName("PreviewSummary")).Text.Contains("Imagem completa no servidor"), "Redução em lotes bloqueada e orienta usar imagem completa");
+            Check(!planButton.IsEnabled && ((TextBlock)clonePanel.FindName("PreviewSummary")).Text.Contains("STREAM_SHRINK"), "Redução em lotes exige STREAM_SHRINK no destino");
+            var shrinkTarget = streamTarget with { Inventory = streamTarget.Inventory! with { Capabilities = [.. streamTarget.Inventory.Capabilities, "STREAM_SHRINK"] } };
+            clonePanel.UpdateData([streamSource, shrinkTarget], [], []);
+            sourceDevice.SelectedItem = streamSource; targetDevice.SelectedItem = shrinkTarget;
+            ((ComboBox)clonePanel.FindName("SourceDisk")).SelectedIndex = 0; ((ComboBox)clonePanel.FindName("TargetDisk")).SelectedIndex = 0;
+            strategy.SelectedIndex = 2;
+            Check(planButton.IsEnabled, "Redução em lotes disponível com STREAM_SHRINK");
             strategy.SelectedIndex = 0;
             var filesPanel = (FilesPanel)main.FindName("Files");
             var fileDevice = source with { Inventory = source.Inventory! with { FileRoots = [new("docs", "Documentos", true, true)] } };

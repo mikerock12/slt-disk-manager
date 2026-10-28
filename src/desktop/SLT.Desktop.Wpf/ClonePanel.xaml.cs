@@ -72,14 +72,12 @@ public partial class ClonePanel : UserControl
         var sourceDevice = SourceDevice.SelectedItem as Device;
         var stream = SelectedTransfer == "STREAM";
         var required = stream
-            ? SelectedStrategy switch { "FIT" => "STREAM_FIT", "PRESERVE_LAYOUT" when source?.SizeBytes != target?.SizeBytes => "STREAM_LAYOUT", _ => "CLONE_STREAM" }
+            ? SelectedStrategy switch { "FIT" when target is not null && source is not null && target.SizeBytes < source.SizeBytes => "STREAM_SHRINK", "FIT" => "STREAM_FIT", "PRESERVE_LAYOUT" when source?.SizeBytes != target?.SizeBytes => "STREAM_LAYOUT", _ => "CLONE_STREAM" }
             : SelectedStrategy switch { "FIT" => "RESTORE_FIT", "PRESERVE_LAYOUT" when source?.SizeBytes != target?.SizeBytes => "RESTORE_LAYOUT", _ => "RESTORE" };
         var capable = targetDevice?.Inventory?.Capabilities.Contains(required) == true
             && (!stream || targetDevice.Inventory.Capabilities.Contains("CLONE_STREAM") && sourceDevice?.Inventory?.Capabilities.Contains("CLONE_STREAM") == true);
-        var shrink = stream && SelectedStrategy == "FIT" && source is not null && target is not null && target.SizeBytes < source.SizeBytes;
-        PlanButton.IsEnabled = !_busy && source is not null && target is not null && capable && !shrink;
-        PreviewSummary.Text = shrink ? "Reduzir para um disco menor ainda exige \"Imagem completa no servidor\": encolher o NTFS/ext4 sem alterar a origem precisa de uma cópia de trabalho." :
-            !capable && targetDevice is not null ? $"Origem/destino não anunciam a capacidade {required}. Atualize o Rescue, selecione outra estratégia ou outra transferência." :
+        PlanButton.IsEnabled = !_busy && source is not null && target is not null && capable;
+        PreviewSummary.Text = !capable && targetDevice is not null ? $"Origem/destino não anunciam a capacidade {required}. Atualize o Rescue, selecione outra estratégia ou outra transferência." :
             stream ? "Em lotes: origem e destino ficam ligados ao mesmo tempo. O servidor guarda só uma janela pequena e apaga cada lote assim que o destino confirma a gravação; não precisa de disco extra no servidor nem de pasta temporária no Rescue. Uma falha interrompe o clone, e é preciso planejar de novo." :
             "Imagem completa: a origem inteira fica no servidor (espaço igual à capacidade da origem) e pode ser restaurada mais de uma vez. FIT adapta em cópia de trabalho no Rescue destino.";
         TargetPartitionNameColumn.Header = "Destino atual — apagar";

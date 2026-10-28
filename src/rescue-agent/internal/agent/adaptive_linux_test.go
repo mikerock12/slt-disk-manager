@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -409,7 +410,7 @@ func TestAdaptiveLinuxPreparedVHDXRoundTrip(t *testing.T) {
 
 // Batch clone without any scratch: chunks go straight into a target that still holds
 // unrelated old bytes; adaptation runs on the target through loop devices.
-func streamFileToTarget(t *testing.T, sourcePath, targetPath string, m streamMap) {
+func streamFileToTarget(t *testing.T, sourcePath, targetPath string, m streamMap) *shrinkDevices {
 	t.Helper()
 	ctx := context.Background()
 	const mib = int64(1024 * 1024)
@@ -428,7 +429,30 @@ func streamFileToTarget(t *testing.T, sourcePath, targetPath string, m streamMap
 		t.Fatal(err)
 	}
 	defer source.Close()
-	w := newStreamWriter(old, m)
+	files := []*os.File{old}
+	var shrink *shrinkDevices
+	if m.shrink() {
+		if err = old.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if shrink, err = setupShrink(ctx, targetPath, m, t.TempDir()); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { shrink.close() })
+		files = nil
+		for _, path := range []string{shrink.disk, shrink.overlay} {
+			f, e := os.OpenFile(path, os.O_RDWR, 0)
+			if e != nil {
+				t.Fatal(e)
+			}
+			files = append(files, f)
+		}
+	}
+	targets := []io.WriterAt{}
+	for _, f := range files {
+		targets = append(targets, f)
+	}
+	w := newStreamWriter(m, targets...)
 	buffer := make([]byte, ChunkSize)
 	for offset := int64(0); offset < m.SourceBytes; offset += ChunkSize {
 		n := min(int64(ChunkSize), m.SourceBytes-offset)
@@ -442,12 +466,15 @@ func streamFileToTarget(t *testing.T, sourcePath, targetPath string, m streamMap
 	if !w.complete() {
 		t.Fatal("regiões incompletas")
 	}
-	if err = w.verify(ctx, old, func(string, int64, int64) error { return nil }); err != nil {
+	if err = w.verify(ctx, files, func(string, int64, int64) error { return nil }); err != nil {
 		t.Fatal(err)
 	}
-	if err = old.Close(); err != nil {
-		t.Fatal(err)
+	for _, f := range files {
+		if err = f.Close(); err != nil {
+			t.Fatal(err)
+		}
 	}
+	return shrink
 }
 
 func readSentinel(t *testing.T, partitionPath, fs string) []byte {
@@ -474,78 +501,86 @@ func readSentinel(t *testing.T, partitionPath, fs string) []byte {
 	return data
 }
 
-func TestAdaptiveLinuxStreamFitGrowAndPreserveInPlace(t *testing.T) {
+func TestAdaptiveLinuxStreamFitGrowShrinkAndPreserveInPlace(t *testing.T) {
 	linuxIntegration(t)
-	if !loopToolsAvailable() {
-		t.Fatal("Linux integration stream test requires root and losetup for synthetic loop devices")
+	if !shrinkToolsAvailable() {
+		t.Fatal("Linux integration stream test requires root, losetup and dmsetup for synthetic loop devices")
 	}
 	ctx := context.Background()
 	const mib = int64(1024 * 1024)
 	for _, table := range []string{"GPT", "MBR"} {
 		for _, fs := range []string{"ext4", "ntfs"} {
-			t.Run(table+"_"+fs, func(t *testing.T) {
-				sourcePath, manifest, sentinel := makeLinuxImage(t, table, fs)
-				source, err := os.Open(sourcePath)
-				if err != nil {
-					t.Fatal(err)
-				}
-				defer source.Close()
-				before, err := hashRange(ctx, source, 0, manifest.LogicalSizeBytes)
-				if err != nil {
-					t.Fatal(err)
-				}
-				work := t.TempDir()
-				targetPath := filepath.Join(work, "target.raw")
-				m, err := planStream(manifest.Layout, 256*mib, 320*mib, 512, CloneOptions{Strategy: "FIT", ResizePartitionNumber: 2})
-				if err != nil {
-					t.Fatal(err)
-				}
-				streamFileToTarget(t, sourcePath, targetPath, m)
-				report, err := adaptStreamTarget(ctx, targetPath, m)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if !report.DataVerified || !report.TableVerified || report.BootVerified || len(report.TargetLayout.Partitions) != 3 {
-					t.Fatalf("relatório incorreto: %+v", report)
-				}
-				target, err := os.Open(targetPath)
-				if err != nil {
-					t.Fatal(err)
-				}
-				defer target.Close()
-				if err = compareRange(ctx, source, 0, target, 0, 440); err != nil {
-					t.Fatal("código de boot:", err)
-				}
-				for i, p := range manifest.Layout.Partitions {
-					if p.Number == 2 {
-						continue
-					}
-					q := m.TargetLayout.Partitions[i]
-					if err = compareRange(ctx, source, p.StartLba*512, target, q.StartLba*512, p.LengthLba*512); err != nil {
-						t.Fatalf("partição %d: %v", p.Number, err)
-					}
-				}
-				part, err := extractPartition(ctx, target, m.TargetLayout.Partitions[1], 512, filepath.Join(work, "data-check.raw"))
-				if err != nil {
-					t.Fatal(err)
-				}
-				part.Close()
-				if got := readSentinel(t, filepath.Join(work, "data-check.raw"), fs); !bytes.Equal(got, sentinel) {
-					t.Fatal("dados de OS/usuário divergiram após expansão no destino")
-				}
-				if fs == "ext4" {
-					if _, err = tool(ctx, nil, "e2fsck", "-f", "-n", filepath.Join(work, "data-check.raw")); err != nil {
+			for _, size := range []int64{320 * mib, 192 * mib} {
+				t.Run(fmt.Sprintf("%s_%s_%dMiB", table, fs, size/mib), func(t *testing.T) {
+					sourcePath, manifest, sentinel := makeLinuxImage(t, table, fs)
+					source, err := os.Open(sourcePath)
+					if err != nil {
 						t.Fatal(err)
 					}
-				}
-				if _, err = tool(ctx, nil, "sfdisk", "--verify", targetPath); err != nil {
-					t.Fatal(err)
-				}
-				after, err := hashRange(ctx, source, 0, manifest.LogicalSizeBytes)
-				if err != nil || after != before {
-					t.Fatal("origem foi modificada")
-				}
-			})
+					defer source.Close()
+					before, err := hashRange(ctx, source, 0, manifest.LogicalSizeBytes)
+					if err != nil {
+						t.Fatal(err)
+					}
+					work := t.TempDir()
+					targetPath := filepath.Join(work, "target.raw")
+					m, err := planStream(manifest.Layout, 256*mib, size, 512, CloneOptions{Strategy: "FIT", ResizePartitionNumber: 2})
+					if err != nil {
+						t.Fatal(err)
+					}
+					shrink := streamFileToTarget(t, sourcePath, targetPath, m)
+					if (shrink != nil) != (size < 256*mib) {
+						t.Fatal("sobreposição de redução incoerente com o tamanho do destino")
+					}
+					report, err := adaptStreamTarget(ctx, targetPath, m, shrink)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if !report.DataVerified || !report.TableVerified || report.BootVerified || len(report.TargetLayout.Partitions) != 3 {
+						t.Fatalf("relatório incorreto: %+v", report)
+					}
+					target, err := os.Open(targetPath)
+					if err != nil {
+						t.Fatal(err)
+					}
+					defer target.Close()
+					if err = compareRange(ctx, source, 0, target, 0, 440); err != nil {
+						t.Fatal("código de boot:", err)
+					}
+					for i, p := range manifest.Layout.Partitions {
+						if p.Number == 2 {
+							continue
+						}
+						q := m.TargetLayout.Partitions[i]
+						if err = compareRange(ctx, source, p.StartLba*512, target, q.StartLba*512, p.LengthLba*512); err != nil {
+							t.Fatalf("partição %d: %v", p.Number, err)
+						}
+					}
+					part, err := extractPartition(ctx, target, m.TargetLayout.Partitions[1], 512, filepath.Join(work, "data-check.raw"))
+					if err != nil {
+						t.Fatal(err)
+					}
+					part.Close()
+					if got := readSentinel(t, filepath.Join(work, "data-check.raw"), fs); !bytes.Equal(got, sentinel) {
+						t.Fatal("dados de OS/usuário divergiram após ajuste no destino")
+					}
+					if fs == "ext4" {
+						if _, err = tool(ctx, nil, "e2fsck", "-f", "-n", filepath.Join(work, "data-check.raw")); err != nil {
+							t.Fatal(err)
+						}
+					}
+					if _, err = tool(ctx, nil, "sfdisk", "--verify", targetPath); err != nil {
+						t.Fatal(err)
+					}
+					after, err := hashRange(ctx, source, 0, manifest.LogicalSizeBytes)
+					if err != nil || after != before {
+						t.Fatal("origem foi modificada")
+					}
+					if out, _ := tool(ctx, nil, "dmsetup", "ls"); bytes.Contains(out, []byte("slt-shrink-")) {
+						t.Fatal("dispositivo de sobreposição não foi removido")
+					}
+				})
+			}
 		}
 	}
 	sourcePath, manifest, _ := makeLinuxImage(t, "GPT", "ext4")
@@ -555,7 +590,7 @@ func TestAdaptiveLinuxStreamFitGrowAndPreserveInPlace(t *testing.T) {
 		t.Fatal(err)
 	}
 	streamFileToTarget(t, sourcePath, targetPath, m)
-	if _, err = adaptStreamTarget(ctx, targetPath, m); err != nil {
+	if _, err = adaptStreamTarget(ctx, targetPath, m, nil); err != nil {
 		t.Fatal(err)
 	}
 	actual, err := InspectLayout(ctx, targetPath, 320*mib, 512)
@@ -567,7 +602,7 @@ func TestAdaptiveLinuxStreamFitGrowAndPreserveInPlace(t *testing.T) {
 			t.Fatal("PRESERVE_LAYOUT em lotes mudou partições")
 		}
 	}
-	if _, err = planStream(manifest.Layout, 256*mib, 192*mib, 512, CloneOptions{Strategy: "FIT", ResizePartitionNumber: 2}); err == nil {
-		t.Fatal("redução em lotes aceita")
+	if _, err = planStream(manifest.Layout, 256*mib, 192*mib, 512, CloneOptions{Strategy: "PRESERVE_LAYOUT"}); err == nil {
+		t.Fatal("PRESERVE_LAYOUT truncando disco aceito")
 	}
 }

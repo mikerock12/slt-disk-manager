@@ -133,7 +133,11 @@ internal static class FeatureTests
             var unavailable = b with { Inventory = b.Inventory! with { Capabilities = ["RESTORE"] } }; db.Put("device", b.Id, unavailable);
             Reject(() => controller.PlanClone(new(a.Id, source.Fingerprint, b.Id, smaller.Fingerprint, "FIT", true)), "clone refuses destination without adaptive engine capability");
 
-            check(ClonePlanning.Preview(source, smaller, "FIT", stream: true).Blockers.Any(x => x.Contains("menor")), "batch clone keeps shrinking in image mode");
+            var shrinkPreview = ClonePlanning.Preview(source, smaller, "FIT", stream: true);
+            check(shrinkPreview.Blockers.Length == 0 && shrinkPreview.ScratchBytesRequired == 0 && shrinkPreview.TargetLayout!.Partitions[1].LengthLba == 136 * MiB / 512, "batch FIT shrinks the OS partition without Rescue scratch");
+            var shrinkTarget = Add("RESCUE", Disk("SHRINK_TARGET", 192 * MiB), ["CAPTURE", "RESTORE", "CLONE_STREAM", "STREAM_FIT"]);
+            var shrinkSource = Add("RESCUE", source, ["CAPTURE", "RESTORE", "CLONE_STREAM"]);
+            Reject(() => controller.PlanClone(new(shrinkSource.Id, source.Fingerprint, shrinkTarget.Id, shrinkTarget.Inventory!.Disks[0].Fingerprint, "FIT", true, "STREAM")), "batch shrink requires STREAM_SHRINK on the destination");
             var grow = ClonePlanning.Preview(source, Disk("GROW", 320 * MiB), "FIT", stream: true);
             check(grow.Blockers.Length == 0 && grow.ScratchBytesRequired == 0 && grow.ServerBytesRequired == 0 && ClonePlanning.Preview(source, Disk("GROW", 320 * MiB), "FIT").ServerBytesRequired == source.SizeBytes, "batch FIT to larger disk needs neither Rescue scratch nor a full server image");
             var streamSource = Disk("STREAM_SOURCE", 3 * Controller.ChunkSize + 512); var streamTarget = Disk("STREAM_TARGET", streamSource.SizeBytes);
@@ -151,7 +155,7 @@ internal static class FeatureTests
             Reject(() => controller.Approve(tgt, "AUTORIZAR"), "batch destination still requires its APAGAR challenge");
             controller.Approve(tgt, controller.GetJob(tgt).Plan.Challenge); controller.Next(sa.Id); controller.Next(sb.Id);
             check(controller.CloneState(ss).State == "STREAMING", "source and destination run at the same time");
-            var data = RandomNumberGenerator.GetBytes((int)streamSource.SizeBytes);
+            var data = RandomNumberGenerator.GetBytes((int)streamSource.SizeBytes); Array.Clear(data, 3 * Controller.ChunkSize, 512);
             byte[] Part(int seq) => data.AsSpan(seq * Controller.ChunkSize, (int)Math.Min(Controller.ChunkSize, data.Length - (long)seq * Controller.ChunkSize)).ToArray();
             string H(byte[] x) => Convert.ToHexStringLower(SHA256.HashData(x));
             Reject(() => controller.Upload(sa.Id, cap, 0, Part(0), H(Part(0))), "batch source must announce verified layout before data");
@@ -166,10 +170,12 @@ internal static class FeatureTests
             controller.StreamAcknowledge(sb.Id, tgt, new(0));
             check(!File.Exists(Path.Combine(controller.StreamDir(sid), "00000000.bin")) && File.Exists(Path.Combine(controller.StreamDir(sid), "00000001.bin")), "acknowledged batch deleted from server while pending batch is kept");
             Reject(() => controller.Download(sb.Id, tgt, 0), "discarded batch cannot be requested again");
+            Reject(() => controller.Upload(sa.Id, cap, 2, [], H(Part(2)), zero: true), "zero batch marker refused unless its hash is the all-zero hash");
             controller.Upload(sa.Id, cap, 2, Part(2), H(Part(2)));
             try { controller.Upload(sa.Id, cap, 3, Part(3), H(Part(3))); throw new Exception("Batch window not enforced after ack."); }
             catch (ApiException e) when (e.Status == 429) { }
-            controller.StreamAcknowledge(sb.Id, tgt, new(2)); controller.Upload(sa.Id, cap, 3, Part(3), H(Part(3)));
+            controller.StreamAcknowledge(sb.Id, tgt, new(2)); controller.Upload(sa.Id, cap, 3, [], Controller.ZeroHash(512), zero: true);
+            check(!File.Exists(Path.Combine(controller.StreamDir(sid), "00000003.bin")) && controller.StreamStatusFor(sb.Id, tgt).Pending.Single().Sha256 == Controller.ZeroHash(512), "all-zero batch crosses without bytes and keeps its full-size hash");
             Reject(() => controller.Result(sa.Id, cap, new(true, "fixture", "")), "source cannot finish before declaring all batches sent");
             controller.Complete(sa.Id, cap); controller.Result(sa.Id, cap, new(true, "fixture", ""));
             check(controller.GetJob(cap).State == "COMPLETED" && controller.CloneState(ss).State == "STREAMING", "source machine is released while destination drains last batches");
