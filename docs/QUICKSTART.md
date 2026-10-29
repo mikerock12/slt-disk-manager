@@ -2,16 +2,37 @@
 
 ## Servidor Windows 10/11 x64
 
-Use Ethernet e uma rede privada da assistência. Escolha o IPv4 do servidor em
-`ipconfig`, por exemplo `192.168.1.10`, e a sub-rede real, por exemplo
-`192.168.1.0/24`. Não copie os exemplos se sua rede for diferente.
+Use Ethernet e uma rede privada da assistência.
 
-Extraia o pacote em uma pasta própria. Execute `Servidor.cmd` e preencha IP/CIDR.
-O painel abre usando `state/server/connection.json` (segredo administrativo local).
-O arquivo `state/server/server-info.txt` mostra URL e pin que podem ser conferidos
-nos clientes. Nunca copie a pasta `state/server` para um cliente.
+### 1. Fixe o IP do servidor
 
-Para serviço e firewall, abra PowerShell **como Administrador**:
+O servidor escuta só no IPv4 escolhido (porta 7443) e cada cliente guarda esse
+endereço. Se o roteador trocar o IP, os clientes deixam de conectar. Antes de instalar:
+
+- **Recomendado — reserva de DHCP no roteador:** no painel do roteador, procure
+  "Reserva de DHCP" ou "IP estático por MAC" e associe o endereço MAC da placa de rede
+  do servidor (`ipconfig /all`, "Endereço Físico") a um IP, por exemplo `192.168.1.10`.
+  O Windows continua em "Obter IP automaticamente" e recebe sempre o mesmo endereço.
+- **Ou IP manual no Windows:** Configurações → Rede e Internet → Ethernet → Atribuição de
+  IP → Editar → Manual. Informe IP, máscara, gateway e DNS, escolhendo um IP fora da faixa
+  que o roteador distribui.
+
+Confirme com `ipconfig` e anote também a sub-rede real, por exemplo `192.168.1.0/24`.
+Não copie os exemplos se sua rede for diferente. Só o servidor precisa de IP fixo.
+
+### 2. Instale o servidor
+
+Use **SLT-Disk-Manager-Servidor-Setup** na bancada. Ele traz servidor, painel, 7-Zip,
+agentes Rescue/WinPE e guias; não instala o cliente. Para rodar como serviço do Windows,
+marque a opção na instalação e informe o IP fixo e a sub-rede: o instalador pede
+permissão de administrador, cria o serviço e libera a porta 7443 só nessa rede.
+
+Sem serviço (ou no pacote portátil), execute `Servidor.cmd` e preencha IP/CIDR. O painel
+abre usando `state/server/connection.json` (segredo administrativo local). O arquivo
+`state/server/server-info.txt` mostra URL e pin que podem ser conferidos nos clientes.
+Nunca copie a pasta `state/server` para um cliente.
+
+Para instalar o serviço manualmente, abra PowerShell **como Administrador**:
 
 ```powershell
 ./install-server/Install-Server.ps1 -PackageDirectory "$PWD/server" -Bind 192.168.1.10 -AllowedSubnet 192.168.1.0/24
@@ -24,11 +45,17 @@ portátil, o processo continua em segundo plano; para encerrá-lo use Gerenciado
 de Tarefas e identifique `SLT.Controller.Host`, ou pare o serviço quando instalado.
 Não mantenha dois controladores usando o mesmo diretório de estado.
 
+Se o IP do servidor precisar mudar, reinstale o serviço com o novo `-Bind` e aponte
+cada cliente para a nova URL; o certificado e o pin do servidor são mantidos.
+
 ## Dois computadores clientes
 
-Copie apenas a pasta `client`, `Cliente.cmd` e `Iniciar-Cliente.ps1` para cada PC,
-mantendo a estrutura. Execute `Cliente.cmd`, informe a URL e confira o pin com o
-servidor. Não aceite um pin recebido de uma máquina desconhecida.
+Use **SLT-Disk-Manager-Cliente-Setup** em cada PC atendido. Ele traz só o cliente
+Windows e o smartctl; pode coexistir com o servidor no mesmo PC. Execute o atalho
+"Cliente Windows" (ou marque o serviço na instalação), informe a URL do servidor com o
+IP fixo e confira o pin com o servidor. Não aceite um pin recebido de uma máquina
+desconhecida. No pacote portátil, copie apenas a pasta `client`, `Cliente.cmd` e
+`Iniciar-Cliente.ps1`, mantendo a estrutura.
 
 O client exibe um código temporário. No painel do servidor, abra Pareamento,
 selecione a solicitação correspondente e digite o código conferido no PC.

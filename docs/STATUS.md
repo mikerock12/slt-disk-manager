@@ -1,6 +1,6 @@
 # Matriz de entrega e homologação
 
-Esta é a beta 0.1.0-beta.5, não o aceite integral da seção 25 da especificação.
+Esta é a beta 0.1.0-beta.5.1, não o aceite integral da seção 25 da especificação.
 Downloads e evidências atuais em ENTREGA-2026-10-29-beta5.md; registros anteriores são históricos.
 
 | Requisito | Estado nesta entrega | Evidência/limite |
@@ -30,7 +30,7 @@ Downloads e evidências atuais em ENTREGA-2026-10-29-beta5.md; registros anterio
 | Auditoria/plano/locks/anti-replay | Implementado | Registro encadeado; não é WORM nem auditoria externa |
 | Retomada de imagem pela rede | Pendente | Recibo idempotente; queda encerra sem retomar escrita |
 | Criptografia em repouso/retention | Externa/manual | ACLs para chaves; proteger volume e definir política |
-| Instalador EXE Windows | Implementado e testado | Componentes servidor/cliente/offline; runtime .NET/C++, 7-Zip e smartctl embutidos; serviços opcionais com UAC; desinstalação preserva estado gerado |
+| Instalador EXE Windows | Implementado e testado | Instaladores separados de servidor e cliente (beta.5.1); runtime .NET/C++, 7-Zip (servidor) e smartctl (cliente) embutidos; serviço opcional de cada um com UAC; desinstalação preserva estado gerado |
 | MSI/assinatura de binários | Pendente | ZIP e instalador Inno disponíveis; sem certificado de assinatura do proprietário |
 | GitHub/CI remoto/PR/merge/destaque | Publicado e fixado | PR1–PR9 mesclados; beta.5 publicada pelo CI a partir do merge 3ebd13c (Windows/Linux, ISO BIOS/UEFI e release) |
 | Backup Google Drive | Concluído e conferido (beta.5) | Drive privado: fonte+Git bundle, os oito assets da release com manifesto SHA256 e snapshot do portal; releitura de tamanho/SHA256, tamanhos remotos e permissão só do proprietário conferidos; sem dados de clientes nem mídias |

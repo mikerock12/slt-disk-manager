@@ -10,11 +10,15 @@ dados reais antes de homologar o ciclo em VMs e discos descartáveis.
 
 ## Começar
 
-Baixe o [instalador, pacote portátil e ISO SLT Rescue da beta.5](https://github.com/mikerock12/slt-disk-manager/releases/tag/v0.1.0-beta.5).
+Baixe os [instaladores do servidor e do cliente, o pacote portátil e a ISO SLT Rescue da beta.5.1](https://github.com/mikerock12/slt-disk-manager/releases/tag/v0.1.0-beta.5.1).
 Consulte [a entrega, as evidências de laboratório e os hashes](docs/ENTREGA-2026-10-29-beta5.md).
 
-Leia [o guia de bancada](docs/QUICKSTART.md). O pacote portátil Windows x64 contém
-servidor, painel e client com runtime .NET incluído. Após extrair:
+São dois instaladores: **SLT-Disk-Manager-Servidor-Setup** para o computador da bancada
+(servidor, painel, 7-Zip, agentes Rescue/WinPE) e **SLT-Disk-Manager-Cliente-Setup** para os
+PCs atendidos (cliente Windows e smartctl). **Fixe o IP do servidor** antes de instalar
+(reserva de DHCP no roteador ou IP manual), como explica [o guia de bancada](docs/QUICKSTART.md).
+O pacote portátil Windows x64 contém servidor, painel e cliente com runtime .NET incluído.
+Após extrair:
 
 1. No servidor, execute `Servidor.cmd` e informe IP/sub-rede da bancada.
 2. Nos clientes autorizados, execute `Cliente.cmd`, informe URL e pin SHA256 do servidor.
