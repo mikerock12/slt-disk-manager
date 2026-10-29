@@ -31,4 +31,5 @@ func (unsupportedWinPE) VerifyVolumes(int, string, byte, byte) error {
 }
 func (unsupportedWinPE) VerifyApplied(byte) error        { return errors.New("WinPE necessário") }
 func (unsupportedWinPE) VerifyBoot(byte, string) error   { return errors.New("WinPE necessário") }
+func (unsupportedWinPE) FlushVolume(byte) error          { return errors.New("WinPE necessário") }
 func (unsupportedWinPE) DriveLayout(int) ([]byte, error) { return nil, errors.New("WinPE necessário") }

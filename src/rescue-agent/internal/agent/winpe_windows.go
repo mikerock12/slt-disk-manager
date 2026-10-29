@@ -473,6 +473,19 @@ func (nativeWinPE) VerifyApplied(windows byte) error {
 	}
 	return nil
 }
+func (nativeWinPE) FlushVolume(letter byte) error {
+	const genericRead, genericWrite, shareReadWrite, openExisting = 0x80000000, 0x40000000, 0x3, 3
+	h, _, e := peKernel.NewProc("CreateFileW").Call(uintptr(unsafe.Pointer(peUTF(fmt.Sprintf(`\\.\%c:`, letter)))), genericRead|genericWrite, shareReadWrite, 0, openExisting, 0, 0)
+	if syscall.Handle(h) == syscall.InvalidHandle {
+		return peError("abrir volume", e)
+	}
+	defer syscall.CloseHandle(syscall.Handle(h))
+	if ok, _, e := peKernel.NewProc("FlushFileBuffers").Call(h); ok == 0 {
+		return peError("FlushFileBuffers", e)
+	}
+	return nil
+}
+
 func (nativeWinPE) VerifyBoot(system byte, firmware string) error {
 	files := []string{`EFI\Microsoft\Boot\BCD`, `EFI\Microsoft\Boot\bootmgfw.efi`}
 	if firmware == "MBR_BIOS" {

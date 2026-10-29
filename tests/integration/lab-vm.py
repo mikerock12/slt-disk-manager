@@ -633,6 +633,7 @@ def phase_install(lab):
             # The agent reboots into the installed Windows (rebootAfterInstall); power off before
             # its first boot starts here with internet, so firstboot runs it from the start.
             c2.shot("windows-aplicado")
+            time.sleep(30)  # the agent flushes the volumes before reporting; spare WinPE's own reboot flush too
             c2.stop()
             c2.process = None
         return states if all(s == "COMPLETED" for s in states.values()) else None

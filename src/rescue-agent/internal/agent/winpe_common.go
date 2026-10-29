@@ -59,6 +59,7 @@ type winPEPlatform interface {
 	VerifyVolumes(int, string, byte, byte) error
 	VerifyApplied(byte) error
 	VerifyBoot(byte, string) error
+	FlushVolume(byte) error
 	DriveLayout(int) ([]byte, error)
 }
 
@@ -541,6 +542,13 @@ func (r *winPERunner) deploy(ctx context.Context, p Plan) (details string, deplo
 	}
 	if err = r.platform.VerifyBoot(system, firmware); err != nil {
 		return "", err
+	}
+	// Boot files and unattend.xml may still sit in the WinPE write cache; the technician (or a
+	// reboot) may cut power right after the server shows the job as completed.
+	for _, letter := range []byte{system, windows} {
+		if err = r.platform.FlushVolume(letter); err != nil {
+			return "", fmt.Errorf("gravação do volume %c: não confirmada no disco: %w", letter, err)
+		}
 	}
 	report, _ := json.Marshal(map[string]any{"mediaId": media.ID, "imageIndex": p.Deployment.ImageIndex, "firmware": firmware, "applied": true, "bootFilesCreated": true, "bootVerified": false, "unattend": unattend, "oobe": "primeiro boot pendente de validação local", "retainedStaging": dir})
 	return string(report), nil
