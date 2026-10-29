@@ -32,8 +32,8 @@ Downloads e evidências atuais em ENTREGA-2026-10-29-beta5.md; registros anterio
 | Criptografia em repouso/retention | Externa/manual | ACLs para chaves; proteger volume e definir política |
 | Instalador EXE Windows | Implementado e testado | Componentes servidor/cliente/offline; runtime .NET/C++, 7-Zip e smartctl embutidos; serviços opcionais com UAC; desinstalação preserva estado gerado |
 | MSI/assinatura de binários | Pendente | ZIP e instalador Inno disponíveis; sem certificado de assinatura do proprietário |
-| GitHub/CI remoto/PR/merge/destaque | Publicado e fixado | PR1–PR7 mesclados; beta.4 publicada com CI40729165261 Windows/Linux e ISO40729165548 SUCCESS |
-| Backup Google Drive | Concluído e conferido (beta.3.3) | Drive privado: fonte+Git bundle e os oito assets da release com manifesto SHA256; tamanhos/hashes e permissão só do proprietário conferidos; sem dados de clientes nem mídia Microsoft |
+| GitHub/CI remoto/PR/merge/destaque | Publicado e fixado | PR1–PR9 mesclados; beta.5 publicada pelo CI a partir do merge 3ebd13c (Windows/Linux, ISO BIOS/UEFI e release) |
+| Backup Google Drive | Concluído e conferido (beta.5) | Drive privado: fonte+Git bundle, os oito assets da release com manifesto SHA256 e snapshot do portal; releitura de tamanho/SHA256, tamanhos remotos e permissão só do proprietário conferidos; sem dados de clientes nem mídias |
 
 Homologação restante: hardware físico (placas de rede/Wi-Fi, Secure Boot, SATA/NVMe) com
 discos descartáveis, Windows 11, perda de rede/energia durante gravação e primeiro boot em
