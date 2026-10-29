@@ -35,7 +35,7 @@ public sealed record JobPlan(string Id, string Kind, string DeviceId, string Dis
     long DiskSizeBytes, int LogicalSectorBytes, string ImageId, string Challenge, DateTimeOffset ExpiresAtUtc, bool Consent,
     [property: JsonPropertyName("clone")] CloneOptions? CloneOptions = null, FileRequest? File = null, DeploymentOptions? Deployment = null);
 public sealed record Job(string Id, JobPlan Plan, string State, DateTimeOffset CreatedAtUtc,
-    DateTimeOffset? ApprovedAtUtc, JsonElement? Progress, JsonElement? Result)
+    DateTimeOffset? ApprovedAtUtc, JsonElement? Progress, JsonElement? Result, string? TemporaryPassword = null)
 {
     public string Kind => Plan.Kind;
     public string DiskPath => Plan.File is { } files

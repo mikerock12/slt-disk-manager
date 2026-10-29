@@ -10,14 +10,16 @@ public sealed record LayoutPartition(int Number, long StartLba, long LengthLba, 
     public string Boot => Bootable ? "Sim" : "—";
 }
 public sealed record CloneOptions(string Strategy, int ResizePartitionNumber);
-public sealed record DeploymentOptions(string MediaId, int ImageIndex, string Firmware, bool RebootAfterInstall);
-public sealed record WindowsImage(int Index, string Name, string Description, string Architecture, string Version, long MinimumSizeBytes)
+public sealed record DeploymentOptions(string MediaId, int ImageIndex, string Firmware, bool RebootAfterInstall, DeploymentAccount? Account = null, string? ToolSha256 = null);
+public sealed record DeploymentAccount(string ComputerName, string UserName, string? Password = null, string? PasswordHash = null, string Locale = "pt-BR", string TimeZone = "");
+public sealed record WindowsImage(int Index, string Name, string Description, string Architecture, string Version, long MinimumSizeBytes, string Language = "")
 {
     public string Label => $"{Index} • {Name} • {Architecture} • mínimo {Display.Bytes(MinimumSizeBytes)}";
 }
 public sealed record DeploymentMedia(string Id, string Name, string FileName, long SizeBytes, string Sha256,
-    ImageChunk[] Chunks, WindowsImage[] Images, string State, DateTimeOffset CreatedAtUtc)
+    ImageChunk[] Chunks, WindowsImage[] Images, string State, DateTimeOffset CreatedAtUtc, string? Error = null, string Kind = "WINDOWS")
 {
+    public bool IsLinux => Kind == "LINUX";
     public string Size => Display.Bytes(SizeBytes);
     public string Label => $"{Name} • {Size} • {State}";
 }

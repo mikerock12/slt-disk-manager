@@ -31,6 +31,9 @@ public sealed record AgentOptions(Uri Server, string ServerPin, string StateDire
         var smartctl = values.GetValueOrDefault("--smartctl");
         if (smartctl is not null && (!Path.IsPathFullyQualified(smartctl) || !File.Exists(smartctl)))
             throw new ArgumentException("--smartctl exige caminho absoluto para smartctl.exe existente.");
+        // The client package ships smartmontools in tools\smartmontools; --smartctl overrides it.
+        var bundled = Path.Combine(AppContext.BaseDirectory, "tools", "smartmontools", "smartctl.exe");
+        if (smartctl is null && File.Exists(bundled) && !File.GetAttributes(bundled).HasFlag(FileAttributes.ReparsePoint)) smartctl = bundled;
         var fileRoots = values.GetValueOrDefault("--file-roots");
         if (fileRoots is not null && (!Path.IsPathFullyQualified(fileRoots) || !System.IO.File.Exists(fileRoots)))
             throw new ArgumentException("--file-roots exige caminho absoluto para JSON local existente.");

@@ -46,7 +46,10 @@ Planejamento cria de uma vez CAPTURE (origem) e RESTORE (destino) com o mesmo `s
 no plano assinado; cada um exige sua aprovação normal (AUTORIZAR / APAGAR). Exige
 capability CLONE_STREAM nos dois; PRESERVE_LAYOUT com capacidade diferente exige
 STREAM_LAYOUT e FIT exige STREAM_FIT (sfdisk, ntfsresize/resize2fs, losetup, root) no destino.
-FIT só para destino igual ou maior nesta fase; reduzir continua no modo IMAGE.
+FIT para destino menor exige STREAM_SHRINK (dmsetup): a partição passa por um dispositivo device-mapper
+cujo início é o destino e cujo excedente é um arquivo esparso em memória com só os blocos não nulos
+de 64 KiB (limite 1 GiB); ntfsresize/resize2fs move esses dados para dentro e a sobra é descartada.
+Lote de 4 MiB só com zeros cruza a rede como marcador (`X-Content-Zero: 1`, corpo vazio, SHA256 dos zeros).
 `ClonePreview.serverBytesRequired` informa a janela (STREAM) ou a capacidade da origem (IMAGE).
 Estados da sessão: AWAITING_SOURCE_APPROVAL, AWAITING_TARGET_APPROVAL, STREAMING, COMPLETED, FAILED.
 

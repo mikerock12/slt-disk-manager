@@ -24,7 +24,7 @@ public sealed partial class Controller
         var preview = ClonePlanning.Preview(a, b, request.Strategy, stream: true);
         Ensure(preview.Blockers.Length == 0, 409, string.Join(" ", preview.Blockers));
         Ensure(source.Inventory!.Capabilities.Contains("CLONE_STREAM") && target.Inventory!.Capabilities.Contains("CLONE_STREAM"), 409, "Origem e destino precisam do Rescue com clonagem em lotes (CLONE_STREAM).");
-        var required = request.Strategy switch { "FIT" => "STREAM_FIT", "PRESERVE_LAYOUT" when a.SizeBytes != b.SizeBytes => "STREAM_LAYOUT", _ => null };
+        var required = request.Strategy switch { "FIT" when b.SizeBytes < a.SizeBytes => "STREAM_SHRINK", "FIT" => "STREAM_FIT", "PRESERVE_LAYOUT" when a.SizeBytes != b.SizeBytes => "STREAM_LAYOUT", _ => null };
         Ensure(required == null || target.Inventory!.Capabilities.Contains(required), 409, $"Rescue destino não oferece {required} para gravar em lotes.");
         var window = (long)StreamWindowChunks * ChunkSize;
         Ensure(StreamWindowChunks > 0 && FreeBytes() - ReservedStreamBytes() > window + 64L * 1024 * 1024, 409, "Servidor sem espaço livre para a janela de transmissão em lotes.");
@@ -90,19 +90,27 @@ public sealed partial class Controller
         }
         return Status(s);
     }
-    private ImageChunk StreamUpload(Job j, int seq, byte[] bytes, string sha)
+    private static readonly Dictionary<int, string> ZeroHashes = [];
+    public static string ZeroHash(int size)
+    {
+        lock (ZeroHashes) { if (!ZeroHashes.TryGetValue(size, out var hash)) ZeroHashes[size] = hash = Convert.ToHexStringLower(SHA256.HashData(new byte[size])); return hash; }
+    }
+    private ImageChunk StreamUpload(Job j, int seq, byte[] bytes, string sha, bool zero)
     {
         var s = OpenStream(j); Ensure(s.SourceJobId == j.Id && s.SourceStarted, 409, "Inicie a transmissão com o layout conferido.");
-        var hash = Convert.ToHexStringLower(SHA256.HashData(bytes));
-        Ensure(SafeEquals(hash, sha), 400, "SHA256 não corresponde aos dados recebidos.");
         var offset = (long)seq * ChunkSize;
-        Ensure(seq >= 0 && offset < s.LogicalSizeBytes && bytes.Length == (int)Math.Min(ChunkSize, s.LogicalSizeBytes - offset), 400, "Tamanho/offset de chunk inválido.");
+        Ensure(seq >= 0 && offset < s.LogicalSizeBytes, 400, "Tamanho/offset de chunk inválido.");
+        var size = (int)Math.Min(ChunkSize, s.LogicalSizeBytes - offset);
+        // An all-zero batch travels as a marker without bytes; its hash still covers the full size.
+        Ensure(!zero || bytes.Length == 0, 400, "Lote zerado não carrega dados.");
+        var hash = zero ? ZeroHash(size) : Convert.ToHexStringLower(SHA256.HashData(bytes));
+        Ensure(SafeEquals(hash, sha), 400, "SHA256 não corresponde aos dados recebidos.");
+        Ensure(zero || bytes.Length == size, 400, "Tamanho/offset de chunk inválido.");
         if (Db.GetChunk(s.Id, "stream", seq) is {} old) { Ensure(old.Sha256 == hash, 409, "Chunk duplicado divergente."); return old; }
         Ensure(seq == Db.NextChunk(s.Id, "stream"), 409, "Chunk fora de ordem; aguarde recibo persistido.");
         if (seq - s.AckedThrough - 1 >= s.WindowChunks) throw new ApiException(429, "Janela de transmissão cheia; aguardando o destino gravar os lotes anteriores.");
-        Ensure(FreeBytes() > bytes.Length + 16L * 1024 * 1024, 409, "Repositório sem espaço.");
-        PersistChunk(StreamChunkPath(s.Id, seq), bytes, hash);
-        var chunk = new ImageChunk(seq, offset, bytes.Length, hash); Db.AddChunk(s.Id, "stream", chunk); return chunk;
+        if (!zero) { Ensure(FreeBytes() > bytes.Length + 16L * 1024 * 1024, 409, "Repositório sem espaço."); PersistChunk(StreamChunkPath(s.Id, seq), bytes, hash); }
+        var chunk = new ImageChunk(seq, offset, size, hash); Db.AddChunk(s.Id, "stream", chunk); return chunk;
     }
     private ImageManifest StreamSourceComplete(Job j, DiskLayout? layout)
     {
@@ -133,7 +141,9 @@ public sealed partial class Controller
         var s = OpenStream(j); Ensure(s.TargetJobId == j.Id, 403, "Transmissão de outro destino.");
         Ensure(seq > s.AckedThrough, 409, "Lote já confirmado e descartado no servidor.");
         var chunk = Db.GetChunk(s.Id, "stream", seq) ?? throw new ApiException(409, "Lote ainda não recebido da origem.");
-        var bytes = File.ReadAllBytes(StreamChunkPath(s.Id, seq));
+        var path = StreamChunkPath(s.Id, seq);
+        if (!File.Exists(path) && chunk.Sha256 == ZeroHash(chunk.SizeBytes)) return new byte[chunk.SizeBytes];
+        var bytes = File.ReadAllBytes(path);
         Ensure(bytes.Length == chunk.SizeBytes && Convert.ToHexStringLower(SHA256.HashData(bytes)) == chunk.Sha256, 409, "Lote corrompido no servidor; escrita bloqueada."); return bytes;
     }
     public StreamStatus StreamAcknowledge(string deviceId, string jobId, StreamAck ack)

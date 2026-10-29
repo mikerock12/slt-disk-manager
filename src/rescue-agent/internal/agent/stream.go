@@ -22,13 +22,23 @@ import (
 
 // Batch clone: the source sends 4 MiB chunks through a small server window while the
 // target writes them straight to its disk. No full image exists on the server nor on any
-// scratch storage. Adaptation for an equal or larger target happens on the target itself
-// after every written byte was re-read and compared; the source is never modified.
+// scratch storage. Adaptation happens on the target itself after every written byte was
+// re-read and compared; the source is never modified. Shrinking uses a device-mapper
+// overlay: the partition's first newSize bytes are the target disk, the tail is a sparse
+// RAM file that only holds non-zero data until ntfsresize/resize2fs moves it inside.
+
+const (
+	streamDisk    = 0
+	streamOverlay = 1
+	// Non-zero source bytes that may sit beyond the new partition end during a shrink.
+	streamOverflowLimit = int64(1024 * 1024 * 1024)
+)
 
 type streamCopy struct {
 	Source int64
 	Dest   int64
 	Length int64
+	Device int
 }
 
 type streamZero struct {
@@ -54,6 +64,8 @@ type streamMap struct {
 	Resize       *streamResize
 }
 
+func (m streamMap) shrink() bool { return m.Resize != nil && m.Resize.NewSize < m.Resize.OldSize }
+
 // planStream maps source byte ranges onto the target exactly like prepareImage builds its
 // private copy, so the target ends with the same bytes the image mode would write.
 func planStream(source *DiskLayout, sourceBytes, targetBytes int64, sector int, options CloneOptions) (streamMap, error) {
@@ -66,15 +78,15 @@ func planStream(source *DiskLayout, sourceBytes, targetBytes int64, sector int, 
 		if sourceBytes != targetBytes {
 			return m, errors.New("EXACT_RAW exige mesma capacidade")
 		}
-		m.Copies = []streamCopy{{0, 0, sourceBytes}}
+		m.Copies = []streamCopy{{0, 0, sourceBytes, streamDisk}}
 		m.TargetLayout = source
 		return m, nil
 	case "PRESERVE_LAYOUT", "FIT":
 	default:
 		return m, errors.New("estratégia desconhecida")
 	}
-	if targetBytes < sourceBytes {
-		return m, errors.New("clone em lotes não reduz o disco; use o modo com imagem completa no servidor")
+	if options.Strategy == "PRESERVE_LAYOUT" && targetBytes < sourceBytes {
+		return m, errors.New("PRESERVE_LAYOUT não permite truncar um disco maior")
 	}
 	if err := ValidateLayout(source, sourceBytes); err != nil {
 		return m, err
@@ -96,7 +108,7 @@ func planStream(source *DiskLayout, sourceBytes, targetBytes int64, sector int, 
 		if source.TableType == "GPT" && targetBytes > sourceBytes {
 			end = (source.LastUsableLba + 1) * int64(sector)
 		}
-		m.Copies = []streamCopy{{0, 0, end}}
+		m.Copies = []streamCopy{{0, 0, end, streamDisk}}
 		if end < targetBytes {
 			m.Zeros = []streamZero{{end, targetBytes - end}}
 		}
@@ -124,24 +136,26 @@ func planStream(source *DiskLayout, sourceBytes, targetBytes int64, sector int, 
 		if err != nil {
 			return m, err
 		}
-		if newSize < oldSize {
-			return m, errors.New("clone em lotes não reduz partições; use o modo com imagem completa no servidor")
-		}
 		suffixStart, suffixEnd := start+oldSize, (source.LastUsableLba+1)*int64(sector)
 		if suffixEnd < suffixStart {
 			return m, errors.New("sufixo inválido")
 		}
-		m.Copies = []streamCopy{{0, 0, suffixStart}}
-		if suffixEnd > suffixStart {
-			m.Copies = append(m.Copies, streamCopy{suffixStart, start + newSize, suffixEnd - suffixStart})
+		m.Resize = &streamResize{Partition: modified, FileSystem: original.FileSystem, OldSize: oldSize, NewSize: newSize}
+		if newSize < oldSize {
+			// The whole partition goes through the overlay; its first newSize bytes are the target.
+			m.Copies = []streamCopy{{0, 0, start, streamDisk}, {start, 0, oldSize, streamOverlay}}
+		} else {
+			m.Copies = []streamCopy{{0, 0, suffixStart, streamDisk}}
+			if newSize > oldSize {
+				m.Zeros = append(m.Zeros, streamZero{start + oldSize, newSize - oldSize})
+			}
 		}
-		if newSize > oldSize {
-			m.Zeros = append(m.Zeros, streamZero{start + oldSize, newSize - oldSize})
+		if suffixEnd > suffixStart {
+			m.Copies = append(m.Copies, streamCopy{suffixStart, start + newSize, suffixEnd - suffixStart, streamDisk})
 		}
 		if tail := start + newSize + suffixEnd - suffixStart; tail < targetBytes {
 			m.Zeros = append(m.Zeros, streamZero{tail, targetBytes - tail})
 		}
-		m.Resize = &streamResize{Partition: modified, FileSystem: original.FileSystem, OldSize: oldSize, NewSize: newSize}
 	}
 	if err := ValidateLayout(&target, targetBytes); err != nil {
 		return m, err
@@ -150,16 +164,42 @@ func planStream(source *DiskLayout, sourceBytes, targetBytes int64, sector int, 
 	return m, nil
 }
 
-type streamWriter struct {
-	f       io.WriterAt
-	m       streamMap
-	sums    []hash.Hash
-	next    []int64
-	written int64
+func allZero(data []byte) bool {
+	for _, b := range data {
+		if b != 0 {
+			return false
+		}
+	}
+	return true
 }
 
-func newStreamWriter(f io.WriterAt, m streamMap) *streamWriter {
-	w := &streamWriter{f: f, m: m}
+var zeroHashes = map[int]string{}
+
+func zeroHash(size int) string {
+	if h, ok := zeroHashes[size]; ok {
+		return h
+	}
+	sum := sha256.Sum256(make([]byte, size))
+	zeroHashes[size] = hex.EncodeToString(sum[:])
+	return zeroHashes[size]
+}
+
+type streamWriter struct {
+	targets       []io.WriterAt
+	m             streamMap
+	sums          []hash.Hash
+	next          []int64
+	written       int64
+	overflowStart int64
+	overflowUsed  int64
+	overflowLimit int64
+}
+
+func newStreamWriter(m streamMap, targets ...io.WriterAt) *streamWriter {
+	w := &streamWriter{targets: targets, m: m, overflowStart: -1, overflowLimit: streamOverflowLimit}
+	if m.shrink() {
+		w.overflowStart = m.Resize.NewSize
+	}
 	for _, c := range m.Copies {
 		w.sums = append(w.sums, sha256.New())
 		w.next = append(w.next, c.Source)
@@ -167,17 +207,51 @@ func newStreamWriter(f io.WriterAt, m streamMap) *streamWriter {
 	return w
 }
 
+func (w *streamWriter) put(device int, piece []byte, offset int64) error {
+	if device == streamOverlay && w.overflowStart >= 0 && offset+int64(len(piece)) > w.overflowStart {
+		split := max(int64(0), w.overflowStart-offset)
+		if split > 0 {
+			if err := w.put(device, piece[:split], offset); err != nil {
+				return err
+			}
+		}
+		// The overflow is a fresh sparse file: zero blocks need no write and no memory.
+		const block = 64 * 1024
+		tail, at := piece[split:], offset+split
+		for i := 0; i < len(tail); i += block {
+			part := tail[i:min(i+block, len(tail))]
+			if allZero(part) {
+				continue
+			}
+			if w.overflowUsed += int64(len(part)); w.overflowUsed > w.overflowLimit {
+				return fmt.Errorf("dados além do novo tamanho da partição excedem %d MiB; use o modo com imagem completa no servidor", w.overflowLimit/1024/1024)
+			}
+			if err := w.writeAt(device, part, at+int64(i)); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	return w.writeAt(device, piece, offset)
+}
+
+func (w *streamWriter) writeAt(device int, piece []byte, offset int64) error {
+	n, err := w.targets[device].WriteAt(piece, offset)
+	if err != nil {
+		return err
+	}
+	if n != len(piece) {
+		return io.ErrShortWrite
+	}
+	w.written += int64(n)
+	return nil
+}
+
 // write places the parts of one source chunk that belong to a copy region at their target offset.
 func (w *streamWriter) write(offset int64, data []byte) error {
 	end := offset + int64(len(data))
 	for i, c := range w.m.Copies {
-		lo, hi := offset, end
-		if c.Source > lo {
-			lo = c.Source
-		}
-		if c.Source+c.Length < hi {
-			hi = c.Source + c.Length
-		}
+		lo, hi := max(offset, c.Source), min(end, c.Source+c.Length)
 		if lo >= hi {
 			continue
 		}
@@ -185,16 +259,11 @@ func (w *streamWriter) write(offset int64, data []byte) error {
 			return errors.New("lotes fora de ordem para a região de cópia")
 		}
 		piece := data[lo-offset : hi-offset]
-		n, err := w.f.WriteAt(piece, c.Dest+lo-c.Source)
-		if err != nil {
+		if err := w.put(c.Device, piece, c.Dest+lo-c.Source); err != nil {
 			return err
-		}
-		if n != len(piece) {
-			return io.ErrShortWrite
 		}
 		w.sums[i].Write(piece)
 		w.next[i] = hi
-		w.written += int64(n)
 	}
 	return nil
 }
@@ -212,7 +281,8 @@ type progressFunc func(phase string, processed, total int64) error
 
 // verify fills new space with zeros, then re-reads every written copy region and zero
 // region from the target before any table change or filesystem adaptation.
-func (w *streamWriter) verify(ctx context.Context, f *os.File, progress progressFunc) error {
+func (w *streamWriter) verify(ctx context.Context, files []*os.File, progress progressFunc) error {
+	disk := files[streamDisk]
 	var total int64
 	for _, z := range w.m.Zeros {
 		total += z.Length
@@ -225,7 +295,7 @@ func (w *streamWriter) verify(ctx context.Context, f *os.File, progress progress
 				return err
 			}
 			n := min(int64(len(zero)), z.Length-offset)
-			if _, err := f.WriteAt(zero[:n], z.Offset+offset); err != nil {
+			if _, err := disk.WriteAt(zero[:n], z.Offset+offset); err != nil {
 				return err
 			}
 			offset += n
@@ -235,8 +305,10 @@ func (w *streamWriter) verify(ctx context.Context, f *os.File, progress progress
 			}
 		}
 	}
-	if err := f.Sync(); err != nil {
-		return err
+	for _, f := range files {
+		if err := f.Sync(); err != nil {
+			return err
+		}
 	}
 	total, done = 0, 0
 	for _, c := range w.m.Copies {
@@ -250,7 +322,7 @@ func (w *streamWriter) verify(ctx context.Context, f *os.File, progress progress
 		h := sha256.New()
 		for offset := int64(0); offset < c.Length; {
 			n := min(int64(len(buffer)), c.Length-offset)
-			if _, err := f.ReadAt(buffer[:n], c.Dest+offset); err != nil {
+			if _, err := files[c.Device].ReadAt(buffer[:n], c.Dest+offset); err != nil {
 				return err
 			}
 			h.Write(buffer[:n])
@@ -267,7 +339,7 @@ func (w *streamWriter) verify(ctx context.Context, f *os.File, progress progress
 	for _, z := range w.m.Zeros {
 		for offset := int64(0); offset < z.Length; {
 			n := min(int64(len(buffer)), z.Length-offset)
-			if _, err := f.ReadAt(buffer[:n], z.Offset+offset); err != nil {
+			if _, err := disk.ReadAt(buffer[:n], z.Offset+offset); err != nil {
 				return err
 			}
 			if !bytes.Equal(buffer[:n], zero[:n]) {
@@ -291,40 +363,157 @@ func loopToolsAvailable() bool {
 	return err == nil
 }
 
+func shrinkToolsAvailable() bool {
+	if !loopToolsAvailable() || !adaptiveToolsAvailable(true) {
+		return false
+	}
+	_, err := exec.LookPath("dmsetup")
+	return err == nil
+}
+
+func attachLoop(ctx context.Context, backing string, args ...string) (string, error) {
+	output, err := tool(ctx, nil, "losetup", append(append([]string{"--find", "--show"}, args...), backing)...)
+	if err != nil {
+		return "", err
+	}
+	device := strings.TrimSpace(string(output))
+	if !strings.HasPrefix(device, "/dev/loop") || strings.ContainsAny(device, "\r\n ") {
+		return "", errors.New("loop retornado inválido")
+	}
+	return device, nil
+}
+
+func detachLoop(device, backing string) error {
+	data, err := os.ReadFile(filepath.Join("/sys/class/block", filepath.Base(device), "loop/backing_file"))
+	if err == nil && strings.TrimSpace(string(data)) != backing {
+		err = errors.New("loop com backing_file diferente não será desconectado")
+	}
+	if err == nil {
+		_, err = tool(context.Background(), nil, "losetup", "--detach", device)
+	}
+	return err
+}
+
 // withLoop maps one partition range of the target disk (or synthetic file) to a loop device.
 func withLoop(ctx context.Context, backing string, offset, size int64, fn func(string) error) (err error) {
 	if !loopToolsAvailable() {
 		return errors.New("ajuste no destino exige Linux Rescue como root e losetup")
 	}
-	backing, err = filepath.Abs(backing)
-	if err != nil {
+	if backing, err = filepath.Abs(backing); err != nil {
 		return err
 	}
-	output, err := tool(ctx, nil, "losetup", "--find", "--show", "--offset", strconv.FormatInt(offset, 10), "--sizelimit", strconv.FormatInt(size, 10), backing)
+	device, err := attachLoop(ctx, backing, "--offset", strconv.FormatInt(offset, 10), "--sizelimit", strconv.FormatInt(size, 10))
 	if err != nil {
 		return err
-	}
-	device := strings.TrimSpace(string(output))
-	if !strings.HasPrefix(device, "/dev/loop") || strings.ContainsAny(device, "\r\n ") {
-		return errors.New("loop retornado inválido")
 	}
 	defer func() {
-		data, e := os.ReadFile(filepath.Join("/sys/class/block", filepath.Base(device), "loop/backing_file"))
-		if e == nil && strings.TrimSpace(string(data)) != backing {
-			e = errors.New("loop com backing_file diferente não será desconectado")
-		}
-		if e == nil {
-			_, e = tool(context.Background(), nil, "losetup", "--detach", device)
-		}
-		if e != nil && err == nil {
+		if e := detachLoop(device, backing); e != nil && err == nil {
 			err = e
 		}
 	}()
 	return fn(device)
 }
 
-// adaptStreamTarget runs after verify, with the target closed, on the target path itself.
-func adaptStreamTarget(ctx context.Context, path string, m streamMap) (RestoreReport, error) {
+// shrinkDevices exposes the target disk and the oversized partition view used while
+// streaming a partition into a smaller target.
+type shrinkDevices struct {
+	diskLoop, overflowLoop, overflowFile, name string
+	disk, overlay                              string
+	backing                                    string
+}
+
+func setupShrink(ctx context.Context, diskPath string, m streamMap, overflowDir string) (s *shrinkDevices, err error) {
+	if !shrinkToolsAvailable() {
+		return nil, errors.New("redução em lotes exige Rescue como root com losetup, dmsetup e ferramentas NTFS/ext4")
+	}
+	s = &shrinkDevices{name: "slt-shrink-" + strconv.FormatInt(time.Now().UnixNano(), 36)}
+	defer func() {
+		if err != nil {
+			s.close()
+			s = nil
+		}
+	}()
+	if s.backing, err = filepath.Abs(diskPath); err != nil {
+		return s, err
+	}
+	base := s.backing
+	if info, e := os.Stat(base); e == nil && info.Mode().IsRegular() {
+		if s.diskLoop, err = attachLoop(ctx, base); err != nil {
+			return s, err
+		}
+		base = s.diskLoop
+	}
+	if overflowDir == "" {
+		overflowDir = os.TempDir()
+	}
+	overflow, err := os.CreateTemp(overflowDir, "slt-overflow-*.img")
+	if err != nil {
+		return s, err
+	}
+	s.overflowFile = overflow.Name()
+	tailBytes := m.Resize.OldSize - m.Resize.NewSize
+	err = overflow.Truncate(tailBytes)
+	if e := overflow.Close(); err == nil {
+		err = e
+	}
+	if err != nil {
+		return s, err
+	}
+	if s.overflowLoop, err = attachLoop(ctx, s.overflowFile); err != nil {
+		return s, err
+	}
+	start, _, err := safeByteRange(m.Resize.Partition.StartLba, m.Resize.Partition.LengthLba, m.TargetLayout.SectorSize)
+	if err != nil {
+		return s, err
+	}
+	// device-mapper tables always count 512-byte sectors.
+	table := fmt.Sprintf("0 %d linear %s 0\n", m.TargetBytes/512, base)
+	if _, err = tool(ctx, strings.NewReader(table), "dmsetup", "create", s.name+"-disk"); err != nil {
+		return s, err
+	}
+	s.disk = "/dev/mapper/" + s.name + "-disk"
+	table = fmt.Sprintf("0 %d linear %s %d\n%d %d linear %s 0\n", m.Resize.NewSize/512, base, start/512, m.Resize.NewSize/512, tailBytes/512, s.overflowLoop)
+	if _, err = tool(ctx, strings.NewReader(table), "dmsetup", "create", s.name+"-part"); err != nil {
+		return s, err
+	}
+	s.overlay = "/dev/mapper/" + s.name + "-part"
+	_, _ = tool(ctx, nil, "dmsetup", "mknodes")
+	return s, nil
+}
+
+func (s *shrinkDevices) close() error {
+	if s == nil {
+		return nil
+	}
+	var first error
+	keep := func(err error) {
+		if err != nil && first == nil {
+			first = err
+		}
+	}
+	for _, name := range []string{s.name + "-part", s.name + "-disk"} {
+		if _, err := os.Stat("/dev/mapper/" + name); err == nil {
+			_, err = tool(context.Background(), nil, "dmsetup", "remove", "--retry", name)
+			keep(err)
+		}
+	}
+	if s.overflowLoop != "" {
+		keep(detachLoop(s.overflowLoop, s.overflowFile))
+		s.overflowLoop = ""
+	}
+	if s.overflowFile != "" {
+		keep(os.Remove(s.overflowFile))
+		s.overflowFile = ""
+	}
+	if s.diskLoop != "" {
+		keep(detachLoop(s.diskLoop, s.backing))
+		s.diskLoop = ""
+	}
+	return first
+}
+
+// adaptStreamTarget runs after verify, with the target files closed, on the target path itself.
+func adaptStreamTarget(ctx context.Context, path string, m streamMap, shrink *shrinkDevices) (RestoreReport, error) {
 	report := RestoreReport{Strategy: m.Strategy, DataVerified: true, BootPayloadPreserved: true, BytesWritten: m.TargetBytes, SourceLayout: m.SourceLayout, TargetLayout: m.TargetLayout,
 		Warnings: []string{"Boot exige teste real no computador destino. Integridade de transferência não comprova sistema inicializável.", "Preservação de GUIDs/UUIDs requer evitar conexão simultânea de origem e clone no mesmo sistema."}}
 	if m.Strategy == "EXACT_RAW" {
@@ -341,7 +530,26 @@ func adaptStreamTarget(ctx context.Context, path string, m streamMap) (RestoreRe
 		return report, errors.New("ferramentas Linux de adaptação não disponíveis")
 	}
 	sector := m.TargetLayout.SectorSize
-	if m.Resize != nil {
+	if m.shrink() {
+		if shrink == nil {
+			return report, errors.New("redução sem dispositivo de sobreposição")
+		}
+		if err := validateFilesystem(ctx, shrink.overlay, m.Resize.FileSystem, false); err != nil {
+			return report, fmt.Errorf("filesystem da partição %d não pode ser reduzido (hibernado, sujo ou inválido): %w", m.Resize.Partition.Number, err)
+		}
+		if err := resizeFilesystemAt(ctx, shrink.overlay, m.Resize.FileSystem, m.Resize.OldSize, m.Resize.NewSize, false); err != nil {
+			return report, err
+		}
+		if m.Resize.FileSystem == "ntfs" {
+			if actual, err := ntfsGeometry(shrink.overlay); err != nil || actual > m.Resize.NewSize {
+				return report, errors.New("NTFS reduzido ainda ocupa espaço além da partição de destino")
+			}
+		}
+		// Everything now lives inside the target partition; the RAM overflow is discarded.
+		if err := shrink.close(); err != nil {
+			return report, err
+		}
+	} else if m.Resize != nil {
 		// Check the copied filesystem at its original size before touching the table.
 		start, _, err := safeByteRange(m.Resize.Partition.StartLba, m.Resize.Partition.LengthLba, sector)
 		if err != nil {
@@ -360,13 +568,17 @@ func adaptStreamTarget(ctx context.Context, path string, m streamMap) (RestoreRe
 		if err != nil {
 			return report, err
 		}
-		if err = withLoop(ctx, path, start, size, func(device string) error {
+		err = withLoop(ctx, path, start, size, func(device string) error {
+			if m.shrink() {
+				return validateFilesystem(ctx, device, m.Resize.FileSystem, true)
+			}
 			return resizeFilesystemAt(ctx, device, m.Resize.FileSystem, m.Resize.OldSize, m.Resize.NewSize, false)
-		}); err != nil {
+		})
+		if err != nil {
 			return report, err
 		}
 		if m.Resize.FileSystem == "ntfs" {
-			report.Warnings = append(report.Warnings, "NTFS expandido fica marcado pelo ntfsresize para CHKDSK no primeiro boot; essa marca não foi removida.")
+			report.Warnings = append(report.Warnings, "NTFS ajustado fica marcado pelo ntfsresize para CHKDSK no primeiro boot; essa marca não foi removida.")
 		}
 	}
 	actual, err := InspectLayout(ctx, path, m.TargetBytes, sector)
@@ -416,8 +628,16 @@ func (r *Runner) sendStream(ctx context.Context, p Plan, d Disk) error {
 		}
 		h := sha256.Sum256(buffer[:length])
 		expected := hex.EncodeToString(h[:])
+		body, headers := io.Reader(bytes.NewReader(buffer[:length])), map[string]string{"Content-Type": "application/octet-stream", "X-Content-SHA256": expected}
+		if allZero(buffer[:length]) {
+			// Empty disk areas cross the network as a marker; the hash still covers every byte.
+			body, headers["X-Content-Zero"] = bytes.NewReader(nil), "1"
+		}
 		for {
-			data, code, e := r.Client.Request(ctx, "PUT", fmt.Sprintf("/agent/v1/jobs/%s/chunks/%d", p.ID, sequence), bytes.NewReader(buffer[:length]), map[string]string{"Content-Type": "application/octet-stream", "X-Content-SHA256": expected})
+			if seeker, ok := body.(io.Seeker); ok {
+				seeker.Seek(0, io.SeekStart)
+			}
+			data, code, e := r.Client.Request(ctx, "PUT", fmt.Sprintf("/agent/v1/jobs/%s/chunks/%d", p.ID, sequence), body, headers)
 			if code == http.StatusTooManyRequests {
 				// Server window full: the target has not yet confirmed earlier batches.
 				if err = r.report(ctx, p, "WAITING_TARGET", offset, d.SizeBytes); err != nil {
@@ -485,7 +705,7 @@ func (r *Runner) receiveStream(ctx context.Context, p Plan, d Disk) error {
 	if err != nil {
 		return err
 	}
-	if m.Strategy != "EXACT_RAW" && !adaptiveToolsAvailable(m.Resize != nil) || m.Resize != nil && (!loopToolsAvailable() || p.Clone.ResizePartitionNumber != m.Resize.Partition.Number) {
+	if m.Strategy != "EXACT_RAW" && !adaptiveToolsAvailable(m.Resize != nil) || m.Resize != nil && (!loopToolsAvailable() || p.Clone.ResizePartitionNumber != m.Resize.Partition.Number) || m.shrink() && !shrinkToolsAvailable() {
 		return errors.New("Rescue destino sem ferramentas para esta estratégia em lotes")
 	}
 	r.LastRestoreReport = &RestoreReport{Strategy: m.Strategy, SourceLayout: status.Layout, Warnings: []string{"Destino incompleto até conclusão e releitura; boot não validado."}}
@@ -496,13 +716,34 @@ func (r *Runner) receiveStream(ctx context.Context, p Plan, d Disk) error {
 	if err != nil {
 		return err
 	}
-	open := true
+	files := []*os.File{f}
+	var shrink *shrinkDevices
 	defer func() {
-		if open {
-			f.Close()
+		for _, file := range files {
+			file.Close()
 		}
+		shrink.close()
 	}()
-	w := newStreamWriter(f, m)
+	if m.shrink() {
+		// Local confirmation and revalidation are done; device-mapper takes the exclusive claim.
+		f.Close()
+		files = nil
+		if shrink, err = setupShrink(ctx, d.Path, m, r.Options.ScratchDir); err != nil {
+			return err
+		}
+		for _, path := range []string{shrink.disk, shrink.overlay} {
+			file, e := os.OpenFile(path, os.O_RDWR, 0)
+			if e != nil {
+				return e
+			}
+			files = append(files, file)
+		}
+	}
+	targets := make([]io.WriterAt, len(files))
+	for i, file := range files {
+		targets[i] = file
+	}
+	w := newStreamWriter(m, targets...)
 	next := 0
 	for next < status.TotalChunks {
 		processed := 0
@@ -513,9 +754,14 @@ func (r *Runner) receiveStream(ctx context.Context, p Plan, d Disk) error {
 			if c.Sequence != next || c.OffsetBytes != int64(next)*ChunkSize || c.SizeBytes <= 0 || c.SizeBytes > ChunkSize {
 				return errors.New("lotes recebidos fora de ordem")
 			}
-			data, _, e := r.Client.Request(ctx, "GET", fmt.Sprintf("/agent/v1/jobs/%s/chunks/%d", p.ID, c.Sequence), nil, nil)
-			if e != nil {
-				return e
+			var data []byte
+			if strings.EqualFold(c.SHA256, zeroHash(c.SizeBytes)) {
+				data = make([]byte, c.SizeBytes)
+			} else {
+				data, err = r.Client.FetchChunk(ctx, fmt.Sprintf("/agent/v1/jobs/%s/chunks/%d", p.ID, c.Sequence))
+				if err != nil {
+					return err
+				}
 			}
 			h := sha256.Sum256(data)
 			if len(data) != c.SizeBytes || !strings.EqualFold(hex.EncodeToString(h[:]), c.SHA256) {
@@ -533,8 +779,10 @@ func (r *Runner) receiveStream(ctx context.Context, p Plan, d Disk) error {
 		}
 		if processed > 0 {
 			// Durable on the target first; only then may the server discard these batches.
-			if err = f.Sync(); err != nil {
-				return err
+			for _, file := range files {
+				if err = file.Sync(); err != nil {
+					return err
+				}
 			}
 			if _, err = r.Client.JSON(ctx, "POST", "/agent/v1/jobs/"+p.ID+"/stream-ack", map[string]any{"through": next - 1}, &status); err != nil {
 				return err
@@ -554,17 +802,19 @@ func (r *Runner) receiveStream(ctx context.Context, p Plan, d Disk) error {
 	if !w.complete() {
 		return errors.New("transmissão terminou sem cobrir todas as regiões do plano")
 	}
-	if err = w.verify(ctx, f, func(phase string, processed, total int64) error { return r.report(ctx, p, phase, processed, total) }); err != nil {
+	if err = w.verify(ctx, files, func(phase string, processed, total int64) error { return r.report(ctx, p, phase, processed, total) }); err != nil {
 		return err
 	}
-	open = false
-	if err = f.Close(); err != nil {
-		return err
+	for _, file := range files {
+		if err = file.Close(); err != nil {
+			return err
+		}
 	}
+	files = nil
 	if err = r.report(ctx, p, "ADAPTING", d.SizeBytes, d.SizeBytes); err != nil {
 		return err
 	}
-	report, err := adaptStreamTarget(ctx, d.Path, m)
+	report, err := adaptStreamTarget(ctx, d.Path, m, shrink)
 	r.LastRestoreReport = &report
 	if err != nil {
 		return err

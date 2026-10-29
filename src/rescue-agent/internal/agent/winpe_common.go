@@ -59,6 +59,8 @@ type winPEPlatform interface {
 	VerifyVolumes(int, string, byte, byte) error
 	VerifyApplied(byte) error
 	VerifyBoot(byte, string) error
+	FlushVolume(byte) error
+	DriveLayout(int) ([]byte, error)
 }
 
 func WinPEDiskNumber(path string) (int, error) {
@@ -287,6 +289,9 @@ func (r *winPERunner) inventory(ctx context.Context) error {
 	if r.options.AllowDeployment && r.options.ScratchDir != "" {
 		caps = append(caps, "DEPLOY_WINDOWS")
 	}
+	if r.options.AllowDeployment && r.firmware == "GPT_UEFI" {
+		caps = append(caps, "CONVERT_GPT")
+	}
 	v := Inventory{DeviceID: r.deviceID, Hostname: hostname, OS: "Windows PE AMD64", Mode: "WINPE", AgentVersion: "0.1.0", Capabilities: caps, Disks: disks, CapturedAtUTC: time.Now().UTC(), Notes: []string{"WinPE firmware=" + r.firmware, "DEPLOY_WINDOWS exige confirmação local; boot/OOBE não homologados"}}
 	_, err = r.client.JSON(ctx, "POST", "/agent/v1/inventory", v, nil)
 	return err
@@ -334,7 +339,7 @@ func (r *winPERunner) download(ctx context.Context, p Plan, m DeploymentMedia, d
 		if err = r.report(ctx, p, "DOWNLOADING_MEDIA", copied, m.SizeBytes); err != nil {
 			return "", err
 		}
-		data, _, e := r.client.Request(ctx, "GET", fmt.Sprintf("/agent/v1/jobs/%s/media/chunks/%d", p.ID, chunk.Sequence), nil, nil)
+		data, e := r.client.FetchChunk(ctx, fmt.Sprintf("/agent/v1/jobs/%s/media/chunks/%d", p.ID, chunk.Sequence))
 		if e != nil {
 			return "", e
 		}
@@ -446,6 +451,9 @@ func (r *winPERunner) deploy(ctx context.Context, p Plan) (details string, deplo
 	if err != nil {
 		return "", err
 	}
+	if err = r.report(ctx, p, "AWAITING_LOCAL_CONFIRMATION", 0, disk.SizeBytes); err != nil {
+		return "", err
+	}
 	fmt.Fprintf(r.options.Output, "\nAPAGAR disco %s | %s | serial %s | %d bytes.\nImagem: %s, edição %d. Confirme LOCALMENTE digitando %q: ", disk.Path, disk.Model, disk.Serial, disk.SizeBytes, media.Name, p.Deployment.ImageIndex, p.Challenge)
 	text, err := bufio.NewReader(io.LimitReader(r.options.Input, 4097)).ReadString('\n')
 	if err != nil || strings.TrimSpace(text) != p.Challenge {
@@ -502,6 +510,26 @@ func (r *winPERunner) deploy(ctx context.Context, p Plan) (details string, deplo
 	if err = r.platform.VerifyApplied(windows); err != nil {
 		return "", err
 	}
+	unattend := false
+	if p.Deployment.Account != nil {
+		// Windows Setup reads %WINDIR%\Panther\unattend.xml on first boot and masks the password afterwards.
+		content, e := BuildUnattend(p.Deployment.Account)
+		if e != nil {
+			return "", e
+		}
+		panther := fmt.Sprintf("%c:\\Windows\\Panther", windows)
+		if err = os.MkdirAll(panther, 0700); err != nil {
+			return "", err
+		}
+		path := filepath.Join(panther, "unattend.xml")
+		if err = os.WriteFile(path, []byte(content), 0600); err != nil {
+			return "", err
+		}
+		if written, e := os.ReadFile(path); e != nil || string(written) != content {
+			return "", errors.New("unattend.xml não confere após gravação")
+		}
+		unattend = true
+	}
 	disks, err = r.platform.Disks(ctx, r.protected)
 	if err != nil {
 		return "", err
@@ -515,7 +543,14 @@ func (r *winPERunner) deploy(ctx context.Context, p Plan) (details string, deplo
 	if err = r.platform.VerifyBoot(system, firmware); err != nil {
 		return "", err
 	}
-	report, _ := json.Marshal(map[string]any{"mediaId": media.ID, "imageIndex": p.Deployment.ImageIndex, "firmware": firmware, "applied": true, "bootFilesCreated": true, "bootVerified": false, "oobe": "primeiro boot pendente de validação local", "retainedStaging": dir})
+	// Boot files and unattend.xml may still sit in the WinPE write cache; the technician (or a
+	// reboot) may cut power right after the server shows the job as completed.
+	for _, letter := range []byte{system, windows} {
+		if err = r.platform.FlushVolume(letter); err != nil {
+			return "", fmt.Errorf("gravação do volume %c: não confirmada no disco: %w", letter, err)
+		}
+	}
+	report, _ := json.Marshal(map[string]any{"mediaId": media.ID, "imageIndex": p.Deployment.ImageIndex, "firmware": firmware, "applied": true, "bootFilesCreated": true, "bootVerified": false, "unattend": unattend, "oobe": "primeiro boot pendente de validação local", "retainedStaging": dir})
 	return string(report), nil
 }
 func RunWinPE(ctx context.Context, options WinPEOptions) error {
@@ -586,12 +621,16 @@ func RunWinPE(ctx context.Context, options WinPEOptions) error {
 				details = "Inventário WinPE atualizado"
 			} else if p.Kind == "DEPLOY_WINDOWS" {
 				details, runErr = r.deploy(ctx, p)
+			} else if p.Kind == "CONVERT_GPT" {
+				details, runErr = r.convert(ctx, p)
 			} else {
 				runErr = errors.New("tipo de tarefa não oferecido pelo agente WinPE")
 			}
 			message := "Imagem Windows aplicada; boot/OOBE ainda não validados"
 			if p.Kind == "INVENTORY" {
 				message = "Inventário atualizado"
+			} else if p.Kind == "CONVERT_GPT" {
+				message = "Disco convertido para GPT/UEFI; boot pendente de validação"
 			}
 			if runErr != nil {
 				message = runErr.Error()
@@ -606,7 +645,7 @@ func RunWinPE(ctx context.Context, options WinPEOptions) error {
 				}
 				return platform.Run(ctx, tools["wpeutil"], []string{"Reboot"}, options.Output)
 			}
-			if runErr != nil && p.Kind == "DEPLOY_WINDOWS" {
+			if runErr != nil && (p.Kind == "DEPLOY_WINDOWS" || p.Kind == "CONVERT_GPT") {
 				return fmt.Errorf("agente interrompido após falha de implantação; reconciliar processos e disco localmente antes de reiniciar: %w", runErr)
 			}
 		}

@@ -14,6 +14,10 @@ if($process.ExitCode -ne 0){throw 'Instalação silenciosa do cliente falhou.'}
 if(!(Test-Path -LiteralPath (Join-Path $target 'client/SLT.WindowsAgent.exe')) -or (Test-Path -LiteralPath (Join-Path $target 'server'))){throw 'Seleção de componentes incorreta.'}
 & (Join-Path $target 'client/SLT.WindowsAgent.exe') --help
 if($LASTEXITCODE -ne 0){throw 'Cliente instalado não iniciou.'}
+$smartctl=Join-Path $target 'client/tools/smartmontools/smartctl.exe'
+if(!(Test-Path -LiteralPath $smartctl) -or !(Test-Path -LiteralPath (Join-Path $target 'client/tools/smartmontools/COPYING.txt'))){throw 'smartctl embutido ou sua licença ausente no cliente instalado.'}
+$version=& $smartctl --version
+if($LASTEXITCODE -ne 0 -or -not ($version -match 'smartctl 7\.5')){throw 'smartctl embutido não executou.'}
 $state=Join-Path $target 'state/client'
 New-Item -ItemType Directory -Path $state -Force | Out-Null
 $sentinel=Join-Path $state 'synthetic-preserve.txt'

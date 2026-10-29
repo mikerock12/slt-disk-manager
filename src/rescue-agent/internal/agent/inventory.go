@@ -158,6 +158,9 @@ func NewInventoryWithScratch(ctx context.Context, deviceID, fixtureDir, scratchD
 		if adaptiveToolsAvailable(true) && loopToolsAvailable() {
 			capabilities = append(capabilities, "STREAM_FIT")
 		}
+		if shrinkToolsAvailable() {
+			capabilities = append(capabilities, "STREAM_SHRINK")
+		}
 	}
 	notes := []string{"Captura raw de disco offline. Restauração física exige aprovação local adicional. Boot e hardware ainda exigem homologação."}
 	if runtime.GOOS == "linux" && adaptiveToolsAvailable(false) {

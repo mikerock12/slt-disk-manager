@@ -6,7 +6,7 @@ public static class FileEndpoints
     {
         T Locked<T>(Func<T> action){lock(c.Gate)return action();}
         string Device(HttpContext context)=>(string)context.Items["deviceId"]!;
-        app.MapGet("/api/v1/jobs/{id}",(string id)=>Locked(()=>c.GetJob(id)));
+        app.MapGet("/api/v1/jobs/{id}",(string id)=>Locked(()=>Provisioning.WithoutSecrets(c.GetJob(id))));
         app.MapPost("/api/v1/files/list",(FileListRequest request)=>Locked(()=>c.Files.List(request)));
         app.MapGet("/api/v1/file-bundles",()=>Locked(()=>c.Db.FileCatalog()));
         app.MapGet("/api/v1/file-bundles/{id}",(string id)=>Locked(()=>c.Files.Get(id)));
@@ -14,6 +14,7 @@ public static class FileEndpoints
         app.MapPost("/api/v1/media/import",(MediaImport request)=>Locked(()=>c.Media.Import(request)));
         app.MapGet("/api/v1/media",()=>Locked(()=>c.Db.All<DeploymentMedia>("media").Select(m=>m with{Chunks=[]}).ToArray()));
         app.MapGet("/agent/v1/jobs/{id}/media",(string id,HttpContext context)=>Locked(()=>c.Media.Manifest(Device(context),id)));
+        app.MapGet("/agent/v1/jobs/{id}/tool",(string id,HttpContext context)=>Locked(()=>Results.Bytes(c.Media.ToolDownload(Device(context),id),"application/octet-stream")));
         app.MapGet("/agent/v1/jobs/{id}/media/chunks/{seq:int}",(string id,int seq,HttpContext context)=>Locked(()=>Results.Bytes(c.Media.Download(Device(context),id,seq),"application/octet-stream")));
         app.MapPost("/api/v1/file-bundles/{id}/verify",(string id)=>Locked(()=>c.Files.Verify(id)));
         app.MapPost("/agent/v1/jobs/{id}/bundle",(string id,BundleStart request,HttpContext context)=>Locked(()=>c.Files.Begin(Device(context),id,request)));

@@ -41,7 +41,6 @@ public static class ClonePlanning
                     if(layout.TableType=="GPT")actions.Add("Reposicionar e validar cabeçalho GPT secundário no fim do destino.");
                     warnings.Add("Partições mantêm seus tamanhos; capacidade adicional permanece não alocada.");
                 }
-                if(strategy=="FIT" && stream && target.SizeBytes<source.SizeBytes)errors.Add("Reduzir para disco menor ainda exige o modo com imagem completa no servidor.");
                 if(strategy=="FIT" && errors.Count==0)
                 {
                     if(layout.TableType=="MBR" && layout.Partitions.Any(p=>p.Number>4 || new[]{"5","05","f","0f","85","42"}.Contains(p.Type.TrimStart('0').ToLowerInvariant())))errors.Add("MBR estendido/dinâmico não é adaptado automaticamente.");
@@ -61,7 +60,9 @@ public static class ClonePlanning
                             try{ValidateLayout(after,target.SizeBytes);}catch(ApiException e){errors.Add(e.Message);}
                             if(stream)
                             {
-                                actions.Add($"Gravar a origem direto no destino em lotes, já deslocando as partições posteriores, incluindo recuperação/OEM; depois expandir a partição {resize} ({candidate.FileSystem}) no próprio destino.");
+                                actions.Add(delta<0
+                                    ? $"Gravar a origem direto no destino em lotes; a partição {resize} ({candidate.FileSystem}) passa por um dispositivo de sobreposição e é reduzida no próprio destino, mantendo em memória só os dados além do novo tamanho (até 1 GiB); partições posteriores são deslocadas."
+                                    : $"Gravar a origem direto no destino em lotes, já deslocando as partições posteriores, incluindo recuperação/OEM; depois expandir a partição {resize} ({candidate.FileSystem}) no próprio destino.");
                                 actions.Add("Conferir os dados gravados, a tabela e os filesystems no destino; a origem nunca é alterada.");
                             }
                             else

@@ -43,7 +43,9 @@ func (r *Runner) report(ctx context.Context, p Plan, phase string, processed, to
 	var result struct {
 		CancelRequested bool `json:"cancelRequested"`
 	}
-	_, err := r.Client.JSON(ctx, "POST", "/agent/v1/jobs/"+p.ID+"/progress", map[string]any{"phase": phase, "bytesProcessed": processed, "bytesTotal": total}, &result)
+	err := retryTransient(ctx, r.Client, func() (int, error) {
+		return r.Client.JSON(ctx, "POST", "/agent/v1/jobs/"+p.ID+"/progress", map[string]any{"phase": phase, "bytesProcessed": processed, "bytesTotal": total}, &result)
+	})
 	if err != nil {
 		return err
 	}
@@ -58,6 +60,9 @@ func (r *Runner) inventory(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	if r.Options.AllowPhysicalWrite && r.Options.FixtureDir == "" && linuxDeployToolsAvailable() {
+		v.Capabilities = append(v.Capabilities, "DEPLOY_LINUX")
+	}
 	_, err = r.Client.JSON(ctx, "POST", "/agent/v1/inventory", v, nil)
 	return err
 }
@@ -70,7 +75,7 @@ func (r *Runner) execute(ctx context.Context, p Plan) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	d, err := ValidateDisk(p, disks, p.Kind == "RESTORE")
+	d, err := ValidateDisk(p, disks, p.Kind == "RESTORE" || p.Kind == "DEPLOY_LINUX")
 	if err != nil {
 		return "", err
 	}
@@ -98,6 +103,8 @@ func (r *Runner) execute(ctx context.Context, p Plan) (string, error) {
 			return "Origem enviada em lotes; o servidor descarta cada lote após a gravação no destino", r.sendStream(ctx, p, d)
 		}
 		return "Imagem raw capturada e validada no repositório", r.capture(ctx, p, d)
+	case "DEPLOY_LINUX":
+		return r.deployLinux(ctx, p, d)
 	case "RESTORE":
 		if p.StreamID != "" {
 			err := r.receiveStream(ctx, p, d)
@@ -157,6 +164,9 @@ func (r *Runner) openDisk(ctx context.Context, p Plan, d Disk, write bool) (*os.
 		}
 	}
 	if write && !fixture {
+		if err := r.report(ctx, p, "AWAITING_LOCAL_CONFIRMATION", 0, d.SizeBytes); err != nil {
+			return nil, err
+		}
 		fmt.Fprintf(r.Options.Output, "\nATENÇÃO: sobrescrever disco %s | %s | serial %s | %d bytes.\nDigite a confirmação exata %q no teclado desta máquina: ", d.Path, d.Model, d.Serial, d.SizeBytes, p.Challenge)
 		line, err := bufio.NewReader(r.Options.Input).ReadString('\n')
 		if err != nil {
@@ -278,7 +288,7 @@ func (r *Runner) restore(ctx context.Context, p Plan, d Disk) error {
 		if err = r.report(ctx, p, "RESTORING", c.OffsetBytes, m.LogicalSizeBytes); err != nil {
 			return err
 		}
-		data, _, err := r.Client.Request(ctx, "GET", fmt.Sprintf("/agent/v1/jobs/%s/chunks/%d", p.ID, c.Sequence), nil, nil)
+		data, err := r.Client.FetchChunk(ctx, fmt.Sprintf("/agent/v1/jobs/%s/chunks/%d", p.ID, c.Sequence))
 		if err != nil {
 			return err
 		}
@@ -347,7 +357,7 @@ func (r *Runner) restoreAdapted(ctx context.Context, p Plan, d Disk, m Manifest)
 			source.Close()
 			return err
 		}
-		data, _, e := r.Client.Request(ctx, "GET", fmt.Sprintf("/agent/v1/jobs/%s/chunks/%d", p.ID, c.Sequence), nil, nil)
+		data, e := r.Client.FetchChunk(ctx, fmt.Sprintf("/agent/v1/jobs/%s/chunks/%d", p.ID, c.Sequence))
 		if e != nil {
 			source.Close()
 			return e

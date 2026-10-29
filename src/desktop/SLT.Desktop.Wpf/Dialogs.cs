@@ -11,7 +11,7 @@ public sealed class PlanApprovalWindow : Window
 
     public PlanApprovalWindow(Job job, Device? device, DiskInfo? disk, ImageManifest? image, FileBundle? bundle = null, FileRootInfo? fileRoot = null, DeploymentMedia? media = null)
     {
-        Title = job.Plan.Kind is "RESTORE" or "DEPLOY_WINDOWS" ? "Confirmar sobrescrita do disco de destino" : "Examinar e aprovar tarefa";
+        Title = job.Plan.Kind is "RESTORE" or "DEPLOY_WINDOWS" or "DEPLOY_LINUX" or "CONVERT_GPT" ? "Confirmar sobrescrita do disco de destino" : "Examinar e aprovar tarefa";
         Width = 790;
         Height = 740;
         MinWidth = 650;
@@ -47,10 +47,17 @@ public sealed class PlanApprovalWindow : Window
         }
         else
         {
-        if (job.Plan.Deployment is { } deployment)
+        if (job.Plan.Kind == "CONVERT_GPT" && job.Plan.Deployment is { } conversion)
+        {
+            Text("CONVERSÃO — MBR PARA GPT/UEFI NO MESMO DISCO", 16, true, Brushes.SandyBrown);
+            Text($"Ferramenta MBR2GPT da mídia {media?.Name ?? conversion.MediaId} (edição {conversion.ImageIndex})\nSHA256: {conversion.ToolSha256}");
+            Text("Partições e dados são preservados; a tabela passa a GPT e é criada a partição EFI. Valide o boot UEFI depois. O WinPE confirma localmente.", 14, false, Brushes.SandyBrown);
+        }
+        else if (job.Plan.Deployment is { } deployment)
         {
             var edition = media?.Images.FirstOrDefault(i => i.Index == deployment.ImageIndex);
-            Text("ORIGEM — MÍDIA WINDOWS NO SERVIDOR", 14, true, Brushes.SandyBrown);
+            Text(job.Plan.Kind == "DEPLOY_LINUX" ? "ORIGEM — MÍDIA LINUX NO SERVIDOR" : "ORIGEM — MÍDIA WINDOWS NO SERVIDOR", 14, true, Brushes.SandyBrown);
+            if (deployment.Account is { } account) Text($"Usuário inicial: {account.UserName} • computador: {account.ComputerName} • idioma {account.Locale}");
             Text($"{media?.Name ?? deployment.MediaId}\nEdição: {edition?.Name ?? deployment.ImageIndex.ToString()} (índice {deployment.ImageIndex})\nFirmware: {deployment.Firmware}\nReiniciar após resultado confirmado: {(deployment.RebootAfterInstall ? "sim" : "não")}");
             Text("DESTINO — TODOS OS DADOS E PARTIÇÕES SERÃO APAGADOS", 16, true, Brushes.SandyBrown);
             Text("O agente WinPE exige outra confirmação digitada no cliente. Primeiro boot, drivers e OOBE devem ser conferidos localmente.", 14, false, Brushes.SandyBrown);
@@ -64,7 +71,7 @@ public sealed class PlanApprovalWindow : Window
         else Text(job.Plan.Kind == "CAPTURE" ? "ORIGEM — DISCO A CAPTURAR" : "ALVO DO DIAGNÓSTICO", 14, true, Brushes.SandyBrown);
         Text(disk is null ? $"{job.Plan.DiskPath}\nFingerprint: {job.Plan.DiskFingerprint}" :
             $"Modelo: {disk.Model}\nSerial: {disk.Serial}\nCaminho: {disk.Path}\nCapacidade: {disk.Size} • Setor: {disk.LogicalSectorBytes} bytes\nEstado: {disk.Flags}\nFingerprint: {disk.Fingerprint}");
-        if (job.Plan.Kind is "RESTORE" or "DEPLOY_WINDOWS" && disk is not null)
+        if (job.Plan.Kind is "RESTORE" or "DEPLOY_WINDOWS" or "DEPLOY_LINUX" && disk is not null)
         {
             Text("Partições atuais que serão removidas: " + (disk.Partitions.Length == 0 ? "nenhuma registrada" : string.Join("; ", disk.Partitions.Select(p => $"{p.Name} {p.FileSystem} {p.Size}"))));
             Text("Faça backup dos dados necessários antes de continuar. Cancelar durante escrita pode deixar o disco incompleto. A inicialização do sistema não é garantida pela verificação dos chunks.", 14, false, Brushes.SandyBrown);
@@ -78,7 +85,8 @@ public sealed class PlanApprovalWindow : Window
         _challenge = new TextBox { MinHeight = 36, Margin = new Thickness(0, 0, 0, 14), MaxLength = Math.Max(job.Plan.Challenge.Length + 10, 64) };
         content.Children.Add(_challenge);
         var consent = new CheckBox { Content = job.Plan.Kind switch
-            { "RESTORE" or "DEPLOY_WINDOWS" => "Conferi o destino e autorizo a perda de todos os seus dados.",
+            { "RESTORE" or "DEPLOY_WINDOWS" or "DEPLOY_LINUX" => "Conferi o destino e autorizo a perda de todos os seus dados.",
+              "CONVERT_GPT" => "Conferi o disco e autorizo converter sua tabela de partições para GPT.",
               "FILE_RESTORE" => "Conferi o cliente e a pasta nova e autorizo a gravação destes arquivos.",
               "FILE_BACKUP" => "Conferi o escopo e autorizo copiar estes arquivos para o servidor.",
               _ => "Conferi a identidade e autorizo a execução deste plano." }, IsChecked = false, Margin = new Thickness(0, 0, 0, 16) };
@@ -88,7 +96,7 @@ public sealed class PlanApprovalWindow : Window
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 18, 0, 0) };
         var cancel = new Button { Content = "Voltar sem executar", Style = (Style)Application.Current.FindResource("SecondaryButton"), IsCancel = true };
         cancel.Click += (_, _) => DialogResult = false;
-        var approve = new Button { Content = job.Plan.Kind is "RESTORE" or "DEPLOY_WINDOWS" ? "Autorizar sobrescrita" : "Aprovar e enfileirar", IsEnabled = false, IsDefault = false };
+        var approve = new Button { Content = job.Plan.Kind is "RESTORE" or "DEPLOY_WINDOWS" or "DEPLOY_LINUX" ? "Autorizar sobrescrita" : job.Plan.Kind == "CONVERT_GPT" ? "Autorizar conversão" : "Aprovar e enfileirar", IsEnabled = false, IsDefault = false };
         void Update() => approve.IsEnabled = string.Equals(_challenge.Text, job.Plan.Challenge, StringComparison.Ordinal) && consent.IsChecked == true && DateTimeOffset.UtcNow < job.Plan.ExpiresAtUtc;
         _challenge.TextChanged += (_, _) => Update();
         consent.Checked += (_, _) => Update();

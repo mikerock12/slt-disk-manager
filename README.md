@@ -10,8 +10,8 @@ dados reais antes de homologar o ciclo em VMs e discos descartáveis.
 
 ## Começar
 
-Baixe o [instalador, pacote portátil e ISO SLT Rescue da beta.4](https://github.com/mikerock12/slt-disk-manager/releases/tag/v0.1.0-beta.4).
-Consulte [a entrega e os hashes](docs/ENTREGA-2026-10-28-beta4.md).
+Baixe o [instalador, pacote portátil e ISO SLT Rescue da beta.5](https://github.com/mikerock12/slt-disk-manager/releases/tag/v0.1.0-beta.5).
+Consulte [a entrega, as evidências de laboratório e os hashes](docs/ENTREGA-2026-10-29-beta5.md).
 
 Leia [o guia de bancada](docs/QUICKSTART.md). O pacote portátil Windows x64 contém
 servidor, painel e client com runtime .NET incluído. Após extrair:
@@ -30,27 +30,45 @@ usados apenas no desenvolvimento/backup solicitado pelo proprietário.
 - ASP.NET Core/.NET 10, SQLite local em WAL, painel WPF separado.
 - Escuta em IP privado explícito, allowlist CIDR, administração somente loopback.
 - Pin SHA256, CSR, certificados individuais, mTLS e revogação imediata.
-- Inventário Windows/Rescue, SMART por smartctl quando instalado.
+- Inventário Windows/Rescue e SMART pelo smartctl 7.5 que acompanha o cliente.
 - Plano com consentimento, confirmação contextual, assinatura RSA, validade e ledger anti-replay.
 - Captura/restauração RAW offline em chunks de 4 MiB, SHA256, recibos persistidos,
   releitura do destino e clonagem A → imagem verificada → B.
 - Assistente de clone integral entre clientes: GPT/MBR, preservação do layout ou
-  ajuste NTFS/ext4 em cópia de trabalho para destinos menores/maiores. CI Linux
-  verifica boot/WinRE e arquivos sentinela; primeiro boot do SO ainda não homologado.
+  ajuste NTFS/ext4 para destinos menores/maiores. Por padrão em lotes: o servidor
+  guarda no máximo 256 MiB e não precisa de espaço do tamanho do disco.
 - Gerenciador de arquivos com escopos locais, backups selecionados, importação
   de pastas do servidor e envio para novas pastas nos clientes.
-- Catálogo local ISO/WIM/ESD e agente WinPE nativo para aplicar Windows e criar
-  boot UEFI/BIOS. Tarefas em PCs distintos seguem em paralelo; boot real pendente.
+- Instalação de sistemas: Windows pelo agente WinPE (UEFI/BIOS, sem telas de OOBE,
+  conta local com senha temporária gerada pelo servidor) e Xubuntu/Ubuntu pelo Rescue
+  (UEFI/GPT, GRUB/shim da própria ISO). Instalações em PCs distintos seguem em paralelo.
+- Conversão de disco Windows MBR → GPT/UEFI pelo WinPE com o MBR2GPT da mídia importada.
 - Histórico durável, auditoria encadeada, progresso real, cancelamento cooperativo,
   interrupção explícita após reinício sem reexecução automática de escrita.
-- Instaladores PowerShell de serviço, regra de firewall privada e pacote portátil.
+- Instalador EXE completo (runtime .NET/C++, 7-Zip e smartctl embutidos) que pode
+  instalar servidor e cliente como serviços do Windows, além do pacote portátil.
+
+## Telas do teste de laboratório
+
+Teste completo em máquinas virtuais, comandado pelo servidor (detalhes e limites em
+[ENTREGA-2026-10-29-beta5](docs/ENTREGA-2026-10-29-beta5.md)): Xubuntu e Windows instalados
+ao mesmo tempo, Windows clonado em lotes de 128 GB para 64 GB, disco convertido para GPT/UEFI
+e Windows clonado iniciando na área de trabalho.
+
+![Painel com as tarefas do laboratório concluídas](docs/screens/painel-tarefas-laboratorio.png)
+
+| Windows 10 instalado pelo servidor (cliente 2, BIOS/MBR) | Windows clonado no cliente 1 após conversão para UEFI/GPT |
+|---|---|
+| ![Área de trabalho do Windows instalado](docs/screens/lab-windows-instalado-cliente2.png) | ![Área de trabalho do Windows clonado em UEFI](docs/screens/lab-windows-clonado-uefi-cliente1.png) |
+| **Xubuntu instalado pelo servidor (cliente 1, UEFI/GPT)** | **Senha temporária exige troca no primeiro login** |
+| ![Tela de login do Xubuntu](docs/screens/lab-xubuntu-instalado-cliente1.png) | ![Troca de senha obrigatória](docs/screens/lab-xubuntu-troca-de-senha.png) |
 
 ## Limites atuais
 
 Veja [a matriz completa](docs/STATUS.md). Não há instalador MSI/assinatura de código,
-ISO Rescue já homologada em hardware, boot remoto automático, PXE, RBAC multiusuário
-nem implantação Linux centralizada. O particionamento Windows só é oferecido pelo
-perfil de instalação no WinPE, com confirmação no painel e no teclado do destino.
+ISO Rescue já homologada em hardware, boot remoto automático, PXE nem RBAC multiusuário.
+O particionamento só é oferecido pelos perfis de instalação (Windows no WinPE, Linux no
+Rescue), com confirmação no painel e no teclado do destino.
 Há scripts locais de aquisição ddrescue/Partclone e orientações de implantação;
 eles não equivalem à implementação centralizada desses módulos. O protocolo v1
 usa HTTPS JSON com polling em vez de gRPC (ADR em docs).

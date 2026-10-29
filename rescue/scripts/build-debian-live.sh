@@ -67,6 +67,9 @@ gdisk
 ntfs-3g
 dosfstools
 e2fsprogs
+dmsetup
+squashfs-tools
+mount
 rsync
 openssh-client
 firmware-realtek
@@ -105,7 +108,7 @@ grep -q -- '-server-pin' /run/slt-agent-help.log
 bash -n /usr/local/bin/slt-start
 id -u technician >/dev/null
 sudo -n -u technician sudo -n true
-for engine in lsblk blkid sfdisk smartctl nvme ddrescue partclone.restore ntfsresize ntfs-3g.probe resize2fs e2fsck losetup nmcli nmtui nm-online iw wpa_supplicant; do
+for engine in lsblk blkid sfdisk smartctl nvme ddrescue partclone.restore ntfsresize ntfs-3g.probe resize2fs e2fsck losetup dmsetup unsquashfs mkfs.fat mkfs.ext4 chroot nmcli nmtui nm-online iw wpa_supplicant; do
   command -v "$engine" >/dev/null
 done
 nmcli --version > /run/slt-network-tools.log

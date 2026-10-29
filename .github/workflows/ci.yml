@@ -69,7 +69,7 @@ jobs:
       - name: Adaptive clone engines on synthetic GPT and MBR disks
         run: |
           sudo apt-get update
-          sudo apt-get install -y fdisk util-linux ntfs-3g e2fsprogs dosfstools qemu-utils
+          sudo apt-get install -y fdisk util-linux ntfs-3g e2fsprogs dosfstools qemu-utils dmsetup squashfs-tools
           sudo env PATH="$PATH" bash rescue/scripts/test-adaptive-linux.sh
       - run: for script in rescue/scripts/*.sh; do bash -n "$script"; done
   release:
@@ -95,5 +95,5 @@ jobs:
             test "$target" = "$GITHUB_SHA" || { echo 'Existing release preserved. Bump VERSION to publish a new build.'; exit 0; }
             gh release upload "$tag" release/* --clobber
           else
-            gh release create "$tag" release/* --target "$GITHUB_SHA" --prerelease --title "SLT Disk Manager $version" --notes 'Beta de laboratório: servidor/painel/cliente, clonagem integral adaptável e arquivos com escopos. Instalação de SO apaga o destino e exige confirmação. Homologação Windows/hardware em andamento. Guia: https://github.com/mikerock12/slt-disk-manager/blob/main/docs/WORKFLOWS.md'
+            gh release create "$tag" release/* --target "$GITHUB_SHA" --prerelease --title "SLT Disk Manager $version" --notes 'Beta de laboratório: servidor/painel/cliente com dependências embutidas, clone em lotes entre clientes (inclusive para disco menor), arquivos com escopos, instalação Windows (WinPE) e Xubuntu/Ubuntu (Rescue) e conversão MBR→GPT/UEFI. Gravação apaga o destino e exige confirmação no painel e no cliente. Hardware físico ainda não homologado. Guia: https://github.com/mikerock12/slt-disk-manager/blob/main/docs/WORKFLOWS.md'
           fi

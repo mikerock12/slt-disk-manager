@@ -74,7 +74,7 @@ slt_start_main() {
         [[ "$canonical" == "$scratch" ]] || { echo 'Use o caminho real da pasta, sem links ou segmentos relativos.' >&2; return 2; }
         arguments+=(--scratch-dir "$scratch")
       else
-        printf 'Adaptação de tamanho permanece indisponível sem pasta temporária válida.\n'
+        printf 'Sem pasta temporária: clone em lotes e instalação seguem disponíveis; restaurar imagem completa adaptando tamanho fica indisponível.\n'
       fi
       ;;
     *) echo 'Escolha 1 ou 2.' >&2; return 2;;

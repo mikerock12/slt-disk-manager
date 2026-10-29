@@ -43,6 +43,9 @@ if not exist "__SCRATCH__" mkdir "__SCRATCH__"
 if errorlevel 1 goto blocked
 set "SLT_BOOTSECT="
 if exist "%~dp0..\boot\bootsect.exe" set "SLT_BOOTSECT=--bootsect %~d0\boot\bootsect.exe"
+rem WinPE under a hypervisor (Hyper-V/WHPX) can hand Go's async preemption an inconsistent
+rem thread context and crash the agent at start; cooperative preemption is enough here.
+set "GODEBUG=asyncpreemptoff=1"
 "%~dp0slt-winpe-agent.exe" --server "__SERVER__" --server-pin "__PIN__" --state-dir "X:\SLT-State" --scratch-dir "__SCRATCH__" --allow-deployment %SLT_BOOTSECT%
 echo.
 echo O agente encerrou. Confira o resultado no servidor; primeiro boot/OOBE ainda precisa ser validado.

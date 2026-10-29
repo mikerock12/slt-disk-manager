@@ -20,7 +20,7 @@ public sealed partial class Controller
         Media = new MediaRepository(this);
         foreach (var job in db.All<Job>("job").Where(j => Active.Contains(j.State)))
         {
-            db.Put("job", job.Id, job with { State = "INTERRUPTED", Result = new(false, "Servidor reiniciado; replaneje após conferir o destino. Nenhuma escrita foi reenviada.", "") });
+            db.Put("job", job.Id, Provisioning.WithoutSecrets(job with { State = "INTERRUPTED", Result = new(false, "Servidor reiniciado; replaneje após conferir o destino. Nenhuma escrita foi reenviada.", "") }));
             db.Log("system", "job.interrupted", job.Id);
         }
         foreach (var image in db.All<ImageManifest>("image").Where(i => i.State is "VERIFYING" or "CREATING"))
@@ -97,7 +97,8 @@ public sealed partial class Controller
     private Job Plan(PlanRequest request, string? streamId)
     {
         if(request.Kind is "FILE_LIST" or "FILE_BACKUP" or "FILE_RESTORE") return Files.Plan(request);
-        if(request.Kind == "DEPLOY_WINDOWS") return PlanDeployment(request);
+        if(request.Kind is "DEPLOY_WINDOWS" or "DEPLOY_LINUX") return PlanDeployment(request);
+        if(request.Kind == "CONVERT_GPT") return PlanConversion(request);
         if(request.Kind == "RESTORE" && request.CloneOptions == null) request = request with { CloneOptions = new("EXACT_RAW") };
         Ensure(request.Kind is "INVENTORY" or "SMART" or "CAPTURE" or "RESTORE", 400, "Operação não implementada nesta versão.");
         Ensure(request.Consent, 400, "Registre autorização do responsável antes de criar uma tarefa.");
@@ -142,7 +143,8 @@ public sealed partial class Controller
         Ensure(d.TrustStatus == "TRUSTED" && d.LastSeenAtUtc > DateTimeOffset.UtcNow.AddSeconds(-45), 409, "Agente offline/revogado.");
         Ensure(d.Inventory?.Capabilities.Contains(job.Plan.Kind) == true, 409, "Capacidade indisponível.");
         if(job.Plan.File != null){ Files.Revalidate(job); return; }
-        if(job.Plan.Kind == "DEPLOY_WINDOWS"){ RevalidateDeployment(job); return; }
+        if(job.Plan.Kind is "DEPLOY_WINDOWS" or "DEPLOY_LINUX"){ RevalidateDeployment(job); return; }
+        if(job.Plan.Kind == "CONVERT_GPT"){ RevalidateConversion(job); return; }
         if (job.Plan.Kind == "INVENTORY") return;
         var disk = d.Inventory!.Disks.SingleOrDefault(x => x.Fingerprint == job.Plan.DiskFingerprint);
         Ensure(disk != null && disk.Path == job.Plan.DiskPath && disk.SizeBytes == job.Plan.DiskSizeBytes && disk.LogicalSectorBytes == job.Plan.LogicalSectorBytes, 409, "Disco mudou após planejamento.");
@@ -202,7 +204,7 @@ public sealed partial class Controller
         else if (result.Success && j.Plan.Kind == "CAPTURE") Ensure(Db.Get<ImageManifest>("image", j.Plan.ImageId)?.State == "AVAILABLE", 409, "Imagem não finalizada e verificada.");
         if (result.Success && j.Plan.Kind == "FILE_BACKUP") Ensure(Files.Get(j.Plan.File!.BundleId).State == "AVAILABLE",409,"Backup não finalizado/verificado.");
         var state = j.CancelRequested ? "CANCELLED" : result.Success ? "COMPLETED" : "FAILED";
-        Db.Put("job", id, j with { State = state, Result = result });
+        Db.Put("job", id, Provisioning.WithoutSecrets(j with { State = state, Result = result }));
         if (j.Plan.StreamId != null) StreamFinished(j, state, result.Message);
         else if (state != "COMPLETED" && j.Plan.Kind == "CAPTURE" && Db.Get<ImageManifest>("image", j.Plan.ImageId) is {} image && image.State != "AVAILABLE")
             Db.Put("image", image.Id, image with { State = "FAILED" });
@@ -213,7 +215,7 @@ public sealed partial class Controller
     {
         var j = GetJob(id); Ensure(j.State is "AWAITING_APPROVAL" or "QUEUED" or "RUNNING" or "CANCELLING", 409, "Tarefa já encerrada.");
         j = j with { State = j.State is "RUNNING" or "CANCELLING" ? "CANCELLING" : "CANCELLED", CancelRequested = true };
-        Db.Put("job", id, j); Db.Log("admin", "job.cancel.request", id);
+        Db.Put("job", id, j.State == "CANCELLED" ? Provisioning.WithoutSecrets(j) : j); Db.Log("admin", "job.cancel.request", id);
         if (j.Plan.StreamId != null && j.State == "CANCELLED") StreamFinished(j, "CANCELLED", "Cancelada antes de iniciar.");
         return j;
     }
@@ -222,10 +224,11 @@ public sealed partial class Controller
         Ensure(Guid.TryParse(id, out _), 400, "ID de imagem inválido."); return Path.Combine(Repository, "images", id);
     }
     private string ChunkPath(string id, int seq) => Path.Combine(ImageDir(id), $"{seq:D8}.bin");
-    public ImageChunk Upload(string deviceId, string jobId, int seq, byte[] bytes, string sha)
+    public ImageChunk Upload(string deviceId, string jobId, int seq, byte[] bytes, string sha, bool zero = false)
     {
         var j = AgentJob(deviceId, jobId, "CAPTURE");
-        if (j.Plan.StreamId != null) return StreamUpload(j, seq, bytes, sha);
+        if (j.Plan.StreamId != null) return StreamUpload(j, seq, bytes, sha, zero);
+        Ensure(!zero, 400, "Lote zerado só é aceito no clone em lotes.");
         var image = Db.Get<ImageManifest>("image",j.Plan.ImageId) ?? throw new ApiException(404,"Imagem não encontrada.");
         Ensure(image.State == "CREATING" && seq >= 0, 409, "Imagem não está recebendo dados.");
         var hash = Convert.ToHexStringLower(SHA256.HashData(bytes));

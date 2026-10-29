@@ -116,10 +116,10 @@ app.MapGet("/api/v1/devices/{id}", (string id) => Locked(() => controller.Device
 app.MapPost("/api/v1/devices/{id}/revoke", (string id) => Locked(() => { controller.Revoke(id); return Results.Ok(new { ok = true }); }));
 app.MapPost("/agent/v1/inventory", (Inventory r, HttpContext ctx) => Locked(() => { controller.Inventory(DeviceId(ctx), r); return Results.Ok(new { ok = true }); }));
 app.MapGet("/agent/v1/jobs/next", (HttpContext ctx) => Locked(() => controller.Next(DeviceId(ctx)) is {} a ? Results.Ok(a) : (IResult)Results.NoContent()));
-app.MapGet("/api/v1/jobs", () => Locked(() => store.All<Job>("job")));
+app.MapGet("/api/v1/jobs", () => Locked(() => store.All<Job>("job").Select(Provisioning.WithoutSecrets).ToList()));
 app.MapPost("/api/v1/jobs/plan", (PlanRequest r) => Locked(() => controller.Plan(r)));
-app.MapPost("/api/v1/jobs/{id}/approve", (string id, ApprovalRequest r) => Locked(() => controller.Approve(id, r.Challenge)));
-app.MapPost("/api/v1/jobs/{id}/cancel", (string id) => Locked(() => controller.Cancel(id)));
+app.MapPost("/api/v1/jobs/{id}/approve", (string id, ApprovalRequest r) => Locked(() => Provisioning.WithoutSecrets(controller.Approve(id, r.Challenge))));
+app.MapPost("/api/v1/jobs/{id}/cancel", (string id) => Locked(() => Provisioning.WithoutSecrets(controller.Cancel(id))));
 app.MapPost("/agent/v1/jobs/{id}/progress", (string id, Progress r, HttpContext ctx) => Locked(() =>
 { controller.Progress(DeviceId(ctx), id, r); return Results.Ok(new { cancelRequested = controller.GetJob(id).CancelRequested }); }));
 app.MapPost("/agent/v1/jobs/{id}/result", (string id, JobResult r, HttpContext ctx) => Locked(() =>
@@ -131,7 +131,7 @@ app.MapPut("/agent/v1/jobs/{id}/chunks/{seq:int}", async (string id, int seq, Ht
     using var memory = new MemoryStream(); var buffer = new byte[65536]; int count;
     while ((count = await ctx.Request.Body.ReadAsync(buffer, ctx.RequestAborted)) > 0)
     { if (memory.Length + count > Controller.ChunkSize) throw new ApiException(413, "Chunk excede 4 MiB."); memory.Write(buffer, 0, count); }
-    return Locked(() => controller.Upload(DeviceId(ctx), id, seq, memory.ToArray(), ctx.Request.Headers["X-Content-SHA256"].ToString()));
+    return Locked(() => controller.Upload(DeviceId(ctx), id, seq, memory.ToArray(), ctx.Request.Headers["X-Content-SHA256"].ToString(), ctx.Request.Headers["X-Content-Zero"].ToString() == "1"));
 });
 app.MapPost("/agent/v1/jobs/{id}/capture-complete", (string id, CaptureCompletion request, HttpContext ctx) => Locked(() => controller.Complete(DeviceId(ctx), id,request.Layout) with{Chunks=[]}));
 app.MapGet("/agent/v1/jobs/{id}/manifest", (string id, HttpContext ctx) => Locked(() => controller.DownloadManifest(DeviceId(ctx), id)));

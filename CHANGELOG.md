@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.1.0-beta.5 — 2026-10-29 — instalação Linux, primeiro boot Windows, redução em lotes e MBR→GPT
+
+- **Instalação Ubuntu/Xubuntu pelo Rescue (UEFI/GPT):** importe a ISO oficial no servidor;
+  o cliente em SLT Rescue particiona, extrai o sistema da própria ISO, instala GRUB/shim,
+  cria o usuário com senha temporária gerada pelo servidor (exibida uma vez) e exige a
+  troca no primeiro login. Instalação Linux e Windows em clientes diferentes seguem ao
+  mesmo tempo.
+- **Windows sem perguntas no primeiro boot:** a implantação WinPE grava `unattend.xml` com
+  nome do computador, conta administradora local com senha temporária, idioma, fuso
+  e telas de OOBE puladas; hibernação desligada para permitir clone seguro.
+- **Clone em lotes para disco menor:** AJUSTAR para destino menor agora funciona sem
+  imagem completa. O destino grava direto no disco; os blocos que passam do novo tamanho
+  ficam em RAM (só os não nulos, até 1 GiB) até o NTFS/ext4 ser reduzido no próprio destino.
+  Lotes só de zeros não trafegam.
+- **Converter MBR para GPT/UEFI:** nova tarefa no WinPE usando o MBR2GPT.EXE da mídia
+  Windows importada pelo operador (hash amarrado ao plano assinado), com validação antes,
+  confirmação local e conferência do layout depois.
+- **Instalador completo:** o pacote traz 7-Zip para ler ISOs no servidor e smartctl 7.5
+  para SMART no cliente; runtime .NET e C++ continuam embutidos. Servidor e cliente podem
+  ser instalados como serviço do Windows pelo próprio instalador (com aviso e UAC).
+- **Robustez de rede:** download de lotes e relatórios de progresso tentam de novo em
+  quedas de conexão, em vez de abortar instalações longas.
+- **Relógio local:** certificados e planos toleram computadores com o relógio em horário
+  local (comum em dual boot com Windows).
+- Painel mostra quando o cliente aguarda confirmação no teclado local.
+
 ## 0.1.0-beta.4 — 2026-10-28 — clone em lotes
 
 Clone cliente → cliente em lotes, agora padrão no painel: origem e destino ficam ligados

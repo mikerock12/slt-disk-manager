@@ -262,7 +262,11 @@ type peFakePlatform struct {
 	block          bool
 	finished       chan struct{}
 	mu             sync.Mutex
+	layout         []byte
+	flushed        []byte
 }
+
+func (f *peFakePlatform) DriveLayout(int) ([]byte, error) { return f.layout, nil }
 
 func (f *peFakePlatform) Check(context.Context) (string, error) { return "GPT_UEFI", nil }
 func (f *peFakePlatform) PrivateState(string) error             { return nil }
@@ -294,6 +298,12 @@ func (f *peFakePlatform) Run(ctx context.Context, path string, args []string, ou
 }
 func (f *peFakePlatform) VerifyVolumes(int, string, byte, byte) error { return nil }
 func (f *peFakePlatform) VerifyApplied(byte) error                    { return nil }
+func (f *peFakePlatform) FlushVolume(letter byte) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.flushed = append(f.flushed, letter)
+	return nil
+}
 func (f *peFakePlatform) VerifyBoot(byte, string) error {
 	if f.fail == "synthetic-boot-verification" {
 		return errors.New("synthetic missing boot files")
@@ -363,7 +373,7 @@ func TestWinPEDeploymentSyntheticStages(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if len(f.commands) != 3 || !strings.Contains(details, `"bootVerified":false`) {
+				if len(f.commands) != 3 || string(f.flushed) != "SW" || !strings.Contains(details, `"bootVerified":false`) {
 					t.Fatal(f.commands, details)
 				}
 				if _, e := os.Stat(filepath.Join(dir, "slt-deploy-"+p.ID, "install.esd")); e != nil {

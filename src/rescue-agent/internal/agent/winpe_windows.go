@@ -457,6 +457,14 @@ func (nativeWinPE) VerifyVolumes(number int, firmware string, system, windows by
 	}
 	return nil
 }
+func (nativeWinPE) DriveLayout(number int) ([]byte, error) {
+	h, err := peOpen(fmt.Sprintf(`\\.\PhysicalDrive%d`, number))
+	if err != nil {
+		return nil, err
+	}
+	defer syscall.CloseHandle(h)
+	return peIO(h, 0x70050, nil, 48+256*144)
+}
 func (nativeWinPE) VerifyApplied(windows byte) error {
 	for _, name := range []string{`Windows\System32\config\SYSTEM`, `Windows\System32\ntoskrnl.exe`} {
 		if err := peRegular(fmt.Sprintf("%c:\\%s", windows, name)); err != nil {
@@ -465,6 +473,19 @@ func (nativeWinPE) VerifyApplied(windows byte) error {
 	}
 	return nil
 }
+func (nativeWinPE) FlushVolume(letter byte) error {
+	const genericRead, genericWrite, shareReadWrite, openExisting = 0x80000000, 0x40000000, 0x3, 3
+	h, _, e := peKernel.NewProc("CreateFileW").Call(uintptr(unsafe.Pointer(peUTF(fmt.Sprintf(`\\.\%c:`, letter)))), genericRead|genericWrite, shareReadWrite, 0, openExisting, 0, 0)
+	if syscall.Handle(h) == syscall.InvalidHandle {
+		return peError("abrir volume", e)
+	}
+	defer syscall.CloseHandle(syscall.Handle(h))
+	if ok, _, e := peKernel.NewProc("FlushFileBuffers").Call(h); ok == 0 {
+		return peError("FlushFileBuffers", e)
+	}
+	return nil
+}
+
 func (nativeWinPE) VerifyBoot(system byte, firmware string) error {
 	files := []string{`EFI\Microsoft\Boot\BCD`, `EFI\Microsoft\Boot\bootmgfw.efi`}
 	if firmware == "MBR_BIOS" {
