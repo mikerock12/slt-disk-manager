@@ -308,15 +308,18 @@ class VM:
         self.shots = 0
         lab.vms.append(self)
 
-    def start(self, cdrom=None, seed=None, scratch=False, memory=4096):
+    def start(self, cdrom=None, seed=None, scratch=False, memory=4096, windows=False):
         assert self.process is None or self.process.poll() is not None
         qmp_port, serial_port = free_port(), free_port()
-        # Under WHPX the host CPU model made Windows guests (WinPE) hang mid-download, sleep
-        # forever or blue-screen. A conservative named model (SSE4.2, no x2APIC/TSC-deadline)
-        # keeps them stable; the default qemu64 was stable too, but lacks SSE4 and is slower.
-        cpu = "Nehalem" if self.lab.accel == "whpx" else "max"
+        # Windows guests (WinPE and installed Windows) hang under WHPX on the lab host: with the
+        # host CPU model mid-download, sleeping or blue-screening; with Nehalem in DISM at 4% with
+        # no disk I/O. They run under multi-threaded TCG, slower but stable (the beta.3.3 WinPE
+        # run completed there). Linux guests (Rescue, Xubuntu) keep WHPX.
+        accel = "tcg" if windows else self.lab.accel
+        cpu = "Nehalem" if accel == "whpx" else "max"
+        self.accel = accel
         args = [str(QEMU_DIR / "qemu-system-x86_64.exe"), "-L", str(QEMU_DIR / "share"), "-name", f"SLT LAB {self.name}",
-                "-machine", f"q35,accel={self.lab.accel}", "-cpu", cpu, "-m", str(memory), "-smp", "2", "-display", "none", "-vga", "std",
+                "-machine", "q35", "-accel", "tcg,thread=multi" if accel == "tcg" else accel, "-cpu", cpu, "-m", str(memory), "-smp", "3" if accel == "tcg" else "2", "-display", "none", "-vga", "std",
                 "-rtc", "base=localtime", "-qmp", f"tcp:127.0.0.1:{qmp_port},server=on,wait=off",
                 "-serial", f"tcp:127.0.0.1:{serial_port},server=on,wait=off",
                 "-drive", f"file={self.disk},if=none,id=disk,format=qcow2,cache=writeback",
@@ -338,9 +341,9 @@ class VM:
         self.process = subprocess.Popen(args, stdout=out, stderr=out, creationflags=HIDDEN)
         self.qmp = wait_for(lambda: QMP(qmp_port), "QMP " + self.name, 60)
         self.serial = Serial(serial_port, self.lab.ws / f"{self.name}-serial.log")
-        if self.lab.accel == "whpx":
+        if accel == "whpx":
             threading.Thread(target=self.nudge, args=(self.process, self.qmp), daemon=True).start()
-        log(f"{self.name} iniciada ({self.lab.accel}, {'UEFI' if self.uefi else 'BIOS'}, cd={Path(cdrom).name if cdrom else '-'})")
+        log(f"{self.name} iniciada ({accel}, {'UEFI' if self.uefi else 'BIOS'}, cd={Path(cdrom).name if cdrom else '-'})")
 
     def nudge(self, process, qmp):
         # WHPX lab quirk: an idle Windows guest (WinPE or installed) sometimes stops getting its
@@ -568,7 +571,7 @@ def phase_install(lab):
             (lab.ws / (name + suffix)).unlink(missing_ok=True)
     c1, c2 = VM(lab, "client1", 64, True), VM(lab, "client2", 128, False)
     seed = build_kit(lab, "client2")
-    c2.start(cdrom=WINDOWS_ISO, seed=seed, scratch=True)
+    c2.start(cdrom=WINDOWS_ISO, seed=seed, scratch=True, windows=True)
     c1.start(cdrom=ROOT / lab.args.rescue_iso)
     rescue_login(c1)
     d1 = rescue_start_agent(lab, c1, True, used)
@@ -603,7 +606,7 @@ def phase_install(lab):
             c1.shot("instalando")
             c2.shot("instalando")
         return states if all(s == "COMPLETED" for s in states.values()) else None
-    wait_for(both_done, "instalações simultâneas", 4 * 3600, 4)
+    wait_for(both_done, "instalações simultâneas", 8 * 3600, 4)
     overlap = [t for t in timeline if t["linux"] == "RUNNING" and t["windows"] == "RUNNING"]
     lab.evidence("installConcurrent", {"samplesBothRunning": len(overlap), "first": overlap[0]["t"] if overlap else None})
     for key in ("linux", "windows"):
@@ -617,7 +620,7 @@ def phase_install(lab):
 
 def phase_firstboot(lab):
     c1, c2 = VM(lab, "client1", 64, True), VM(lab, "client2", 128, False)
-    c2.start(memory=4096)
+    c2.start(memory=4096, windows=True)
     c1.start(memory=3072)
     threads = [threading.Thread(target=windows_logon, args=(c2, lab.state["passwords"]["client2-windows"], "windows-primeiro-boot", lab.args.windows_wait))]
     threads[0].start()
@@ -670,7 +673,7 @@ def phase_convert(lab):
     used = set(lab.state.setdefault("usedEnrollments", []))
     c1 = VM(lab, "client1", 64, True)
     seed = build_kit(lab, "client1")
-    c1.start(cdrom=WINDOWS_ISO, seed=seed, scratch=True)
+    c1.start(cdrom=WINDOWS_ISO, seed=seed, scratch=True, windows=True)
     c1.press_for_cd(25)
     d1 = winpe_pair(lab, c1, used)
     lab.state["usedEnrollments"] = sorted(used)
@@ -691,7 +694,7 @@ def phase_convert(lab):
 
 def phase_boot(lab):
     c1 = VM(lab, "client1", 64, True)
-    c1.start(memory=4096)
+    c1.start(memory=4096, windows=True)
     windows_logon(c1, lab.state["passwords"]["client2-windows"], "windows-uefi-cliente1", lab.args.windows_wait)
     lab.evidence("uefiBoot", {"shot": str(lab.ws / "client1-latest.png"), "review": "conferir área de trabalho do Windows clonado em UEFI/GPT no cliente1"})
     lab.evidence("uefiShutdownClean", c1.powerdown(900))
