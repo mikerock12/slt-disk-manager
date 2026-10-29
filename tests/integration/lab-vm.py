@@ -308,7 +308,7 @@ class VM:
         self.shots = 0
         lab.vms.append(self)
 
-    def start(self, cdrom=None, seed=None, scratch=False, memory=4096, windows=False):
+    def start(self, cdrom=None, seed=None, scratch=False, memory=4096, windows=False, internet=True):
         assert self.process is None or self.process.poll() is not None
         qmp_port, serial_port = free_port(), free_port()
         # Windows guests (WinPE and installed Windows) hang under WHPX on the lab host: with the
@@ -324,7 +324,7 @@ class VM:
                 "-serial", f"tcp:127.0.0.1:{serial_port},server=on,wait=off",
                 "-drive", f"file={self.disk},if=none,id=disk,format=qcow2,cache=writeback",
                 "-device", f"ide-hd,drive=disk,bus=ide.0,serial={self.serial_number},bootindex={2 if cdrom else 1}",
-                "-netdev", "user,id=lan,ipv6=off", "-device", f"e1000,netdev=lan,id=nic,mac=52:54:00:5a:{1 if self.name == 'client1' else 2:02x}:01"]
+                "-netdev", "user,id=lan,ipv6=off" + ("" if internet else ",restrict=on"), "-device", f"e1000,netdev=lan,id=nic,mac=52:54:00:5a:{1 if self.name == 'client1' else 2:02x}:01"]
         if self.uefi:
             args += ["-drive", f"if=pflash,format=raw,readonly=on,file={QEMU_DIR / 'share/edk2-x86_64-code.fd'}", "-drive", f"if=pflash,format=raw,file={self.vars}"]
         if scratch:
@@ -541,12 +541,31 @@ def approve(lab, job):
     return lab.api("POST", f"/api/v1/jobs/{job['id']}/approve", {"challenge": job["plan"]["challenge"]})
 
 
+def out_of_oobe(path):
+    """True once the screen is neither black, the Windows logo nor a flat OOBE blue page."""
+    try:
+        from PIL import Image
+    except ImportError:
+        return None
+    small = Image.open(path).convert("RGB").resize((64, 48))
+    def oobe(px):
+        r, g, b = px
+        return (r < 20 and 60 < g < 110 and 110 < b < 175) or r + g + b < 40 or (r < 20 and g > 180 and b > 230) or r + g + b > 700
+    return sum(oobe(px) for px in small.getdata()) / (64 * 48) < 0.6
+
+
 def windows_logon(vm, password, label, wait_minutes):
     """Waits for the logon screen produced by the unattend and signs in with the temporary password."""
     end = time.monotonic() + wait_minutes * 60
     while time.monotonic() < end:
+        vm.qmp.key("ctrl")  # wakes a display the logon screen turned off
+        time.sleep(3)
         vm.shot(label + "-aguardando")
+        if out_of_oobe(vm.lab.ws / f"{vm.name}-latest.png"):
+            break
         time.sleep(30)
+    else:
+        raise AssertionError(f"{vm.name}: Windows não chegou ao logon em {wait_minutes} min")
     vm.qmp.key("spc")
     time.sleep(5)
     vm.qmp.type(password + "\n")
@@ -604,7 +623,14 @@ def phase_install(lab):
             raise AssertionError(f"instalação falhou: {[lab.job(v).get('result') for v in lab.state['installJobs'].values()]}")
         if int(time.monotonic()) % 120 < 4:
             c1.shot("instalando")
-            c2.shot("instalando")
+            if c2.process is not None:
+                c2.shot("instalando")
+        if states["windows"] == "COMPLETED" and c2.process is not None:
+            # The agent reboots into the installed Windows (rebootAfterInstall); power off before
+            # its first boot starts here with internet, so firstboot runs it from the start.
+            c2.shot("windows-aplicado")
+            c2.stop()
+            c2.process = None
         return states if all(s == "COMPLETED" for s in states.values()) else None
     wait_for(both_done, "instalações simultâneas", 8 * 3600, 4)
     # Concurrency comes from the server's audit chain: dispatch and completion of each job.
@@ -623,13 +649,15 @@ def phase_install(lab):
     rescue_shutdown(c1)
     lab.state["client2PoweredAfterInstall"] = True
     lab.save()
-    log("cliente2 reinicia sozinho no Windows instalado (rebootAfterInstall); fase firstboot segue")
-    c2.stop()
+    log("cliente2 reiniciou sozinho após aplicar o Windows (rebootAfterInstall); o primeiro boot segue na fase firstboot")
 
 
 def phase_firstboot(lab):
     c1, c2 = VM(lab, "client1", 64, True), VM(lab, "client2", 128, False)
-    c2.start(memory=4096, windows=True)
+    # Lab only: with internet, the Windows first boot runs the OOBE zero-day update (ZDP) from
+    # Windows Update; under emulation it failed and OOBE looped on "Por que meu computador foi
+    # reiniciado?". The first boot runs without internet, as a bench PC not yet cabled would.
+    c2.start(memory=4096, windows=True, internet=False)
     c1.start(memory=3072)
     threads = [threading.Thread(target=windows_logon, args=(c2, lab.state["passwords"]["client2-windows"], "windows-primeiro-boot", lab.args.windows_wait))]
     threads[0].start()
