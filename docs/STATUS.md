@@ -23,8 +23,8 @@ Downloads e evidências atuais em ENTREGA-2026-10-29-beta5.md; registros anterio
 | ddrescue com mapfile | Script local candidato | Retomada local; não integra fila do Controller |
 | Explorar/copiar arquivos remotamente | Implementado | Escopos locais; listagem paginada, backup/envio e importação local; E2E5/5 |
 | Particionamento/formatação remoto | Limitado aos perfis de instalação | Perfis tipados Windows (WinPE) e Linux (Rescue); sem particionador arbitrário |
-| Conversão MBR→GPT/UEFI | Implementado na beta.5 | MBR2GPT da mídia importada, hash no plano assinado, /validate, confirmação local e conferência do layout; hardware não homologado |
-| Instalação Windows/Linux | Windows WinPE com unattend e Ubuntu/Xubuntu pelo Rescue (UEFI) implementados na beta.5 | Conta local com senha temporária gerada pelo servidor; OOBE pulado; Linux exige troca de senha; evidência de laboratório em ENTREGA-2026-10-29-beta5.md; hardware não homologado |
+| Conversão MBR→GPT/UEFI | Implementado na beta.5 | MBR2GPT da mídia importada, hash no plano assinado, /validate, confirmação local e conferência do layout; laboratório VM: Windows clonado iniciou em UEFI até a área de trabalho; hardware não homologado |
+| Instalação Windows/Linux | Windows WinPE com unattend e Ubuntu/Xubuntu pelo Rescue (UEFI) implementados na beta.5 | Laboratório VM: instalados ao mesmo tempo, Windows até a área de trabalho sem OOBE e Xubuntu com troca de senha obrigatória (ENTREGA-2026-10-29-beta5.md); hardware não homologado |
 | PXE/Rescue local | Pendente | USB/boot manual primeiro |
 | Contas/RBAC | Pendente | Uma credencial administrativa local, sem multiusuário |
 | Auditoria/plano/locks/anti-replay | Implementado | Registro encadeado; não é WORM nem auditoria externa |
@@ -35,7 +35,9 @@ Downloads e evidências atuais em ENTREGA-2026-10-29-beta5.md; registros anterio
 | GitHub/CI remoto/PR/merge/destaque | Publicado e fixado | PR1–PR7 mesclados; beta.4 publicada com CI40729165261 Windows/Linux e ISO40729165548 SUCCESS |
 | Backup Google Drive | Concluído e conferido (beta.3.3) | Drive privado: fonte+Git bundle e os oito assets da release com manifesto SHA256; tamanhos/hashes e permissão só do proprietário conferidos; sem dados de clientes nem mídia Microsoft |
 
-Homologação restante: Windows 10/11 em VMs UEFI, Linux ext4, SATA/NVMe em discos
-descartáveis, perda de rede/energia, filesystem após restore e primeiro boot.
+Homologação restante: hardware físico (placas de rede/Wi-Fi, Secure Boot, SATA/NVMe) com
+discos descartáveis, Windows 11, perda de rede/energia durante gravação e primeiro boot em
+equipamentos reais. O ciclo instalar → clonar com redução → converter → iniciar já passou
+em máquinas virtuais.
 Os scripts locais de ferramentas maduras não devem ser contabilizados como
 funcionalidades centralizadas concluídas.

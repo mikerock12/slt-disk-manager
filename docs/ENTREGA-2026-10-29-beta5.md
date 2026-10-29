@@ -17,14 +17,14 @@ reduzindo a principal; converter o cliente 1 para GPT/UEFI e iniciar o Windows.
 
 | Etapa | Resultado | Evidência |
 |---|---|---|
-| Cliente 1: 64 GB, UEFI/GPT, Xubuntu 26.04 pelo SLT Rescue | <!-- R1 --> | |
-| Cliente 2: 128 GB, BIOS/MBR, Windows 10 Pro pelo WinPE | <!-- R2 --> | |
-| Instalações ao mesmo tempo | <!-- R3 --> | |
-| Primeiro boot Xubuntu | <!-- R4 --> | |
-| Primeiro boot Windows | <!-- R5 --> | |
-| Clone em lotes cliente 2 → cliente 1 com redução | <!-- R6 --> | |
-| Conversão MBR → GPT/UEFI no cliente 1 | <!-- R7 --> | |
-| Boot do Windows clonado em UEFI | <!-- R8 --> | |
+| Cliente 1: 64 GB, UEFI/GPT, Xubuntu 26.04 pelo SLT Rescue | COMPLETED: partição EFI + raiz ext4, GRUB/shim da própria ISO, usuário com senha temporária | auditoria do servidor e `docs/screens/lab-xubuntu-instalado-cliente1.png` |
+| Cliente 2: 128 GB, BIOS/MBR, Windows 10 Pro pelo WinPE | COMPLETED: download 3,7 GiB em lotes verificados, DiskPart, DISM, BCDBoot/bootsect e `unattend.xml` gravado | resultado do job e cópia do disco pós-instalação |
+| Instalações ao mesmo tempo | Aprovadas juntas; despachadas no mesmo segundo; ~12 min com as duas rodando | eventos `job.dispatched`/`job.completed` da auditoria encadeada |
+| Primeiro boot Xubuntu | Tela de login `cliente1`/`tecnico` em pt_BR; senha temporária aceita e troca exigida | `docs/screens/lab-xubuntu-*.png` |
+| Primeiro boot Windows | Área de trabalho do Windows 10 Pro em pt-BR com a conta `tecnico` e a senha temporária, sem telas de OOBE | `docs/screens/lab-windows-instalado-cliente2.png` |
+| Clone em lotes cliente 2 → cliente 1 com redução | COMPLETED em lotes (AJUSTAR): partições do Xubuntu substituídas; Windows 127,46 GB → 63,46 GB; dados e tabela verificados; nenhum dado deixado no servidor | resultado do job e sessão de clone |
+| Conversão MBR → GPT/UEFI no cliente 1 | COMPLETED em ~5 min: MBR2GPT da mídia importada (hash no plano assinado), `/validate`, confirmação local e conferência da GPT com partição EFI | resultado do job |
+| Boot do Windows clonado em UEFI | Área de trabalho do Windows clonado em UEFI/GPT no cliente 1 com a conta `tecnico`; desligamento limpo pelo botão de energia | `docs/screens/lab-windows-clonado-uefi-cliente1.png` |
 
 O harness está em `tests/integration/lab-vm.py` (fases `install`, `firstboot`, `clone`,
 `convert` e `boot`). As mídias Windows/Xubuntu, os discos virtuais, as senhas temporárias e
@@ -35,7 +35,9 @@ as evidências brutas ficam só em `runtime/` local, fora do Git.
 - QEMU 11.1 em Windows 10 com WHPX, processador i5-6500 e disco rígido. Neste host o Windows
   convidado não ficou estável sob WHPX (travava no meio do download, dormia sem acordar ou
   dava tela azul); o WinPE e o primeiro boot do Windows rodaram em emulação TCG, muito mais
-  lenta (DISM ~30 min, especialização ~50 min). Rescue e Xubuntu rodaram sob WHPX.
+  lenta (DISM ~30 min, especialização ~50 min). Rescue, Xubuntu e o boot final do Windows
+  clonado (já configurado) rodaram sob WHPX. O clone em lotes de 128 GB levou ~3h30 neste
+  host com disco rígido (transferência ~2h15 e releitura ~1h20).
 - Com internet, a configuração inicial do Windows tenta baixar a atualização ZDP; na VM o
   download falhou e o Windows repetiu a tela "Por que meu computador foi reiniciado?". O
   primeiro boot do laboratório roda sem internet; o guia orienta o técnico a desconectar o
@@ -51,6 +53,10 @@ as evidências brutas ficam só em `runtime/` local, fora do Git.
 - O `unattend.xml` e os arquivos de boot podiam ficar no cache do WinPE se o computador fosse
   desligado logo após o "Concluído": o agente agora descarrega os volumes de sistema e do
   Windows antes de informar o resultado.
+- O primeiro boot do Windows repetia a tela de recuperação "Por que meu computador foi
+  reiniciado?" mesmo sem internet e com o unattend correto: o idioma agora é aplicado na
+  etapa `specialize` e as telas de OOBE de máquina e de usuário são puladas; o mesmo disco
+  instalado chegou ao logon e à área de trabalho.
 - A senha temporária do Windows aparecia nas listagens de tarefas e ficava no banco: agora é
   mascarada e apagada do plano quando a tarefa termina; continua exibida uma única vez.
 - O agente WinPE travava sob hypervisor por preempção assíncrona do Go: o kit define
@@ -60,11 +66,16 @@ as evidências brutas ficam só em `runtime/` local, fora do Git.
 
 ## Verificações automáticas
 
-<!-- CHECKS -->
+Locais na fonte publicada: Controller 145/145, cliente Windows 42/42, Desktop 37/37, Go
+`vet` Windows/Linux e testes do agente Rescue/WinPE (inclui novas tentativas de rede, descarga
+dos volumes e unattend). O CI da release repete as suítes, gera instalador, pacote e ISO e
+inicia a ISO em BIOS e UEFI.
 
 ## Prints
 
-<!-- PRINTS -->
+Em `docs/screens/`: painel com todas as tarefas do laboratório concluídas
+(`painel-tarefas-laboratorio.png`), Windows instalado no cliente 2, Windows clonado em UEFI no
+cliente 1, login do Xubuntu e troca obrigatória de senha. Nenhum print mostra senha ou token.
 
 ## Backup
 

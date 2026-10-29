@@ -48,6 +48,21 @@ usados apenas no desenvolvimento/backup solicitado pelo proprietário.
 - Instalador EXE completo (runtime .NET/C++, 7-Zip e smartctl embutidos) que pode
   instalar servidor e cliente como serviços do Windows, além do pacote portátil.
 
+## Telas do teste de laboratório
+
+Teste completo em máquinas virtuais, comandado pelo servidor (detalhes e limites em
+[ENTREGA-2026-10-29-beta5](docs/ENTREGA-2026-10-29-beta5.md)): Xubuntu e Windows instalados
+ao mesmo tempo, Windows clonado em lotes de 128 GB para 64 GB, disco convertido para GPT/UEFI
+e Windows clonado iniciando na área de trabalho.
+
+![Painel com as tarefas do laboratório concluídas](docs/screens/painel-tarefas-laboratorio.png)
+
+| Windows 10 instalado pelo servidor (cliente 2, BIOS/MBR) | Windows clonado no cliente 1 após conversão para UEFI/GPT |
+|---|---|
+| ![Área de trabalho do Windows instalado](docs/screens/lab-windows-instalado-cliente2.png) | ![Área de trabalho do Windows clonado em UEFI](docs/screens/lab-windows-clonado-uefi-cliente1.png) |
+| **Xubuntu instalado pelo servidor (cliente 1, UEFI/GPT)** | **Senha temporária exige troca no primeiro login** |
+| ![Tela de login do Xubuntu](docs/screens/lab-xubuntu-instalado-cliente1.png) | ![Troca de senha obrigatória](docs/screens/lab-xubuntu-troca-de-senha.png) |
+
 ## Limites atuais
 
 Veja [a matriz completa](docs/STATUS.md). Não há instalador MSI/assinatura de código,
