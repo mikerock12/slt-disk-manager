@@ -1,0 +1,28 @@
+﻿SLT DISK MANAGER — CLIENTE WINDOWS (BETA DE LABORATÓRIO)
+
+Instale este pacote nos computadores atendidos que ficarão ligados no Windows durante o
+serviço (inventário, SMART e cópia de arquivos). Clonagem e instalação de sistemas usam o
+pendrive SLT Rescue ou WinPE preparado no servidor, não este cliente.
+
+ANTES DE INSTALAR
+Tenha à mão o endereço e o pin SHA-256 do servidor, exibidos no painel e em
+state\server\server-info.txt no computador servidor, por exemplo
+https://192.168.1.10:7443. O servidor deve ter IP fixo. Confira o pin pessoalmente: ele
+garante que este cliente fala com o servidor certo. Depois aprove o pareamento no painel
+conferindo o código exibido neste computador.
+
+O QUE ACOMPANHA (nada é baixado da internet durante a instalação)
+- Cliente com runtime .NET 10 e runtime C++ embutidos; o Windows 10/11 já fornece o UCRT,
+  conferido antes de instalar.
+- smartmontools/smartctl 7.5 (GPL-2), usado no diagnóstico SMART somente leitura.
+As licenças ficam em client\tools e docs\12-licensing-third-party.md.
+
+SERVIÇO DO WINDOWS (opcional, com seu aviso)
+Na próxima etapa você pode marcar a instalação do cliente como serviço do Windows, com
+inventário e SMART automáticos. O passo roda o script incluído e pede permissão de
+administrador (UAC). Sem marcar, nada muda em serviços, firewall, boot ou discos; use o
+atalho "Cliente Windows" no modo portátil.
+
+O cliente Windows não grava discos: leitura de inventário/SMART e arquivos só nas pastas
+autorizadas. Leia QUICKSTART.md antes de operar.
+Binários ainda não têm assinatura digital do proprietário; confira origem e SHA256.

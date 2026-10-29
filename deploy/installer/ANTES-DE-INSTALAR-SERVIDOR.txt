@@ -1,0 +1,37 @@
+﻿SLT DISK MANAGER — SERVIDOR DA BANCADA (BETA DE LABORATÓRIO)
+
+Instale este pacote somente no computador servidor da assistência. Nos computadores
+atendidos use o instalador "SLT Disk Manager Cliente".
+
+ANTES DE INSTALAR: FIXE O IP DESTE COMPUTADOR
+O servidor escuta só no IPv4 informado (porta 7443) e cada cliente guarda esse endereço.
+Se o roteador trocar o IP, os clientes deixam de conectar. Escolha uma das opções:
+- Recomendado: reserva de DHCP no roteador (associe o endereço MAC da placa de rede
+  deste computador a um IP, por exemplo 192.168.1.10). O Windows continua em
+  "Obter IP automaticamente" e recebe sempre o mesmo endereço.
+- Ou IP manual no Windows: Configurações > Rede e Internet > Ethernet > Atribuição de IP >
+  Editar > Manual; informe IP, máscara, gateway e DNS, fora da faixa distribuída pelo
+  roteador.
+Use Ethernet (cabo). Confirme o IP com "ipconfig" antes de continuar.
+
+O QUE ACOMPANHA (nada é baixado da internet durante a instalação)
+- Servidor e painel com runtime .NET 10 e runtime C++ embutidos; o Windows 10/11 já fornece
+  o UCRT, conferido antes de instalar.
+- 7-Zip (LGPL), usado para ler as ISOs Windows/Ubuntu que você importar.
+- Agentes SLT Rescue (Linux) e WinPE, kit WinPE e guias de preparação dos pendrives.
+As licenças ficam em server\tools e docs\12-licensing-third-party.md.
+
+SERVIÇO DO WINDOWS (opcional, com seu aviso)
+Na próxima etapa você pode marcar a instalação do servidor como serviço do Windows. O
+passo roda o script incluído, pede permissão de administrador (UAC), cria o serviço e
+libera a porta 7443 somente na sub-rede privada informada. Sem marcar, nada muda em
+serviços, firewall, boot ou discos; use o atalho "Servidor e painel" no modo portátil.
+Não é preciso virtualizador nem Hyper-V.
+
+Clonagem e instalação de sistemas apagam integralmente o disco de destino.
+Confirme a autorização, os discos e os backups antes de aprovar qualquer tarefa.
+Cada gravação exige confirmação no painel e no teclado do cliente.
+Windows/WinPE, Ubuntu/Xubuntu e respectivas licenças não acompanham este instalador:
+importe a sua mídia legítima no servidor.
+Leia QUICKSTART.md, docs/WORKFLOWS.md e docs/STATUS.md antes de operar.
+Binários ainda não têm assinatura digital do proprietário; confira origem e SHA256.

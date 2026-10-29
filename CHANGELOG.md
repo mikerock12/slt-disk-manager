@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.0-beta.5.1 — 2026-10-29 — instaladores separados e IP fixo
+
+- **Dois instaladores:** `SLT-Disk-Manager-Servidor-Setup` para o computador da bancada
+  (servidor, painel, 7-Zip, agentes Rescue/WinPE e guias) e `SLT-Disk-Manager-Cliente-Setup`
+  para os PCs atendidos (cliente Windows e smartctl). Cada um oferece só o seu serviço do
+  Windows. O instalador do servidor atualiza por cima da instalação combinada anterior; o
+  do cliente tem identidade e pasta próprias e pode coexistir com o servidor no mesmo PC.
+- **IP fixo do servidor:** guia na instalação, no QUICKSTART e no site — reserva de DHCP no
+  roteador (recomendado) ou IP manual no Windows, antes de instalar o serviço.
+- Mesmo código e agentes da beta.5; pacote portátil e ISO Rescue inalterados em função.
+
 ## 0.1.0-beta.5 — 2026-10-29 — instalação Linux, primeiro boot Windows, redução em lotes e MBR→GPT
 
 - **Instalação Ubuntu/Xubuntu pelo Rescue (UEFI/GPT):** importe a ISO oficial no servidor;

@@ -43,14 +43,15 @@ jobs:
           python tests/integration/package-smoke.py "artifacts/SLT-Disk-Manager-$version-win-x64.zip"
           if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
           ./scripts/build-installer.ps1 -Version $version
-          ./tests/integration/installer-smoke.ps1 -Installer "artifacts/SLT-Disk-Manager-Setup-$version.exe"
+          ./tests/integration/installer-smoke.ps1 -ServerInstaller "artifacts/SLT-Disk-Manager-Servidor-Setup-$version.exe" -ClientInstaller "artifacts/SLT-Disk-Manager-Cliente-Setup-$version.exe"
           Get-ChildItem artifacts -File | Where-Object {$_.Name -like "SLT-Disk-Manager-*$version*.exe" -or $_.Name -like "SLT-Disk-Manager-*$version*.zip"} | Get-FileHash -Algorithm SHA256 | ForEach-Object { '{0}  {1}' -f $_.Hash.ToLowerInvariant(),(Split-Path $_.Path -Leaf) } | Set-Content artifacts/SHA256SUMS.txt -Encoding ascii
       - uses: actions/upload-artifact@v7
         with:
           name: slt-disk-manager-win-x64
           path: |
             artifacts/SLT-Disk-Manager-*.zip
-            artifacts/SLT-Disk-Manager-Setup-*.exe
+            artifacts/SLT-Disk-Manager-Servidor-Setup-*.exe
+            artifacts/SLT-Disk-Manager-Cliente-Setup-*.exe
             artifacts/SHA256SUMS.txt
           retention-days: 14
   rescue-linux:
@@ -95,5 +96,5 @@ jobs:
             test "$target" = "$GITHUB_SHA" || { echo 'Existing release preserved. Bump VERSION to publish a new build.'; exit 0; }
             gh release upload "$tag" release/* --clobber
           else
-            gh release create "$tag" release/* --target "$GITHUB_SHA" --prerelease --title "SLT Disk Manager $version" --notes 'Beta de laboratório: servidor/painel/cliente com dependências embutidas, clone em lotes entre clientes (inclusive para disco menor), arquivos com escopos, instalação Windows (WinPE) e Xubuntu/Ubuntu (Rescue) e conversão MBR→GPT/UEFI. Gravação apaga o destino e exige confirmação no painel e no cliente. Hardware físico ainda não homologado. Guia: https://github.com/mikerock12/slt-disk-manager/blob/main/docs/WORKFLOWS.md'
+            gh release create "$tag" release/* --target "$GITHUB_SHA" --prerelease --title "SLT Disk Manager $version" --notes 'Beta de laboratório com instaladores separados para o servidor da bancada e para o cliente Windows, ambos com dependências embutidas; clone em lotes entre clientes (inclusive para disco menor), arquivos com escopos, instalação Windows (WinPE) e Xubuntu/Ubuntu (Rescue) e conversão MBR→GPT/UEFI. Gravação apaga o destino e exige confirmação no painel e no cliente. Hardware físico ainda não homologado. Guia: https://github.com/mikerock12/slt-disk-manager/blob/main/docs/WORKFLOWS.md'
           fi
