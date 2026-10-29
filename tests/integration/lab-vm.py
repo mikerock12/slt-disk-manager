@@ -722,7 +722,7 @@ def phase_convert(lab):
     c1 = VM(lab, "client1", 64, True)
     seed = build_kit(lab, "client1")
     c1.start(cdrom=WINDOWS_ISO, seed=seed, scratch=True, windows=True)
-    c1.press_for_cd(25)
+    c1.press_for_cd(90)  # WinPE runs under TCG: the UEFI CD prompt comes later
     d1 = winpe_pair(lab, c1, used)
     lab.state["usedEnrollments"] = sorted(used)
     lab.save()
@@ -742,7 +742,7 @@ def phase_convert(lab):
 
 def phase_boot(lab):
     c1 = VM(lab, "client1", 64, True)
-    c1.start(memory=4096, windows=True)
+    c1.start(memory=4096, windows=True, internet=False)
     windows_logon(c1, lab.state["passwords"]["client2-windows"], "windows-uefi-cliente1", lab.args.windows_wait)
     lab.evidence("uefiBoot", {"shot": str(lab.ws / "client1-latest.png"), "review": "conferir área de trabalho do Windows clonado em UEFI/GPT no cliente1"})
     lab.evidence("uefiShutdownClean", c1.powerdown(900))
