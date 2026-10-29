@@ -607,8 +607,17 @@ def phase_install(lab):
             c2.shot("instalando")
         return states if all(s == "COMPLETED" for s in states.values()) else None
     wait_for(both_done, "instalações simultâneas", 8 * 3600, 4)
-    overlap = [t for t in timeline if t["linux"] == "RUNNING" and t["windows"] == "RUNNING"]
-    lab.evidence("installConcurrent", {"samplesBothRunning": len(overlap), "first": overlap[0]["t"] if overlap else None})
+    # Concurrency comes from the server's audit chain: dispatch and completion of each job.
+    times = {}
+    for event in lab.api("GET", "/api/v1/audit"):
+        for key, job_id in lab.state["installJobs"].items():
+            if job_id in event["details"] and event["action"] in ("job.dispatched", "job.completed"):
+                times[f"{key}.{event['action'].split('.')[1]}"] = event["timestampUtc"]
+    start = max(times["linux.dispatched"], times["windows.dispatched"])
+    end = min(times["linux.completed"], times["windows.completed"])
+    overlap = (datetime.fromisoformat(end) - datetime.fromisoformat(start)).total_seconds()
+    assert overlap > 0, f"instalações não se sobrepuseram: {times}"
+    lab.evidence("installConcurrent", {**times, "overlapSeconds": round(overlap)})
     for key in ("linux", "windows"):
         lab.evidence("install-" + key, lab.job(lab.state["installJobs"][key])["result"])
     rescue_shutdown(c1)
