@@ -7,7 +7,20 @@ homologação: hardware físico continua sem homologação.
 
 ## Downloads publicados
 
-<!-- RELEASE -->
+[Release e todos os arquivos](https://github.com/mikerock12/slt-disk-manager/releases/tag/v0.1.0-beta.5),
+publicada pelo CI a partir do merge `3ebd13c` (PR9).
+
+| Arquivo | Bytes | SHA256 |
+|---|---:|---|
+| SLT-Disk-Manager-Setup-0.1.0-beta.5.exe | 128037227 | 58de98657ae28bf62251813cb696368c3dab49f9015f10c20ed03a01a702b173 |
+| SLT-Disk-Manager-0.1.0-beta.5-win-x64.zip | 181743351 | cfcf0f496afb09bf88309120a6e45839253da5125bbd7cc923317f278d1f8a6a |
+| SLT-Rescue-0.1.0-beta.5-amd64.iso | 504365056 | 624a86a04b93aaca45495faa63fd9e7f9ad5a6e2a9f8ce2c4ddee448944471d9 |
+
+Os oito assets públicos foram baixados e conferidos por tamanho e SHA256 contra os digests
+da release e o `SHA256SUMS.txt`. O ZIP passou no teste CRC (1149 arquivos), contém 7-Zip
+(servidor) e smartctl (cliente) com licenças, e o agente WinPE empacotado informa
+`vcs.revision=3ebd13c…` e `vcs.modified=false`. Portal atualizado para esta tag e conferido em
+produção (API com tamanho/SHA256 exatos, download 302 para o asset).
 
 ## Teste de laboratório completo
 
@@ -79,4 +92,7 @@ cliente 1, login do Xubuntu e troca obrigatória de senha. Nenhum print mostra s
 
 ## Backup
 
-<!-- BACKUP -->
+Backup privado no Google Drive concluído e conferido: fonte com histórico Git completo
+(bundle verificado) e manifesto de hashes, os oito assets da release e o snapshot do portal.
+Releitura com tamanho/SHA256, tamanhos remotos exatos e acesso somente do proprietário.
+Referências privadas ficam apenas em recibos locais ignorados pelo Git.
