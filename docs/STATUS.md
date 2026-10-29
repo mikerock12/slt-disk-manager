@@ -1,7 +1,7 @@
 # Matriz de entrega e homologação
 
 Esta é a beta 0.1.0-beta.5, não o aceite integral da seção 25 da especificação.
-Downloads e evidências atuais em ENTREGA-2026-10-28-beta5.md; registros anteriores são históricos.
+Downloads e evidências atuais em ENTREGA-2026-10-29-beta5.md; registros anteriores são históricos.
 
 | Requisito | Estado nesta entrega | Evidência/limite |
 |---|---|---|
@@ -24,7 +24,7 @@ Downloads e evidências atuais em ENTREGA-2026-10-28-beta5.md; registros anterio
 | Explorar/copiar arquivos remotamente | Implementado | Escopos locais; listagem paginada, backup/envio e importação local; E2E5/5 |
 | Particionamento/formatação remoto | Limitado aos perfis de instalação | Perfis tipados Windows (WinPE) e Linux (Rescue); sem particionador arbitrário |
 | Conversão MBR→GPT/UEFI | Implementado na beta.5 | MBR2GPT da mídia importada, hash no plano assinado, /validate, confirmação local e conferência do layout; hardware não homologado |
-| Instalação Windows/Linux | Windows WinPE com unattend e Ubuntu/Xubuntu pelo Rescue (UEFI) implementados na beta.5 | Conta local com senha temporária gerada pelo servidor; OOBE pulado; Linux exige troca de senha; evidência de laboratório em ENTREGA-2026-10-28-beta5.md; hardware não homologado |
+| Instalação Windows/Linux | Windows WinPE com unattend e Ubuntu/Xubuntu pelo Rescue (UEFI) implementados na beta.5 | Conta local com senha temporária gerada pelo servidor; OOBE pulado; Linux exige troca de senha; evidência de laboratório em ENTREGA-2026-10-29-beta5.md; hardware não homologado |
 | PXE/Rescue local | Pendente | USB/boot manual primeiro |
 | Contas/RBAC | Pendente | Uma credencial administrativa local, sem multiusuário |
 | Auditoria/plano/locks/anti-replay | Implementado | Registro encadeado; não é WORM nem auditoria externa |

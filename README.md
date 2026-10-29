@@ -10,8 +10,8 @@ dados reais antes de homologar o ciclo em VMs e discos descartáveis.
 
 ## Começar
 
-Baixe o [instalador, pacote portátil e ISO SLT Rescue da beta.4](https://github.com/mikerock12/slt-disk-manager/releases/tag/v0.1.0-beta.4).
-Consulte [a entrega e os hashes](docs/ENTREGA-2026-10-28-beta4.md).
+Baixe o [instalador, pacote portátil e ISO SLT Rescue da beta.5](https://github.com/mikerock12/slt-disk-manager/releases/tag/v0.1.0-beta.5).
+Consulte [a entrega, as evidências de laboratório e os hashes](docs/ENTREGA-2026-10-29-beta5.md).
 
 Leia [o guia de bancada](docs/QUICKSTART.md). O pacote portátil Windows x64 contém
 servidor, painel e client com runtime .NET incluído. Após extrair:

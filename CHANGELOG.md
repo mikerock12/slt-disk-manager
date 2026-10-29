@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.0-beta.5 — 2026-10-28 — instalação Linux, primeiro boot Windows, redução em lotes e MBR→GPT
+## 0.1.0-beta.5 — 2026-10-29 — instalação Linux, primeiro boot Windows, redução em lotes e MBR→GPT
 
 - **Instalação Ubuntu/Xubuntu pelo Rescue (UEFI/GPT):** importe a ISO oficial no servidor;
   o cliente em SLT Rescue particiona, extrai o sistema da própria ISO, instala GRUB/shim,
