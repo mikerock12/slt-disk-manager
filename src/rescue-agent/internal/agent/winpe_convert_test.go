@@ -22,6 +22,15 @@ func TestUnattendSkipsOOBEWithLocalizedAdministrators(t *testing.T) {
 			t.Fatalf("unattend sem %q", expected)
 		}
 	}
+	// Language goes to specialize: applied in oobeSystem it restarted OOBE in the lab, which then
+	// looped on the restart-recovery page. Machine and user OOBE are skipped outright.
+	oobe := strings.Index(text, `pass="oobeSystem"`)
+	if intl := strings.Index(text, "Microsoft-Windows-International-Core"); intl < 0 || intl > oobe || strings.Count(text, "International-Core") != 1 {
+		t.Fatal("International-Core deve ficar só no specialize")
+	}
+	if !strings.Contains(text[oobe:], "<SkipMachineOOBE>true</SkipMachineOOBE>") || !strings.Contains(text[oobe:], "<SkipUserOOBE>true</SkipUserOOBE>") {
+		t.Fatal("OOBE de máquina e de usuário devem ser pulados")
+	}
 	for _, bad := range []*DeploymentAccount{
 		{ComputerName: "CLIENTE2", UserName: "tecnico", Password: "short", Locale: "pt-BR", TimeZone: "E. South America Standard Time"},
 		{ComputerName: "CLIENTE2", UserName: "tec<nico>", Password: "Abc23456defGH", Locale: "pt-BR", TimeZone: "E. South America Standard Time"},

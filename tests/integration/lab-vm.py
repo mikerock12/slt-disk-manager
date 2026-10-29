@@ -96,18 +96,18 @@ class QMP:
                     raise RuntimeError(str(response["error"]))
                 return response.get("return")
 
-    def key(self, code, shift=False):
+    def key(self, code, shift=False, delay=0.07):
         keys = ([{"type": "qcode", "data": "shift"}] if shift else []) + [{"type": "qcode", "data": code}]
-        self.command("send-key", {"keys": keys, "hold-time": 50})
-        time.sleep(0.07)
+        self.command("send-key", {"keys": keys, "hold-time": 50 if delay < 0.5 else 120})
+        time.sleep(delay)
 
-    def type(self, text):
+    def type(self, text, delay=0.07):
         # Only harness-generated values: challenges, temporary passwords and fixed commands.
         for ch in text:
             if ch.isascii() and ch.isalnum():
-                self.key(ch.lower(), ch.isupper())
+                self.key(ch.lower(), ch.isupper(), delay)
             elif ch in self.KEYS:
-                self.key(*self.KEYS[ch])
+                self.key(*self.KEYS[ch], delay)
             else:
                 raise ValueError("caractere não permitido para digitação: " + repr(ch))
 
@@ -570,9 +570,14 @@ def windows_logon(vm, password, label, wait_minutes):
         time.sleep(30)
     else:
         raise AssertionError(f"{vm.name}: Windows não chegou ao logon em {wait_minutes} min")
-    vm.qmp.key("spc")
-    time.sleep(5)
-    vm.qmp.type(password + "\n")
+    # Under TCG the lock screen takes long to lift and fast keystrokes get lost: wake it with a
+    # key that types nothing, wait for the password field, then type one key at a time.
+    slow = vm.accel == "tcg"
+    vm.qmp.key("ctrl")
+    time.sleep(40 if slow else 5)
+    vm.qmp.type(password, 1.5 if slow else 0.07)
+    time.sleep(3)
+    vm.qmp.key("ret")
     for _ in range(30):
         time.sleep(20)
         vm.shot(label + "-logon")

@@ -43,6 +43,12 @@ func BuildUnattend(a *DeploymentAccount) (string, error) {
 	return `<?xml version="1.0" encoding="utf-8"?>
 <unattend xmlns="urn:schemas-microsoft-com:unattend" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
  <settings pass="specialize">
+  ` + component("Microsoft-Windows-International-Core") + `
+   <InputLocale>` + locale.input + `</InputLocale>
+   <SystemLocale>` + a.Locale + `</SystemLocale>
+   <UILanguage>` + a.Locale + `</UILanguage>
+   <UserLocale>` + a.Locale + `</UserLocale>
+  </component>
   ` + component("Microsoft-Windows-Shell-Setup") + `
    <ComputerName>` + xmlText(a.ComputerName) + `</ComputerName>
    <TimeZone>` + xmlText(a.TimeZone) + `</TimeZone>
@@ -54,14 +60,10 @@ func BuildUnattend(a *DeploymentAccount) (string, error) {
   </component>
  </settings>
  <settings pass="oobeSystem">
-  ` + component("Microsoft-Windows-International-Core") + `
-   <InputLocale>` + locale.input + `</InputLocale>
-   <SystemLocale>` + a.Locale + `</SystemLocale>
-   <UILanguage>` + a.Locale + `</UILanguage>
-   <UserLocale>` + a.Locale + `</UserLocale>
-  </component>
   ` + component("Microsoft-Windows-Shell-Setup") + `
    <OOBE>
+    <SkipMachineOOBE>true</SkipMachineOOBE>
+    <SkipUserOOBE>true</SkipUserOOBE>
     <HideEULAPage>true</HideEULAPage>
     <HideLocalAccountScreen>true</HideLocalAccountScreen>
     <HideOEMRegistrationScreen>true</HideOEMRegistrationScreen>
