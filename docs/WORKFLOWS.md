@@ -137,6 +137,13 @@ desligada. Anote a senha e troque-a no primeiro acesso. Reinício só ocorre qua
 explicitamente e após confirmação do resultado pelo servidor. Não há quebra de ativação
 ou licença: o Windows ativa com a licença do equipamento ou do cliente.
 
+No primeiro boot com internet, a configuração inicial do Windows pode baixar uma
+atualização obrigatória (ZDP) do Windows Update. Se ela falhar, o Windows mostra
+"Por que meu computador foi reiniciado?" e repete a tela. Para evitar, deixe o cabo de
+rede desconectado até chegar à área de trabalho; se a tela já apareceu, desconecte o cabo
+e avance. Em laboratório lento, uma instalação que entrou nesse ciclo não se recuperou:
+foi preciso instalar de novo sem internet no primeiro boot.
+
 ## Instalar Xubuntu/Ubuntu
 
 Importe a ISO oficial desktop (Ubuntu/Xubuntu com instalador em camadas, 24.04 ou mais

@@ -316,6 +316,10 @@ class VM:
         # no disk I/O. They run under multi-threaded TCG, slower but stable (the beta.3.3 WinPE
         # run completed there). Linux guests (Rescue, Xubuntu) keep WHPX.
         accel = "tcg" if windows else self.lab.accel
+        if windows and cdrom is None and self.lab.accel == "whpx":
+            # The installed Windows boots (OOBE) under WHPX by default: under TCG its OOBE
+            # restarted itself mid-way and looped on the restart-recovery page.
+            accel = self.lab.args.windows_boot_accel
         cpu = "Nehalem" if accel == "whpx" else "max"
         self.accel = accel
         args = [str(QEMU_DIR / "qemu-system-x86_64.exe"), "-L", str(QEMU_DIR / "share"), "-name", f"SLT LAB {self.name}",
@@ -650,10 +654,16 @@ def phase_install(lab):
     lab.state["client2PoweredAfterInstall"] = True
     lab.save()
     log("cliente2 reiniciou sozinho após aplicar o Windows (rebootAfterInstall); o primeiro boot segue na fase firstboot")
+    # Copy of the freshly applied disk, so a failed first boot can be retried without reinstalling.
+    shutil.copyfile(c2.disk, lab.ws / "client2-installed.qcow2")
+    log("cópia do disco do cliente2 logo após a instalação: client2-installed.qcow2")
 
 
 def phase_firstboot(lab):
     c1, c2 = VM(lab, "client1", 64, True), VM(lab, "client2", 128, False)
+    if lab.args.from_installed:
+        shutil.copyfile(lab.ws / "client2-installed.qcow2", c2.disk)
+        log("disco do cliente2 restaurado da cópia feita logo após a instalação")
     # Lab only: with internet, the Windows first boot runs the OOBE zero-day update (ZDP) from
     # Windows Update; under emulation it failed and OOBE looped on "Por que meu computador foi
     # reiniciado?". The first boot runs without internet, as a bench PC not yet cabled would.
@@ -743,6 +753,8 @@ def main():
     parser.add_argument("--workspace")
     parser.add_argument("--rescue-iso", default="artifacts/lab/SLT-Rescue-lab.iso")
     parser.add_argument("--windows-wait", type=int, default=12, help="minutos até digitar a senha no logon do Windows")
+    parser.add_argument("--windows-boot-accel", choices=["whpx", "tcg"], default="whpx", help="acelerador do Windows instalado (o WinPE usa TCG)")
+    parser.add_argument("--from-installed", action="store_true", help="firstboot recomeça da cópia do disco feita após a instalação")
     args = parser.parse_args()
     workspace = Path(args.workspace) if args.workspace else ROOT / "runtime" / ("lab-" + uuid.uuid4().hex[:12])
     if not workspace.resolve().is_relative_to((ROOT / "runtime").resolve()):
