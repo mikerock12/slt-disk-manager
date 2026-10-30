@@ -5,6 +5,27 @@ sem perguntas, redução no clone em lotes, conversão MBR→GPT/UEFI e instalad
 dependências. Consulte STATUS.md para distinguir implementação, teste automatizado e
 homologação: hardware físico continua sem homologação.
 
+## Atualização 0.1.0-beta.5.1 — instaladores separados
+
+[Release v0.1.0-beta.5.1](https://github.com/mikerock12/slt-disk-manager/releases/tag/v0.1.0-beta.5.1),
+publicada pelo CI a partir do merge `1200e08` (PR11). Mesmo código e agentes da beta.5; muda
+a distribuição: um instalador para o servidor da bancada e outro para os PCs atendidos,
+com o guia de IP fixo do servidor no instalador, no QUICKSTART e no site.
+
+| Arquivo | Bytes | SHA256 |
+|---|---:|---|
+| SLT-Disk-Manager-Servidor-Setup-0.1.0-beta.5.1.exe | 93467588 | eb533d28ce6570df9fdf008380a68b8fbd7a18be3e8e9f7dbd428258663e053a |
+| SLT-Disk-Manager-Cliente-Setup-0.1.0-beta.5.1.exe | 38010363 | 4040aaa43773ef29b29b378a07ffeac0beda6fd1acd736c65a45fbb52cef73f9 |
+| SLT-Disk-Manager-0.1.0-beta.5.1-win-x64.zip | 181751038 | 694e2046dd9c0b04b4a8c2f9e1a11e36e5a16d3c1569baf33a6348fd45969961 |
+| SLT-Rescue-0.1.0-beta.5.1-amd64.iso | 504365056 | fb9f01d50f5e341a7dea48afed6a9ab268402314acecc666b0d13fd635c25e58 |
+
+Os nove assets foram baixados e conferidos por tamanho e SHA256 (digests e `SHA256SUMS.txt`);
+ZIP CRC 1149 arquivos; agente WinPE `vcs.revision=1200e08…`, `vcs.modified=false`. O smoke dos
+instaladores publicados passou: servidor sem cliente e cliente sem servidor/painel, 7-Zip e
+smartctl executam, desinstalação preserva o estado gerado. Portal com os dois downloads e o
+guia conferido em produção. Backup privado no Drive (fonte com histórico, nove assets e
+snapshot do portal) relido por tamanho/SHA256, com tamanhos remotos e acesso só do proprietário.
+
 ## Downloads publicados
 
 [Release e todos os arquivos](https://github.com/mikerock12/slt-disk-manager/releases/tag/v0.1.0-beta.5),

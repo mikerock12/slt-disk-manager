@@ -4,7 +4,7 @@ Atualizado em 2026-10-27. Projeto baseado na especificação técnica 1.0.0. Reg
 
 ## Checkpoint atual — 2026-10-28
 
-- 29/10: 0.1.0-beta.5.1 separa os instaladores (Servidor e Cliente, mesmo .iss com /DEdition) e adiciona o guia de IP fixo do servidor no instalador, QUICKSTART, README e site.
+- 29/10: publicada 0.1.0-beta.5.1 (merge 1200e08, assets conferidos, portal Worker 7ac85e95-eb6f-4f3c-b236-414bbf6cfdaa, backup Drive conferido); separa os instaladores (Servidor e Cliente, mesmo .iss com /DEdition) e adiciona o guia de IP fixo do servidor no instalador, QUICKSTART, README e site.
 
 - Entrega pública: **0.1.0-beta.4**, fonte `9c71b9495346ee84dac599bd609c59c88c57bbc6` (PR7): clone em lotes entre dois Rescue sem imagem completa no servidor nem scratch (janela 256 MiB, lote apagado após fsync do destino; EXATO/PRESERVAR/AJUSTAR maior). CI 40729165261 e ISO 40729165548 SUCCESS; oito assets conferidos, ZIP CRC 1131 arquivos, agente com vcs.revision da release. Hashes em `docs/ENTREGA-2026-10-28-beta4.md`.
 - Entrega 0.1.0-beta.5 (29/10, PR9 `feat/full-lab`): versão completa pedida pelo usuário, validada em laboratório VM de ponta a ponta (instalação simultânea Xubuntu/Windows pelo servidor, primeiro boot, clone em lotes 128→64 GB com redução, MBR→GPT e boot UEFI do Windows clonado até a área de trabalho). Evidências e limites em `docs/ENTREGA-2026-10-29-beta5.md`; prints em `docs/screens/`. Publicada: release v0.1.0-beta.5 (merge 3ebd13c, CI SUCCESS, oito assets conferidos), portal (Worker 9cf911fa-fcba-4625-b7ac-8bf352aec7f2) e backup privado no Drive conferido. Hardware físico continua sem homologação.
