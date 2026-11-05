@@ -50,13 +50,19 @@ def vm_configuration(match_full_vm, mode, index):
             "smbiosProduct": "SLT_PXE_LAB" if match_full_vm else "SLT_BOOTSTRAP_DIAGNOSTIC"}
 
 
-def fixture_disk(private, mode):
+def fixture_disk(private, prefix):
     # A new private regular file, not a device or a source/customer image.
-    file = private / (mode + "-synthetic.raw")
+    file = private / (prefix + "-synthetic.raw")
     with file.open("xb") as output:
         output.write(bytes(8 * 1024 * 1024))
     assert file.is_file() and not file.is_symlink() and file.stat().st_size == 8 * 1024 * 1024
     return file, lab.digest(file)
+
+
+def diagnostic_runs(firmware, attempts):
+    assert firmware in ("bios", "uefi", "both") and 1 <= attempts <= 3
+    modes = ("bios", "uefi") if firmware == "both" else (firmware,)
+    return [(index, mode, attempt) for index, mode in enumerate(modes) for attempt in range(1, attempts + 1)]
 
 
 def main():
@@ -65,6 +71,7 @@ def main():
     parser.add_argument("--bootstrap-profile", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--firmware", choices=("bios", "uefi", "both"), default="both")
+    parser.add_argument("--attempts", type=int, choices=(1, 2, 3), default=1, help="Repeat each firmware with the same MAC/lease and a fresh VM/service (default: 1)")
     parser.add_argument("--match-full-vm", action="store_true", help="Use full-lab RAM/CPU/MAC/SMBIOS/profile IDs and attach only a synthetic 8 MiB readonly RAW disk")
     parser.add_argument("--inside-netns", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--parent-netns", help=argparse.SUPPRESS)
@@ -86,11 +93,12 @@ def main():
     assert not json.loads(lab.run("ip", "-j", "route", "show", "default"))
     args.output.mkdir(parents=True, exist_ok=False)
     os.chmod(args.output, 0o700)
-    modes = ("bios", "uefi") if args.firmware == "both" else (args.firmware,)
+    runs = diagnostic_runs(args.firmware, args.attempts)
     results = {"scope": "BOOTSTRAP_OUTAGE_DIAGNOSTIC_ONLY", "networkBootLabApproved": False,
                "namespaceIsolated": True, "hostNetworkChanged": False, "isoAttached": False,
                "usbAttached": False, "disksAttached": args.match_full_vm, "syntheticDisksOnly": args.match_full_vm,
                "matchFullVmConfiguration": args.match_full_vm, "controllerStarted": False,
+               "attemptsPerFirmware": args.attempts, "expectedRuns": len(runs), "sharedDhcpLeaseState": True,
                "linuxUserspaceExpected": False, "secureBoot": False, "physicalHardwareTested": False,
                "firmware": [], "success": False}
     processes, logs = [], []
@@ -137,23 +145,24 @@ def main():
         dhcp = start(["dnsmasq", "--keep-in-foreground", "--conf-file=" + str(dnsconfig)], "external-dhcp")
         time.sleep(0.3)
         assert dhcp.poll() is None
-        for index, mode in enumerate(modes):
-            entry = {"firmware": mode, "passed": False, "explicitBootFailure": False, "userspaceReached": False}
+        for index, mode, attempt in runs:
+            prefix = mode if args.attempts == 1 else f"{mode}-attempt-{attempt}"
+            entry = {"firmware": mode, "attempt": attempt, "passed": False, "explicitBootFailure": False, "userspaceReached": False}
             results["firmware"].append(entry)
             console, qmp, service, vm = None, None, None, None
             fixture = None
             try:
-                service_name = mode + "-boot-service"
+                service_name = prefix + "-boot-service"
                 service_log = args.output / (service_name + ".log")
                 service = start(["dotnet", str(args.service_dll), "--lab"], service_name, stdin=subprocess.PIPE)
                 service.stdin.write((json.dumps(launch) + "\n").encode())
                 service.stdin.flush()
                 lab.wait_for(lambda: '"state":"RUNNING"' in service_log.read_text(errors="replace"), "bootstrap service RUNNING", 90)
-                qmp_path, serial_path = private / (mode + "-qmp.sock"), private / (mode + "-serial.sock")
+                qmp_path, serial_path = private / (prefix + "-qmp.sock"), private / (prefix + "-serial.sock")
                 firmware = []
                 if mode == "uefi":
                     code, template = lab.firmware_files()
-                    variables = private / "OVMF_VARS.fd"
+                    variables = private / (prefix + "-OVMF_VARS.fd")
                     shutil.copyfile(template, variables)
                     firmware = ["-drive", f"if=pflash,format=raw,unit=0,readonly=on,file={code}",
                                 "-drive", f"if=pflash,format=raw,unit=1,file={variables}"]
@@ -162,7 +171,7 @@ def main():
                 entry["vmConfiguration"] = configuration
                 disk_arguments = []
                 if args.match_full_vm:
-                    fixture, fixture_hash = fixture_disk(private, mode)
+                    fixture, fixture_hash = fixture_disk(private, prefix)
                     entry["syntheticSha256Before"] = fixture_hash
                     entry["syntheticDisk"] = {"sizeBytes": fixture.stat().st_size, "readonly": True,
                                               "format": "raw", "device": "virtio-blk-pci", "serial": "SLT-PXE-FIXTURE"}
@@ -175,15 +184,15 @@ def main():
                            "-device", "e1000,netdev=net0,mac=" + configuration["mac"], *disk_arguments,
                            "-smbios", "type=1,manufacturer=SLT_QEMU_ONLY,product=" + configuration["smbiosProduct"], *firmware]
                 started = time.monotonic()
-                vm = start(command, mode + "-qemu")
+                vm = start(command, prefix + "-qemu")
                 lab.wait_for(lambda: serial_path.exists() and qmp_path.exists(), "bootstrap QEMU console")
-                console = lab.GuestConsole(serial_path, args.output / (mode + ".serial.log"))
+                console = lab.GuestConsole(serial_path, args.output / (prefix + ".serial.log"))
                 qmp = lab.Qmp(qmp_path)
                 console.qmp = qmp
                 console.expect("SLT Network Boot", 180)
                 entry["menuSeconds"] = round(time.monotonic() - started, 2)
-                qmp.execute("screendump", {"filename": str(args.output / (mode + "-menu.ppm"))})
-                lab.progress(mode.upper() + " diagnostic menu reached; stopping real SLT HTTP/TFTP")
+                qmp.execute("screendump", {"filename": str(args.output / (prefix + "-menu.ppm"))})
+                lab.progress(prefix.upper() + " diagnostic menu reached; stopping real SLT HTTP/TFTP")
                 service.stdin.write(b"STOP\n")
                 service.stdin.flush()
                 service.wait(timeout=15)
@@ -199,25 +208,25 @@ def main():
                 time.sleep(0.2)
                 qmp.key("ret")
                 time.sleep(0.3)
-                qmp.execute("screendump", {"filename": str(args.output / (mode + "-after-selection.ppm"))})
+                qmp.execute("screendump", {"filename": str(args.output / (prefix + "-after-selection.ppm"))})
                 console.expect(r"(?m)^Falha de boot\.", 180, label="explicit SLT boot failure output (not a debug command trace)")
                 entry["explicitBootFailure"] = True
-                qmp.execute("screendump", {"filename": str(args.output / (mode + "-failure-message.ppm"))})
+                qmp.execute("screendump", {"filename": str(args.output / (prefix + "-failure-message.ppm"))})
                 until = time.monotonic() + 10
                 while time.monotonic() < until:
                     entry["userspaceReached"] = bool(re.search(r"SLT_RESCUE_BOOT_READY:|Linux version |BOOT_READY", console.pump()))
                     assert not entry["userspaceReached"], "Unexpected Linux userspace"
                     assert vm.poll() is None, "Diagnostic VM terminated unexpectedly"
                     time.sleep(0.2)
-                qmp.execute("screendump", {"filename": str(args.output / (mode + "-after-fallback.ppm"))})
+                qmp.execute("screendump", {"filename": str(args.output / (prefix + "-after-fallback.ppm"))})
                 entry["observedSeconds"] = round(time.monotonic() - failed_at, 2)
                 entry["passed"] = True
-                lab.progress("PASS " + mode + ": explicit SLT failure after bootstrap outage, no Linux or real disk attached")
+                lab.progress("PASS " + prefix + ": explicit SLT failure after bootstrap outage, no Linux or real disk attached")
             except Exception as error:
                 entry["error"] = type(error).__name__ + ": " + str(error)[:500]
                 if console:
                     console.diagnostics("bootstrap-only diagnostic failed", kind="FAILURE")
-                lab.progress("FAIL " + mode + ": " + entry["error"])
+                lab.progress("FAIL " + prefix + ": " + entry["error"])
             finally:
                 if qmp:
                     try:
@@ -240,7 +249,7 @@ def main():
                     if entry["syntheticSha256After"] != entry["syntheticSha256Before"]:
                         entry["passed"] = False
                         entry["error"] = "Synthetic readonly disk changed"
-        results["success"] = len(results["firmware"]) == len(modes) and all(entry["passed"] for entry in results["firmware"])
+        results["success"] = len(results["firmware"]) == len(runs) and all(entry["passed"] for entry in results["firmware"])
     finally:
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
         remaining = [process for process in reversed(processes) if process.poll() is None]

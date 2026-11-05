@@ -53,7 +53,7 @@ jobs:
       - name: Observe pre-kernel failure matching the full VM with readonly fixture
         timeout-minutes: 12
         run: |
-          sudo env PATH="$PATH" python3 rescue/pxe/test-bootstrap-outage-vm.py --service-dll src/network-boot/SLT.NetworkBoot.Service/bin/Release/net10.0/SLT.NetworkBoot.Service.dll --bootstrap-profile artifacts/ipxe-bootstrap --output artifacts/bootstrap-outage --firmware ${{ matrix.firmware }} --match-full-vm
+          sudo env PATH="$PATH" python3 rescue/pxe/test-bootstrap-outage-vm.py --service-dll src/network-boot/SLT.NetworkBoot.Service/bin/Release/net10.0/SLT.NetworkBoot.Service.dll --bootstrap-profile artifacts/ipxe-bootstrap --output artifacts/bootstrap-outage --firmware ${{ matrix.firmware }} --match-full-vm --attempts 3
       - name: Preserve bounded diagnostic evidence
         if: always()
         run: |
