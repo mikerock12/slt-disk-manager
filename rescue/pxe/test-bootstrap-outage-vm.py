@@ -65,6 +65,16 @@ def diagnostic_runs(firmware, attempts):
     return [(index, mode, attempt) for index, mode in enumerate(modes) for attempt in range(1, attempts + 1)]
 
 
+def failure_timeout(value):
+    try:
+        seconds = int(value)
+    except (TypeError, ValueError):
+        raise argparse.ArgumentTypeError("Failure timeout must be an integer from 20 through 180") from None
+    if not 20 <= seconds <= 180:
+        raise argparse.ArgumentTypeError("Failure timeout must be an integer from 20 through 180")
+    return seconds
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--service-dll", type=Path, required=True)
@@ -73,9 +83,18 @@ def main():
     parser.add_argument("--firmware", choices=("bios", "uefi", "both"), default="both")
     parser.add_argument("--attempts", type=int, choices=(1, 2, 3), default=1, help="Repeat each firmware with the same MAC/lease and a fresh VM/service (default: 1)")
     parser.add_argument("--match-full-vm", action="store_true", help="Use full-lab RAM/CPU/MAC/SMBIOS/profile IDs and attach only a synthetic 8 MiB readonly RAW disk")
+    parser.add_argument("--visual-evidence", action="store_true", help="Also observe exact VGA failure text with bounded Tesseract TSV evidence")
+    parser.add_argument("--visual-only-diagnostic", action="store_true", help="Require two qualifying VGA frames even when serial succeeds; implies --visual-evidence and never approves LAB")
+    parser.add_argument("--failure-timeout", type=failure_timeout, default=180, metavar="20..180", help="Bound diagnostic failure observation in seconds (default: 180; does not change the full PXE gate)")
     parser.add_argument("--inside-netns", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--parent-netns", help=argparse.SUPPRESS)
     args = parser.parse_args()
+    visual_enabled = args.visual_evidence or args.visual_only_diagnostic
+    visual_observer = None
+    if visual_enabled:
+        visual_spec = importlib.util.spec_from_file_location("slt_boot_failure_observer", Path(__file__).with_name("boot_failure_observer.py"))
+        visual_observer = importlib.util.module_from_spec(visual_spec)
+        visual_spec.loader.exec_module(visual_observer)
     if sys.platform != "linux" or os.geteuid() != 0:
         parser.error("Run as root on a disposable Linux runner; never on the host LAN")
     for name in ("service_dll", "bootstrap_profile", "output"):
@@ -99,6 +118,8 @@ def main():
                "usbAttached": False, "disksAttached": args.match_full_vm, "syntheticDisksOnly": args.match_full_vm,
                "matchFullVmConfiguration": args.match_full_vm, "controllerStarted": False,
                "attemptsPerFirmware": args.attempts, "expectedRuns": len(runs), "sharedDhcpLeaseState": True,
+               "visualEvidenceRequested": visual_enabled, "visualOnlyDiagnostic": args.visual_only_diagnostic,
+               "failureTimeoutSeconds": args.failure_timeout,
                "linuxUserspaceExpected": False, "secureBoot": False, "physicalHardwareTested": False,
                "firmware": [], "success": False}
     processes, logs = [], []
@@ -169,6 +190,7 @@ def main():
                     entry["firmwareCodeSha256"] = lab.digest(code)
                 configuration = vm_configuration(args.match_full_vm, mode, index)
                 entry["vmConfiguration"] = configuration
+                backend_log = args.output / (prefix + "-serial-backend.log")
                 disk_arguments = []
                 if args.match_full_vm:
                     fixture, fixture_hash = fixture_disk(private, prefix)
@@ -179,7 +201,8 @@ def main():
                                       "-device", "virtio-blk-pci,drive=fixture,serial=SLT-PXE-FIXTURE"]
                 command = ["qemu-system-x86_64", "-no-user-config", "-nodefaults", "-device", "VGA", "-machine", "q35,accel=tcg",
                            "-cpu", "max", "-m", str(configuration["memoryMiB"]), "-smp", str(configuration["cpuCount"]), "-display", "none", "-no-reboot",
-                           "-qmp", f"unix:{qmp_path},server=on,wait=off", "-serial", f"unix:{serial_path},server=on,wait=off",
+                           "-qmp", f"unix:{qmp_path},server=on,wait=off",
+                           "-chardev", f"socket,id=serial0,path={serial_path},server=on,wait=off,logfile={backend_log},logappend=off", "-serial", "chardev:serial0",
                            "-boot", "order=n,menu=off", "-netdev", "tap,id=net0,ifname=slttap0,script=no,downscript=no",
                            "-device", "e1000,netdev=net0,mac=" + configuration["mac"], *disk_arguments,
                            "-smbios", "type=1,manufacturer=SLT_QEMU_ONLY,product=" + configuration["smbiosProduct"], *firmware]
@@ -207,11 +230,25 @@ def main():
                 qmp.key("down")
                 time.sleep(0.2)
                 qmp.key("ret")
-                time.sleep(0.3)
-                qmp.execute("screendump", {"filename": str(args.output / (prefix + "-after-selection.ppm"))})
-                console.expect(r"(?m)^Falha de boot\.", 180, label="explicit SLT boot failure output (not a debug command trace)")
+                selected_at = time.monotonic()
+                if visual_enabled:
+                    entry["visualEvidenceReport"] = prefix + "-visual-observation.json"
+                    evidence = visual_observer.observe_failure(console, qmp, args.output, prefix, lab.terminal_text,
+                        selected_at=selected_at, visual_only=args.visual_only_diagnostic, timeout=args.failure_timeout)
+                    assert evidence["passed"]
+                    entry["failureEvidenceSource"] = evidence["source"]
+                    entry["visualCorroboration"] = evidence["visualCorroboration"]
+                    if evidence["visualCorroboration"]:
+                        shutil.copyfile(args.output / evidence["visualCorroboration"][0], args.output / (prefix + "-failure-message.ppm"))
+                    else:
+                        qmp.execute("screendump", {"filename": str(args.output / (prefix + "-after-observation.ppm"))})
+                else:
+                    time.sleep(0.3)
+                    qmp.execute("screendump", {"filename": str(args.output / (prefix + "-after-selection.ppm"))})
+                    console.expect(r"(?m)^Falha de boot\.", args.failure_timeout, label="explicit SLT boot failure output (not a debug command trace)")
+                    entry["failureEvidenceSource"] = "SERIAL_EXPLICIT_FAILURE"
+                    qmp.execute("screendump", {"filename": str(args.output / (prefix + "-failure-message.ppm"))})
                 entry["explicitBootFailure"] = True
-                qmp.execute("screendump", {"filename": str(args.output / (prefix + "-failure-message.ppm"))})
                 until = time.monotonic() + 10
                 while time.monotonic() < until:
                     entry["userspaceReached"] = bool(re.search(r"SLT_RESCUE_BOOT_READY:|Linux version |BOOT_READY", console.pump()))
@@ -249,6 +286,14 @@ def main():
                     if entry["syntheticSha256After"] != entry["syntheticSha256Before"]:
                         entry["passed"] = False
                         entry["error"] = "Synthetic readonly disk changed"
+                socket_log = args.output / (prefix + ".serial.log")
+                backend_file = args.output / (prefix + "-serial-backend.log")
+                if socket_log.is_file() and backend_file.is_file():
+                    socket_bytes, backend_bytes = socket_log.read_bytes(), backend_file.read_bytes()
+                    entry["serialCaptureComparison"] = {"socketFile": socket_log.name, "socketSizeBytes": len(socket_bytes),
+                        "socketSha256": lab.digest(socket_log), "backendFile": backend_file.name, "backendSizeBytes": len(backend_bytes),
+                        "backendSha256": lab.digest(backend_file), "socketIsContiguousBackendSubstring": socket_bytes in backend_bytes,
+                        "backendHasAnchoredFailure": bool(re.search(r"(?m)^Falha de boot\.", lab.terminal_text(backend_bytes.decode("utf-8", errors="replace"))))}
         results["success"] = len(results["firmware"]) == len(runs) and all(entry["passed"] for entry in results["firmware"])
     finally:
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
