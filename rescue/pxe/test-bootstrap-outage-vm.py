@@ -2,8 +2,9 @@
 """Short, isolated bootstrap failure diagnostic; this never approves a boot profile.
 
 Uses real SLT HTTP/TFTP and pinned iPXE loaders, but only tiny non-executable
-Rescue artifact fixtures. No Controller, Linux userspace, disk, ISO or USB is
-attached. Requires a disposable Linux network namespace, root, QEMU and OVMF.
+Rescue artifact fixtures. No Controller, Linux userspace, real disk, ISO or USB
+is attached. The optional full-VM configuration adds only an 8 MiB synthetic
+readonly RAW disk. Requires a disposable Linux namespace, root, QEMU and OVMF.
 """
 from __future__ import annotations
 
@@ -26,7 +27,7 @@ lab = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(lab)
 
 
-def fixture_profile(private, store):
+def fixture_profile(private, store, match_full_vm=False):
     source = private / "synthetic-rescue"
     source.mkdir()
     artifacts = []
@@ -35,12 +36,27 @@ def fixture_profile(private, store):
         file.write_bytes(("SLT SYNTHETIC " + artifact_id + " - NOT AN EXECUTABLE IMAGE\n").encode("ascii"))
         artifacts.append({"id": artifact_id, "relativePath": artifact_id, "sizeBytes": file.stat().st_size,
                           "sha256": lab.digest(file), "source": "synthetic-bootstrap-outage-diagnostic"})
-    profile = {"schemaVersion": 1, "id": "rescue-bootstrap-outage-fixture", "displayName": "Synthetic bootstrap outage fixture",
+    profile = {"schemaVersion": 1, "id": "rescue-0-1-0-beta-6" if match_full_vm else "rescue-bootstrap-outage-fixture", "displayName": "Synthetic bootstrap outage fixture",
                "kind": "RESCUE_LINUX", "architecture": "X64", "firmwareSupport": ["BIOS", "UEFI"],
-               "secureBootStatus": "UNSUPPORTED", "validationStatus": "NETWORK_BOOT_DEV", "version": "fixture-v1",
+               "secureBootStatus": "UNSUPPORTED", "validationStatus": "NETWORK_BOOT_DEV", "version": "0.1.0-beta.6" if match_full_vm else "fixture-v1",
                "artifacts": artifacts}
     (source / "netboot-manifest.json").write_text(json.dumps(profile), encoding="utf-8")
     return lab.import_profile(source, store)
+
+
+def vm_configuration(match_full_vm, mode, index):
+    return {"memoryMiB": 4096 if match_full_vm else 1024, "cpuCount": 2 if match_full_vm else 1,
+            "mac": ("52:54:00:77:00:02" if mode == "uefi" else "52:54:00:77:00:01") if match_full_vm else f"52:54:00:77:01:{index + 1:02x}",
+            "smbiosProduct": "SLT_PXE_LAB" if match_full_vm else "SLT_BOOTSTRAP_DIAGNOSTIC"}
+
+
+def fixture_disk(private, mode):
+    # A new private regular file, not a device or a source/customer image.
+    file = private / (mode + "-synthetic.raw")
+    with file.open("xb") as output:
+        output.write(bytes(8 * 1024 * 1024))
+    assert file.is_file() and not file.is_symlink() and file.stat().st_size == 8 * 1024 * 1024
+    return file, lab.digest(file)
 
 
 def main():
@@ -49,6 +65,7 @@ def main():
     parser.add_argument("--bootstrap-profile", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--firmware", choices=("bios", "uefi", "both"), default="both")
+    parser.add_argument("--match-full-vm", action="store_true", help="Use full-lab RAM/CPU/MAC/SMBIOS/profile IDs and attach only a synthetic 8 MiB readonly RAW disk")
     parser.add_argument("--inside-netns", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--parent-netns", help=argparse.SUPPRESS)
     args = parser.parse_args()
@@ -72,7 +89,8 @@ def main():
     modes = ("bios", "uefi") if args.firmware == "both" else (args.firmware,)
     results = {"scope": "BOOTSTRAP_OUTAGE_DIAGNOSTIC_ONLY", "networkBootLabApproved": False,
                "namespaceIsolated": True, "hostNetworkChanged": False, "isoAttached": False,
-               "usbAttached": False, "disksAttached": False, "controllerStarted": False,
+               "usbAttached": False, "disksAttached": args.match_full_vm, "syntheticDisksOnly": args.match_full_vm,
+               "matchFullVmConfiguration": args.match_full_vm, "controllerStarted": False,
                "linuxUserspaceExpected": False, "secureBoot": False, "physicalHardwareTested": False,
                "firmware": [], "success": False}
     processes, logs = [], []
@@ -103,7 +121,7 @@ def main():
         private = Path(private_context.name)
         store = private / "boot-store"
         store.mkdir()
-        profiles = [fixture_profile(private, store), lab.import_profile(args.bootstrap_profile, store)]
+        profiles = [fixture_profile(private, store, args.match_full_vm), lab.import_profile(args.bootstrap_profile, store)]
         results["profiles"] = [{"id": p["id"], "kind": p["kind"], "version": p["version"],
                                 "artifacts": [{k: artifact[k] for k in ("id", "sizeBytes", "sha256")} for artifact in p["artifacts"]]}
                                for p in profiles]
@@ -123,6 +141,7 @@ def main():
             entry = {"firmware": mode, "passed": False, "explicitBootFailure": False, "userspaceReached": False}
             results["firmware"].append(entry)
             console, qmp, service, vm = None, None, None, None
+            fixture = None
             try:
                 service_name = mode + "-boot-service"
                 service_log = args.output / (service_name + ".log")
@@ -139,12 +158,22 @@ def main():
                     firmware = ["-drive", f"if=pflash,format=raw,unit=0,readonly=on,file={code}",
                                 "-drive", f"if=pflash,format=raw,unit=1,file={variables}"]
                     entry["firmwareCodeSha256"] = lab.digest(code)
+                configuration = vm_configuration(args.match_full_vm, mode, index)
+                entry["vmConfiguration"] = configuration
+                disk_arguments = []
+                if args.match_full_vm:
+                    fixture, fixture_hash = fixture_disk(private, mode)
+                    entry["syntheticSha256Before"] = fixture_hash
+                    entry["syntheticDisk"] = {"sizeBytes": fixture.stat().st_size, "readonly": True,
+                                              "format": "raw", "device": "virtio-blk-pci", "serial": "SLT-PXE-FIXTURE"}
+                    disk_arguments = ["-drive", f"if=none,id=fixture,file={fixture},format=raw,readonly=on",
+                                      "-device", "virtio-blk-pci,drive=fixture,serial=SLT-PXE-FIXTURE"]
                 command = ["qemu-system-x86_64", "-no-user-config", "-nodefaults", "-device", "VGA", "-machine", "q35,accel=tcg",
-                           "-cpu", "max", "-m", "1024", "-smp", "1", "-display", "none", "-no-reboot",
+                           "-cpu", "max", "-m", str(configuration["memoryMiB"]), "-smp", str(configuration["cpuCount"]), "-display", "none", "-no-reboot",
                            "-qmp", f"unix:{qmp_path},server=on,wait=off", "-serial", f"unix:{serial_path},server=on,wait=off",
                            "-boot", "order=n,menu=off", "-netdev", "tap,id=net0,ifname=slttap0,script=no,downscript=no",
-                           "-device", f"e1000,netdev=net0,mac=52:54:00:77:01:{index + 1:02x}",
-                           "-smbios", "type=1,manufacturer=SLT_QEMU_ONLY,product=SLT_BOOTSTRAP_DIAGNOSTIC", *firmware]
+                           "-device", "e1000,netdev=net0,mac=" + configuration["mac"], *disk_arguments,
+                           "-smbios", "type=1,manufacturer=SLT_QEMU_ONLY,product=" + configuration["smbiosProduct"], *firmware]
                 started = time.monotonic()
                 vm = start(command, mode + "-qemu")
                 lab.wait_for(lambda: serial_path.exists() and qmp_path.exists(), "bootstrap QEMU console")
@@ -183,7 +212,7 @@ def main():
                 qmp.execute("screendump", {"filename": str(args.output / (mode + "-after-fallback.ppm"))})
                 entry["observedSeconds"] = round(time.monotonic() - failed_at, 2)
                 entry["passed"] = True
-                lab.progress("PASS " + mode + ": explicit SLT failure after bootstrap outage, no disks or Linux attached")
+                lab.progress("PASS " + mode + ": explicit SLT failure after bootstrap outage, no Linux or real disk attached")
             except Exception as error:
                 entry["error"] = type(error).__name__ + ": " + str(error)[:500]
                 if console:
@@ -206,6 +235,11 @@ def main():
                         except subprocess.TimeoutExpired:
                             process.kill()
                             process.wait(timeout=2)
+                if fixture:
+                    entry["syntheticSha256After"] = lab.digest(fixture)
+                    if entry["syntheticSha256After"] != entry["syntheticSha256Before"]:
+                        entry["passed"] = False
+                        entry["error"] = "Synthetic readonly disk changed"
         results["success"] = len(results["firmware"]) == len(modes) and all(entry["passed"] for entry in results["firmware"])
     finally:
         signal.signal(signal.SIGTERM, signal.SIG_IGN)

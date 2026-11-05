@@ -50,10 +50,10 @@ jobs:
           manifest.write_text(json.dumps(profile,indent=2)+'\n')
           with (root/'SLT-BUILD.txt').open('a') as f:f.write('DIAGNOSTIC ONLY: EFI DEBUG=script,exec,efi_init; never approved for a release.\n')
           PY
-      - name: Observe pre-kernel failure without ISO or disks
+      - name: Observe pre-kernel failure matching the full VM with readonly fixture
         timeout-minutes: 12
         run: |
-          sudo env PATH="$PATH" python3 rescue/pxe/test-bootstrap-outage-vm.py --service-dll src/network-boot/SLT.NetworkBoot.Service/bin/Release/net10.0/SLT.NetworkBoot.Service.dll --bootstrap-profile artifacts/ipxe-bootstrap --output artifacts/bootstrap-outage --firmware ${{ matrix.firmware }}
+          sudo env PATH="$PATH" python3 rescue/pxe/test-bootstrap-outage-vm.py --service-dll src/network-boot/SLT.NetworkBoot.Service/bin/Release/net10.0/SLT.NetworkBoot.Service.dll --bootstrap-profile artifacts/ipxe-bootstrap --output artifacts/bootstrap-outage --firmware ${{ matrix.firmware }} --match-full-vm
       - name: Preserve bounded diagnostic evidence
         if: always()
         run: |
