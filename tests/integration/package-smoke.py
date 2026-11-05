@@ -74,6 +74,9 @@ with (state / 'server.log').open('w', encoding='utf-8') as log:
                 time.sleep(.25)
         for path in ['/api/v1/devices', '/api/v1/clones', '/api/v1/file-bundles', '/api/v1/media']:
             assert api(path) == []
+        boot = api('/api/v1/network-boot/status')
+        assert boot['state'] == 'STOPPED' and boot['profiles'] == [] and boot['startedAtUtc'] is None
+        assert (folder / 'network-boot/SLT.NetworkBoot.Service.exe').is_file()
         print('PASS packaged self-contained Controller, TLS pin, admin auth and workflow catalogs')
     finally:
         process.terminate()

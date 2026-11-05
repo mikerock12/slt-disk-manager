@@ -1,7 +1,7 @@
 name: Build, safety and integration
 on:
   push:
-    branches: [main, 'feat/**', 'fix/**']
+    branches: [main, 'feat/**', 'fix/**', 'codex/**']
   pull_request:
   workflow_dispatch:
 permissions:

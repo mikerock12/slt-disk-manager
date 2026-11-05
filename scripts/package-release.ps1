@@ -10,6 +10,7 @@ try {
     $env:DOTNET_CLI_HOME=Join-Path $projectRoot '.tools/dotnet-home'
     $env:NUGET_PACKAGES=Join-Path $projectRoot '.tools/nuget'
     $projects=@{
+        'network-boot'='src/network-boot/SLT.NetworkBoot.Service/SLT.NetworkBoot.Service.csproj'
         server='src/server/SLT.Controller.Host/SLT.Controller.Host.csproj'
         desktop='src/desktop/SLT.Desktop.Wpf/SLT.Desktop.Wpf.csproj'
         client='src/windows-agent/SLT.WindowsAgent/SLT.WindowsAgent.csproj'
@@ -51,6 +52,7 @@ try {
     Copy-Item -LiteralPath $rescueBinary -Destination (Join-Path $output 'rescue/slt-rescue-agent')
     Copy-Item -LiteralPath rescue/README.md -Destination (Join-Path $output 'rescue/README.md')
     Copy-Item -LiteralPath rescue/scripts -Destination (Join-Path $output 'rescue/scripts') -Recurse
+    Copy-Item -LiteralPath rescue/pxe -Destination (Join-Path $output 'rescue/pxe') -Recurse
     Copy-Item -LiteralPath rescue/profiles -Destination (Join-Path $output 'rescue/profiles') -Recurse
     Copy-Item -LiteralPath rescue/windows-pe -Destination (Join-Path $output 'windows-pe') -Recurse
     Copy-Item -LiteralPath artifacts/slt-winpe-agent.exe -Destination (Join-Path $output 'windows-pe/slt-winpe-agent.exe')

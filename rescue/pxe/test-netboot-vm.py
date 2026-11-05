@@ -1,0 +1,374 @@
+#!/usr/bin/env python3
+"""Real BIOS/UEFI PXE lab using a disposable Linux network namespace.
+
+Requires root, unshare, iproute2, dnsmasq, QEMU, OVMF and dotnet. Never attaches
+an ISO/USB or host disk. DHCP is a lab-only external dnsmasq, not SLT's service.
+Evidence excludes the Controller state directory (individual keys/admin token).
+"""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import http.client
+import json
+import os
+from pathlib import Path
+import re
+import select
+import shutil
+import signal
+import socket
+import ssl
+import subprocess
+import sys
+import tempfile
+import time
+
+
+def run(*arguments):
+    return subprocess.check_output(arguments, text=True).strip()
+
+
+def digest(path):
+    hasher = hashlib.sha256()
+    with Path(path).open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            hasher.update(block)
+    return hasher.hexdigest()
+
+
+def wait_for(check, description, timeout=60):
+    deadline = time.monotonic() + timeout
+    last = None
+    while time.monotonic() < deadline:
+        try:
+            value = check()
+            if value:
+                return value
+        except (OSError, ValueError, http.client.HTTPException) as error:
+            last = error
+        time.sleep(0.2)
+    raise AssertionError(f"Timeout: {description}; {last}")
+
+
+class GuestConsole:
+    def __init__(self, path, evidence):
+        self.connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.connection.connect(str(path))
+        self.log = evidence.open("wb")
+        self.text = ""
+
+    def pump(self):
+        while select.select([self.connection], [], [], 0)[0]:
+            try:
+                data = self.connection.recv(65536)
+            except ConnectionResetError:
+                break
+            if not data:
+                break
+            self.log.write(data)
+            self.log.flush()
+            self.text += data.decode("utf-8", errors="replace")
+        return self.text
+
+    def expect(self, pattern, timeout=120, offset=0):
+        return wait_for(lambda: re.search(pattern, self.pump()[offset:]), f"guest serial {pattern}", timeout)
+
+    def send(self, value):
+        self.connection.sendall(value.encode("ascii"))
+
+    def command(self, command, marker, timeout=60):
+        offset = len(self.pump())
+        self.send(command + "\n")
+        self.expect(re.escape(marker), timeout, offset)
+
+    def close(self):
+        self.pump()
+        self.connection.close()
+        self.log.close()
+
+
+class Qmp:
+    def __init__(self, path):
+        self.socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.socket.settimeout(10)
+        self.socket.connect(str(path))
+        self.file = self.socket.makefile("rwb", buffering=0)
+        self.file.readline()
+        self.execute("qmp_capabilities")
+
+    def execute(self, command, arguments=None):
+        self.file.write((json.dumps({"execute": command, "arguments": arguments or {}}) + "\n").encode())
+        while True:
+            line = self.file.readline()
+            if not line:
+                raise RuntimeError("QMP disconnected")
+            response = json.loads(line)
+            if "error" in response:
+                raise RuntimeError(response["error"])
+            if "return" in response:
+                return response["return"]
+
+    def key(self, key):
+        self.execute("send-key", {"keys": [{"type": "qcode", "data": key}], "hold-time": 100})
+
+    def close(self):
+        self.file.close()
+        self.socket.close()
+
+
+def import_profile(source, store):
+    source = Path(source)
+    profile = json.loads((source / "netboot-manifest.json").read_text(encoding="utf-8-sig"))
+    assert re.fullmatch(r"[a-z0-9][a-z0-9-]{0,63}", profile["id"])
+    target = store / profile["id"]
+    target.mkdir()
+    for artifact in profile["artifacts"]:
+        assert re.fullmatch(r"[a-z0-9][a-z0-9-]{0,63}", artifact["id"])
+        path = source / artifact["relativePath"]
+        assert not path.is_symlink() and path.resolve().is_relative_to(source.resolve())
+        assert path.stat().st_size == artifact["sizeBytes"] and digest(path) == artifact["sha256"]
+        shutil.copyfile(path, target / artifact["id"])
+        artifact["relativePath"] = artifact["id"]
+    profile["enabled"] = True
+    profile["validationStatus"] = "NETWORK_BOOT_DEV"
+    return profile
+
+
+def firmware_files():
+    for suffix in ("_4M", ""):
+        code = Path(f"/usr/share/OVMF/OVMF_CODE{suffix}.fd")
+        variables = Path(f"/usr/share/OVMF/OVMF_VARS{suffix}.fd")
+        if code.is_file() and variables.is_file():
+            return code, variables
+    raise FileNotFoundError("Matching non-Secure-Boot OVMF code/variables missing")
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--service-dll", type=Path, required=True)
+    parser.add_argument("--rescue-profile", type=Path, required=True)
+    parser.add_argument("--bootstrap-profile", type=Path, required=True)
+    parser.add_argument("--controller-dll", type=Path)
+    parser.add_argument("--output", type=Path, required=True, help="New evidence directory; contains no Controller state")
+    parser.add_argument("--firmware", default="bios,uefi")
+    parser.add_argument("--memory-mib", type=int, default=4096)
+    parser.add_argument("--inside-netns", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--parent-netns", help=argparse.SUPPRESS)
+    args = parser.parse_args()
+    if sys.platform != "linux" or os.geteuid() != 0:
+        parser.error("Run this dedicated lab with sudo on Linux; no DHCP is sent on the host network")
+    modes = args.firmware.split(",")
+    assert modes and set(modes) <= {"bios", "uefi"} and len(modes) == len(set(modes))
+    assert 2048 <= args.memory_mib <= 16384
+    for name in ("service_dll", "rescue_profile", "bootstrap_profile", "controller_dll", "output"):
+        if getattr(args, name) is not None:
+            setattr(args, name, getattr(args, name).resolve())
+    if not args.inside_netns:
+        if args.output.exists():
+            parser.error("Evidence directory already exists")
+        command = ["unshare", "--net", sys.executable, str(Path(__file__).resolve()), *sys.argv[1:],
+                   "--inside-netns", "--parent-netns", os.readlink("/proc/self/ns/net")]
+        os.execvp(command[0], command)
+    # Assertions run before adding any network address or starting DHCP. A fresh
+    # unshare namespace has only lo and no route to any host/production network.
+    namespace = os.readlink("/proc/self/ns/net")
+    assert args.parent_netns and namespace != args.parent_netns, "Not a separate network namespace"
+    interfaces = json.loads(run("ip", "-j", "link"))
+    assert [interface["ifname"] for interface in interfaces] == ["lo"], interfaces
+    assert not json.loads(run("ip", "-j", "route", "show", "default"))
+    args.output.mkdir(parents=True)
+    os.chmod(args.output, 0o700)
+    results = {"namespaceIsolated": True, "hostNetworkChanged": False, "isoAttached": False,
+               "usbAttached": False, "secureBoot": False, "physicalHardwareTested": False,
+               "controllerValidationRequested": bool(args.controller_dll),
+               "memoryMiB": args.memory_mib, "firmware": [], "success": False}
+    processes, logs = [], []
+
+    def start(command, name, **kwargs):
+        log = (args.output / f"{name}.log").open("wb")
+        logs.append(log)
+        process = subprocess.Popen(command, stderr=log, stdout=log, start_new_session=True, **kwargs)
+        processes.append(process)
+        return process
+
+    try:
+        run("ip", "link", "set", "lo", "up")
+        run("ip", "link", "add", "sltbr0", "type", "bridge")
+        run("ip", "address", "add", "10.77.0.1/24", "dev", "sltbr0")
+        run("ip", "link", "set", "sltbr0", "up")
+        run("ip", "tuntap", "add", "dev", "slttap0", "mode", "tap")
+        run("ip", "link", "set", "slttap0", "master", "sltbr0")
+        run("ip", "link", "set", "slttap0", "up")
+        results["topology"] = json.loads(run("ip", "-j", "address"))
+        assert not json.loads(run("ip", "-j", "route", "show", "default"))
+        with tempfile.TemporaryDirectory(prefix="slt-pxe-private-") as private_dir:
+            private = Path(private_dir)
+            store = private / "boot-store"
+            store.mkdir()
+            profiles = [import_profile(args.rescue_profile, store), import_profile(args.bootstrap_profile, store)]
+            results["profiles"] = [{"id": profile["id"], "version": profile["version"],
+                                    "artifacts": [{"id": artifact["id"], "sizeBytes": artifact["sizeBytes"], "sha256": artifact["sha256"]}
+                                                  for artifact in profile["artifacts"]]} for profile in profiles]
+            config = {"schemaVersion": 1, "interfaceId": "sltbr0", "bindIPv4": "10.77.0.1",
+                      "allowedCidr": "10.77.0.0/24", "mode": "EXTERNAL_DHCP", "httpPort": 8088,
+                      "maxConcurrentTransfers": 8}
+            launch = {"config": config, "storePath": str(store), "profiles": profiles, "laboratory": True}
+            service = start(["dotnet", str(args.service_dll), "--lab"], "boot-service", stdin=subprocess.PIPE)
+            service.stdin.write((json.dumps(launch) + "\n").encode())
+            service.stdin.flush()
+            wait_for(lambda: '"state":"RUNNING"' in (args.output / "boot-service.log").read_text(errors="replace"), "boot service RUNNING", 90)
+            dnsconfig = private / "dnsmasq.conf"
+            dnsconfig.write_text("\n".join([
+                "port=0", "interface=sltbr0", "bind-interfaces", "except-interface=lo", "log-dhcp",
+                "dhcp-authoritative", "dhcp-range=10.77.0.20,10.77.0.40,255.255.255.0,5m",
+                "dhcp-option=option:router", "dhcp-option=option:dns-server", "dhcp-no-override",
+                "dhcp-match=set:efi64,option:client-arch,7",
+                "dhcp-match=set:efi64,option:client-arch,9",
+                # SLT loaders embed DHCP + chain tftp://${next-server}/autoexec.ipxe.
+                # Always chainload them, even QEMU's built-in BIOS iPXE ROM:
+                # the gate must exercise SLT's real TFTP, not bypass it via HTTP.
+                "dhcp-boot=tag:!efi64,undionly.kpxe,,10.77.0.1",
+                "dhcp-boot=tag:efi64,ipxe.efi,,10.77.0.1",
+                f"dhcp-leasefile={private / 'leases'}", "user=root", ""]))
+            dhcp = start(["dnsmasq", "--keep-in-foreground", "--conf-file=" + str(dnsconfig)], "external-dhcp")
+            time.sleep(0.3)
+            assert dhcp.poll() is None
+            connection = None
+            if args.controller_dll:
+                controller = start(["dotnet", str(args.controller_dll), "--state-dir", str(private / "controller"),
+                                    "--bind", "10.77.0.1", "--allowed-subnet", "10.77.0.0/24"], "controller")
+                connection = wait_for(lambda: json.loads((private / "controller/connection.json").read_text()), "Controller identity")
+
+            def request(method, path, body=None):
+                context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+                context.check_hostname = False
+                context.verify_mode = ssl.CERT_NONE  # Exact DER pin checked before HTTP/token bytes.
+                client = http.client.HTTPSConnection("127.0.0.1", 7443, context=context, timeout=10)
+                client.connect()
+                assert hashlib.sha256(client.sock.getpeercert(binary_form=True)).hexdigest() == connection["serverPin"]
+                client.request(method, path, json.dumps(body) if body is not None else None,
+                               {"Content-Type": "application/json", "Authorization": "Bearer " + connection["token"]})
+                response = client.getresponse()
+                payload = response.read()
+                client.close()
+                assert response.status == 200, (response.status, payload[:300])
+                return json.loads(payload) if payload else None
+
+            if connection:
+                wait_for(lambda: request("GET", "/health"), "Controller HTTPS")
+            for index, mode in enumerate(modes):
+                fixture = private / f"{mode}-synthetic.raw"
+                fixture.write_bytes(bytes(n % 251 for n in range(8 * 1024 * 1024)))
+                fixture_hash = digest(fixture)
+                qmp_path, serial_path = private / "qmp.sock", private / "serial.sock"
+                qmp_path.unlink(missing_ok=True)
+                serial_path.unlink(missing_ok=True)
+                firmware = []
+                if mode == "uefi":
+                    code, template = firmware_files()
+                    variables = private / "OVMF_VARS.fd"
+                    shutil.copyfile(template, variables)
+                    firmware = ["-drive", f"if=pflash,format=raw,unit=0,readonly=on,file={code}",
+                                "-drive", f"if=pflash,format=raw,unit=1,file={variables}"]
+                vm = start(["qemu-system-x86_64", "-no-user-config", "-machine", "q35,accel=tcg", "-cpu", "max",
+                            "-m", str(args.memory_mib), "-smp", "2", "-display", "none", "-no-reboot",
+                            "-qmp", f"unix:{qmp_path},server=on,wait=off", "-serial", f"unix:{serial_path},server=on,wait=off",
+                            "-boot", "order=n,menu=off", "-netdev", "tap,id=net0,ifname=slttap0,script=no,downscript=no",
+                            "-device", f"e1000,netdev=net0,mac=52:54:00:77:00:{index + 1:02x}",
+                            "-drive", f"if=none,id=fixture,file={fixture},format=raw,readonly=on",
+                            "-device", "virtio-blk-pci,drive=fixture,serial=SLT-PXE-FIXTURE",
+                            "-smbios", "type=1,manufacturer=SLT_QEMU_ONLY,product=SLT_PXE_LAB", *firmware], mode + "-qemu")
+                console, qmp = None, None
+                started = time.monotonic()
+                try:
+                    wait_for(lambda: serial_path.exists() and qmp_path.exists(), "QEMU console")
+                    console = GuestConsole(serial_path, args.output / f"{mode}.serial.log")
+                    qmp = Qmp(qmp_path)
+                    console.expect("SLT Network Boot", 180)
+                    menu_seconds = time.monotonic() - started
+                    qmp.execute("screendump", {"filename": str(args.output / f"{mode}-menu.ppm")})
+                    qmp.key("down")
+                    time.sleep(0.2)
+                    qmp.key("ret")
+                    console.expect("SLT_RESCUE_BOOT_READY:" + mode.upper(), 600)
+                    boot_seconds = time.monotonic() - started
+                    console.send("\n")
+                    console.expect(r"login:|technician@|\$ ", 60)
+                    tail = console.pump()[-1500:]
+                    if "login:" in tail and "technician@" not in tail:
+                        console.send("technician\n")
+                        console.expect(r"Password:|technician@|\$ ", 30, len(console.text) - 100)
+                        if "Password:" in console.pump()[-300:]:
+                            console.send("live\n")
+                    console.command("sudo -n true && printf '%s%s\\n' 'SLT_PXE_' 'LOGIN_OK'", "SLT_PXE_LOGIN_OK")
+                    console.command("ip -4 route; ip -4 addr; printf '%s%s\\n' 'SLT_PXE_' 'NETWORK_OK'", "SLT_PXE_NETWORK_OK")
+                    console.command("sudo -n smartctl -a /dev/vda; printf 'SMART_EXIT=%s\\n' \"$?\"; printf '%s%s\\n' 'SLT_PXE_' 'SMART_CHECKED'", "SLT_PXE_SMART_CHECKED")
+                    qmp.execute("screendump", {"filename": str(args.output / f"{mode}-rescue.ppm")})
+                    entry = {"firmware": mode, "menuSeconds": round(menu_seconds, 2), "bootSeconds": round(boot_seconds, 2),
+                             "syntheticSha256Before": fixture_hash, "bootReady": True, "localLogin": True,
+                             "smartDiagnosticAttempted": True, "smartAttributesExpected": False}
+                    if connection:
+                        old_devices = {d["id"] for d in request("GET", "/api/v1/devices")}
+                        offset = len(console.text)
+                        console.send("sudo slt-start\n")
+                        console.expect("Escolha \\[1\\]:", 30, offset)
+                        console.send("1\n")
+                        console.expect("Endere", 45, offset)
+                        console.send("https://10.77.0.1:7443\n")
+                        console.expect("64 caracteres", 30, offset)
+                        console.send(connection["serverPin"] + "\n")
+                        console.expect("Modo \\[1\\]:", 30, offset)
+                        console.send("1\n")
+                        pending = wait_for(lambda: next((e for e in request("GET", "/api/v1/enrollments") if e["status"] == "PENDING"), None), "guest CSR enrollment", 90)
+                        console.expect(re.escape(pending["code"]), 30, offset)
+                        request("POST", f"/api/v1/enrollments/{pending['id']}/approve", {"code": pending["code"]})
+                        device = wait_for(lambda: next((d for d in request("GET", "/api/v1/devices") if d["id"] not in old_devices and d.get("inventory")), None), "guest mTLS inventory", 120)
+                        disk = next(d for d in device["inventory"]["disks"] if d["serial"] == "SLT-PXE-FIXTURE")
+                        assert disk["isReadOnly"] and disk["sizeBytes"] == fixture.stat().st_size
+                        job = request("POST", "/api/v1/jobs/plan", {"kind": "INVENTORY", "deviceId": device["id"], "diskFingerprint": disk["fingerprint"], "consent": True})
+                        request("POST", f"/api/v1/jobs/{job['id']}/approve", {"challenge": job["plan"]["challenge"]})
+                        final = wait_for(lambda: next((j for j in request("GET", "/api/v1/jobs") if j["id"] == job["id"] and j["state"] in ("COMPLETED", "FAILED")), None), "signed INVENTORY job", 90)
+                        assert final["state"] == "COMPLETED", final
+                        entry["csrMtlsInventory"] = True
+                        entry["signedInventoryJob"] = True
+                        request("POST", f"/api/v1/devices/{device['id']}/revoke", {})
+                    qmp.execute("quit")
+                    vm.wait(timeout=15)
+                    entry["syntheticSha256After"] = digest(fixture)
+                    assert entry["syntheticSha256After"] == fixture_hash
+                    results["firmware"].append(entry)
+                    print(f"PASS {mode}: actual PXE menu, Rescue userspace, local login, readonly fixture intact", flush=True)
+                finally:
+                    if qmp:
+                        qmp.close()
+                    if console:
+                        console.close()
+                    if vm.poll() is None:
+                        vm.terminate()
+                        vm.wait(timeout=15)
+            service.stdin.write(b"STOP\n")
+            service.stdin.flush()
+            service.wait(timeout=15)
+            assert service.returncode == 0
+            results["serviceStopped"] = True
+            results["success"] = True
+            results["bootAndInventoryGatePassed"] = bool(args.controller_dll) and set(modes) == {"bios", "uefi"} and all(
+                entry.get("csrMtlsInventory") and entry.get("signedInventoryJob") for entry in results["firmware"])
+    finally:
+        for process in reversed(processes):
+            if process.poll() is None:
+                os.killpg(process.pid, signal.SIGTERM)
+                try:
+                    process.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    os.killpg(process.pid, signal.SIGKILL)
+                    process.wait(timeout=10)
+        for log in logs:
+            log.close()
+        results["allOwnedProcessesStopped"] = all(process.poll() is not None for process in processes)
+        (args.output / "receipt.json").write_text(json.dumps(results, indent=2) + "\n")
+
+
+if __name__ == "__main__":
+    main()

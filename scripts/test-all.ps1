@@ -6,7 +6,7 @@ Push-Location $projectRoot
 try {
     $env:DOTNET_CLI_HOME=Join-Path $projectRoot '.tools/dotnet-home'
     $env:NUGET_PACKAGES=Join-Path $projectRoot '.tools/nuget'
-    foreach($project in @('tests/SLT.Controller.Tests','tests/SLT.WindowsAgent.Tests','src/desktop/tests/SLT.Desktop.SmokeTests')) {
+    foreach($project in @('tests/SLT.Controller.Tests','tests/SLT.WindowsAgent.Tests','src/desktop/tests/SLT.Desktop.SmokeTests','src/network-boot/tests/SLT.NetworkBoot.Tests')) {
         dotnet run --project $project
         if($LASTEXITCODE -ne 0) { throw "Falha: $project" }
     }

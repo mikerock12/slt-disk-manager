@@ -7,6 +7,8 @@ on:
       - 'rescue/**'
       - '.github/workflows/rescue-iso.yml'
       - 'VERSION'
+      - 'src/network-boot/**'
+      - 'scripts/build-ipxe-bootstrap.sh'
   push:
     branches: [main]
     paths:
@@ -14,6 +16,8 @@ on:
       - 'rescue/**'
       - '.github/workflows/rescue-iso.yml'
       - 'VERSION'
+      - 'src/network-boot/**'
+      - 'scripts/build-ipxe-bootstrap.sh'
 permissions:
   contents: read
 concurrency:
@@ -24,13 +28,21 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    timeout-minutes: 70
+    timeout-minutes: 100
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
           go-version-file: src/rescue-agent/go.mod
           cache: false
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+      - name: Build isolated boot service and Controller
+        run: |
+          dotnet build src/network-boot/SLT.NetworkBoot.Service -c Release
+          dotnet build src/server/SLT.Controller.Host -c Release
+          dotnet run --project src/network-boot/tests/SLT.NetworkBoot.Tests -c Release
       - name: Test and build Linux agent
         working-directory: src/rescue-agent
         run: |
@@ -50,7 +62,18 @@ jobs:
       - name: Install isolated VM test tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends qemu-system-x86 ovmf
+          sudo apt-get install -y --no-install-recommends qemu-system-x86 ovmf dnsmasq iproute2 xorriso build-essential liblzma-dev git
+      - name: Export Rescue netboot and build pinned iPXE bootstrap
+        run: |
+          version=$(tr -d '\r\n' < VERSION)
+          python3 rescue/pxe/export-rescue-netboot.py artifacts/rescue-iso/live-image-amd64.hybrid.iso artifacts/rescue-netboot --version "$version" --source-commit "$GITHUB_SHA"
+          bash scripts/build-ipxe-bootstrap.sh "$PWD/artifacts/ipxe-bootstrap"
+          python3 rescue/pxe/test-export-rescue-netboot.py
+      - name: Actual PXE BIOS and UEFI in isolated network namespace (no ISO/USB)
+        timeout-minutes: 30
+        run: |
+          sudo env PATH="$PATH" python3 rescue/pxe/test-netboot-vm.py --service-dll src/network-boot/SLT.NetworkBoot.Service/bin/Release/net10.0/SLT.NetworkBoot.Service.dll --rescue-profile artifacts/rescue-netboot --bootstrap-profile artifacts/ipxe-bootstrap --controller-dll src/server/SLT.Controller.Host/bin/Release/net10.0/SLT.Controller.Host.dll --output artifacts/pxe-lab
+          sudo chown -R "$(id -u):$(id -g)" artifacts/pxe-lab
       - name: Boot actual ISO in BIOS and UEFI (no disks, no network)
         timeout-minutes: 14
         run: bash rescue/scripts/test-iso-boot.sh artifacts/rescue-iso/live-image-amd64.hybrid.iso artifacts/rescue-boot
@@ -67,6 +90,9 @@ jobs:
             artifacts/rescue-iso/package-copyrights.tar.gz
             artifacts/rescue-iso-build.log
             artifacts/rescue-boot/
+            artifacts/pxe-lab/
+            artifacts/rescue-netboot/
+            artifacts/ipxe-bootstrap/
           compression-level: 0
           retention-days: 14
       - name: Attach tested Rescue ISO to matching release
@@ -86,4 +112,16 @@ jobs:
           iso="SLT-Rescue-$version-amd64.iso"
           cp artifacts/rescue-iso/live-image-amd64.hybrid.iso "artifacts/$iso"
           (cd artifacts && sha256sum "$iso" > "$iso.sha256")
-          gh release upload "$tag" "artifacts/$iso" "artifacts/$iso.sha256" artifacts/rescue-iso/packages.tsv artifacts/rescue-iso/source-index.tsv artifacts/rescue-iso/package-copyrights.tar.gz --clobber
+          netboot="SLT-Netboot-$version-amd64.zip"
+          python3 - "$netboot" <<'PY'
+          import sys,zipfile
+          from pathlib import Path
+          with zipfile.ZipFile(Path('artifacts')/sys.argv[1], 'x', zipfile.ZIP_DEFLATED) as z:
+              for directory in ['rescue-netboot','ipxe-bootstrap']:
+                  for p in sorted((Path('artifacts')/directory).rglob('*')):
+                      if p.is_file(): z.write(p,p.relative_to('artifacts').as_posix())
+              z.write('docs/NETWORK-BOOT-OPERACAO.md','LEIA-ME.md')
+              z.write('artifacts/pxe-lab/receipt.json','LAB-RECEIPT.json')
+          PY
+          (cd artifacts && sha256sum "$netboot" > "$netboot.sha256")
+          gh release upload "$tag" "artifacts/$iso" "artifacts/$iso.sha256" "artifacts/$netboot" "artifacts/$netboot.sha256" artifacts/rescue-iso/packages.tsv artifacts/rescue-iso/source-index.tsv artifacts/rescue-iso/package-copyrights.tar.gz --clobber
