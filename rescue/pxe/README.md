@@ -88,6 +88,22 @@ na saída; chaves e token do Controller ficam em pasta temporária separada e nu
 são copiados para a saída pública. Execute o harness para produzir evidências;
 sua presença no código não equivale a teste aprovado.
 
+O login serial aguarda estados novos de getty → senha → prompt autenticado, usa
+Enter CR e confirma `technician`/`sudo` por uma linha de conclusão única do shell
+com código zero. Prompts antigos, MOTD ou eco de comandos não satisfazem esse
+aceite. Sequências ANSI e CR são normalizadas somente para reconhecimento; o log
+bruto é preservado. `test-netboot-diagnostics.py` cobre essas regressões sem VM.
+Para reproduzir o login real com uma ISO existente, sem NIC e sem disco físico:
+
+```sh
+python3 rescue/pxe/test-local-console.py --qemu /usr/bin/qemu-system-x86_64 \
+  --iso artifacts/rescue-iso/live-image-amd64.hybrid.iso \
+  --output runtime/console-login-probe
+```
+
+No Windows, use `python` e o caminho local do QEMU. Esse teste usa TCP serial em
+loopback e comprova o helper interativo; não é evidência de boot PXE.
+
 Para cada firmware, o harness também inicia uma VM nova, carrega somente o menu,
 interrompe o serviço SLT e verifica liberação de HTTP/TFTP. Selecionar Rescue deve
 produzir erro explícito de boot, sem alcançar o marcador de userspace e mantendo

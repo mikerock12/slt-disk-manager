@@ -22,7 +22,13 @@ try
     await using var http = await BootHttpServer.Start(launch, report: Report);
     Console.WriteLine(BootJson.Serialize(new { state = "RUNNING" })); ready = true; tftp.Start();
     // Any command/EOF means stop. No arbitrary remote commands or process launch inputs.
-    await Console.In.ReadLineAsync();
+    var input = Console.In.ReadLineAsync();
+    if (await Task.WhenAny(input, tftp.Completion) == tftp.Completion)
+    {
+        await tftp.Completion;
+        throw new IOException("Listener TFTP encerrou inesperadamente; HTTP será encerrado também.");
+    }
+    await input;
 }
 catch (Exception e)
 {

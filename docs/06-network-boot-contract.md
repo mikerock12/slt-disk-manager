@@ -24,6 +24,9 @@ no fetch do live-boot (o decoder depende da extensão da URL).
 IDs `[a-z0-9][a-z0-9-]{0,63}`. firmwareSupport BIOS e UEFI, architecture X64;
 secureBootStatus UNSUPPORTED. Sem argumentos/URLs/comandos fornecidos pelo manifesto.
 Importação nunca confia em validationStatus recebido: começa NETWORK_BOOT_DEV.
+O Controller classifica NETWORK_BOOT_LAB somente quando ID, versão, tipo e hashes
+de todos os artefatos correspondem ao catálogo instalado pelo pipeline depois
+dos gates reais. Perfis DEV habilitados bloqueiam start, sem abrir listeners.
 
 Porta pública: GET/HEAD `/boot/v1/menu.ipxe`, `/boot/v1/assets/{id}`,
 GET `/boot/v1/health` mínimo. Não serve API/agent/webroot. TFTP UDP69 somente

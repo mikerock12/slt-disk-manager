@@ -28,6 +28,14 @@ try
     File.WriteAllText(Path.Combine(source, "netboot-manifest.json"), BootJson.Serialize(profile));
     var imported = BootArtifactStore.Import(source, store);
     Check(imported.ValidationStatus == "NETWORK_BOOT_DEV" && imported.SecureBootStatus == "UNSUPPORTED", "manifest cannot self-certify support");
+    var trustFile = Path.Combine(root, "trusted-boot-profiles.json");
+    File.WriteAllText(trustFile, BootJson.Serialize(new TrustedBootRegistry(1, new string('0', 40), [new(imported.Id, TrustedBootProfiles.Fingerprint(imported)), new("bootstrap-fixture", new string('1', 64))])));
+    var trust = new TrustedBootProfiles(trustFile);
+    Check(new TrustedBootProfiles().Classify(imported).ValidationStatus == "NETWORK_BOOT_DEV", "no installed catalog cannot promote a profile");
+    Check(trust.Classify(imported).ValidationStatus == "NETWORK_BOOT_LAB", "installed exact payload fingerprint recognizes lab profile");
+    Check(trust.Classify(imported with { Version = "changed" }).ValidationStatus == "NETWORK_BOOT_DEV", "lab registry binds version");
+    Check(trust.Classify(imported with { Artifacts = imported.Artifacts.Select(a => a with { Sha256 = new string('0', 64) }).ToArray() }).ValidationStatus == "NETWORK_BOOT_DEV", "lab registry binds every artifact hash");
+    Check(trust.Classify(imported with { ValidationStatus = "NETWORK_BOOT_HARDWARE_VERIFIED", SecureBootStatus = "VERIFIED" }).SecureBootStatus == "UNSUPPORTED", "installed lab registry never promotes Secure Boot/hardware");
     BootArtifactStore.VerifyAll(store, [imported]); Check(true, "copy verified after import");
     Reject(() => BootArtifactStore.Import(source, store), "immutable versioned import");
     foreach (var path in new[] { "../kernel", "/etc/passwd", "C:/secret", "sub/../../secret", "kernel:secret", "sub\\kernel", "sub//kernel" }) Reject(() => BootArtifactStore.SafeFile(source, path), "path sandbox " + path);
@@ -85,6 +93,19 @@ try
         using var head = await client.SendAsync(new HttpRequestMessage(HttpMethod.Head, "/boot/v1/assets/rescue-test-rootfs.squashfs"));
         Check(head.Content.Headers.ContentLength == bytes.Length && (await head.Content.ReadAsByteArrayAsync()).Length == 0, "HEAD no payload " + cycle);
         foreach (var path in new[] { "/api/v1/devices", "/agent/v1/jobs", "/boot/v1/assets/admin.token", "/boot/v1/assets/%2e%2e%2fadmin.token" }) Check((await client.GetAsync(path)).StatusCode == HttpStatusCode.NotFound, "public listener denies " + path);
+    }
+    // Stop with a slow consumer while a large synthetic file is in flight.
+    var largePath = Path.Combine(store, imported.Id, "rootfs");
+    using (var large = File.Open(largePath, FileMode.Create, FileAccess.Write)) large.SetLength(32 * 1024 * 1024);
+    string largeHash; using (var large = File.OpenRead(largePath)) largeHash = Convert.ToHexStringLower(SHA256.HashData(large));
+    var largeProfile = imported with { Artifacts = imported.Artifacts.Select(a => a.Id == "rootfs" ? a with { SizeBytes = 32 * 1024 * 1024, Sha256 = largeHash } : a).ToArray() };
+    var slowServer = await BootHttpServer.Start(launch with { Profiles = [largeProfile] });
+    using (var slow = new TcpClient())
+    {
+        slow.ReceiveBufferSize = 1024; await slow.ConnectAsync(IPAddress.Loopback, port);
+        await slow.GetStream().WriteAsync(Encoding.ASCII.GetBytes("GET /boot/v1/assets/rescue-test-rootfs.squashfs HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"));
+        await Task.Delay(100); var timer = System.Diagnostics.Stopwatch.StartNew();
+        await slowServer.DisposeAsync(); Check(timer.Elapsed < TimeSpan.FromSeconds(8), "stop bounds active slow HTTP transfer and releases listener");
     }
     await using (var management = new NetworkBootManagement(Path.Combine(root, "state"), Path.Combine(root, "absent.exe"), (_, _) => { }))
     {

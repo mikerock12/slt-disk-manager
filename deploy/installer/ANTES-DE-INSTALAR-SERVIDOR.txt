@@ -1,4 +1,4 @@
-SLT DISK MANAGER — SERVIDOR DA BANCADA (BETA DE LABORATÓRIO)
+﻿SLT DISK MANAGER — SERVIDOR DA BANCADA (BETA DE LABORATÓRIO)
 
 Instale este pacote somente no computador servidor da assistência. Nos computadores
 atendidos use o instalador "SLT Disk Manager Cliente".

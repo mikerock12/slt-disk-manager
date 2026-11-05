@@ -1,15 +1,18 @@
 # Network Boot — evidências por fase
 
-Checkpoint 2026-11-04, implementação P0–P2 em validação. Não é aceite P3–P5.
+Checkpoint 2026-11-05, implementação P0–P2 em validação. Não é aceite P3–P5.
 
 | Componente/cenário | Evidência atual | Limite |
 |---|---|---|
-| Rede RFC1918/CIDR/NIC, import/hash/paths/menu | Suíte Network Boot 82/82 local | Arquivos sintéticos e sockets loopback |
+| Rede RFC1918/CIDR/NIC, import/hash/paths/menu/catálogo de confiança | Suíte Network Boot 88/88 local | Arquivos sintéticos e sockets loopback; stop também com consumidor lento |
 | HTTP concorrente/range, TFTP UDP, WRQ/traversal, colisão e start/stop | Mesma suíte | Sem DHCP na LAN do host |
 | UI salvar/validar/consentimento/start/stop | Desktop 45/45; renders sintéticos | Não é screenshot de firmware |
 | Export ISO → kernel/initrd/SquashFS | Exportador 10/10 e ISO beta.5.1 real extraída | Exportar não prova boot |
-| PXE BIOS/UEFI sem ISO/USB | Harness `rescue/pxe/test-netboot-vm.py` preparado | Execução real pendente no CI |
+| Login serial após senha | Prova interativa QEMU local com technician/live, identidade e sudo; regressões8/8 | Corrige o harness; não substitui os gates PXE completos |
+| PXE BIOS sem ISO/USB | CI41946920318 alcançou Linux ready, falhou no login automatizado | Gate reprovado; ainda não libera publicação |
+| PXE UEFI sem ISO/USB | Harness `rescue/pxe/test-netboot-vm.py` preparado | Execução real pendente após corrigir login |
 | CSR/mTLS/INVENTORY por PXE | Incluído no harness com disco RAW readonly e hashes antes/depois | Não alegar aprovado até recibo |
+| API administrativa Network Boot via HTTPS real | Integração local11/11 | Token, consentimento, config inválida, traversal, auditoria e ausência de jobs; nenhum listener boot iniciado |
 | ProxyDHCP | Bloqueado | Somente DHCP externo implementado |
 | Falha antes do kernel e durante fetch, retorno Linux local após parar PXE | Cenários adicionados ao harness, execução pendente | Fallback usa fixture Linux live em disco RAW readonly; não comprova Windows instalado |
 | WinPE PXE/Windows sem scratch | P3/P4 pendentes | Fluxo USB legado preservado |

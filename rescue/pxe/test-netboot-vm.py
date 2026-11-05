@@ -23,6 +23,31 @@ import subprocess
 import sys
 import tempfile
 import time
+import uuid
+
+
+def progress(message):
+    timestamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    print(f"[{timestamp}] {message}", flush=True)
+
+
+def terminal_text(text):
+    text = re.sub(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)", "", text)
+    text = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", text)
+    text = re.sub(r"\x1b[@-_]", "", text)
+    return text.replace("\r", "")
+
+
+def serial_tail(text, maximum=2400):
+    # Only known local launcher/diagnostic commands run in these guests. Do not
+    # print credentials if a future guest unexpectedly emits a secret field.
+    text = re.sub(r"-----BEGIN [^-]*PRIVATE KEY-----.*?(?:-----END [^-]*PRIVATE KEY-----|$)", "[private key redacted]", text, flags=re.S)
+    text = re.sub(r"(?i)(authorization\s*:\s*bearer\s+)\S+", r"\1[redacted]", text)
+    text = re.sub(r'''(?i)(["']?(?:token|secret|password)["']?[ \t]*[:=][ \t]*["']?)[^\s"']+''', r"\1[redacted]", text)
+    text = re.sub(r"(?i)(c[oó]digo\s+)\d{8}", r"\1[redacted pairing code]", text)
+    text = terminal_text(text)
+    text = "".join(character for character in text if character.isprintable() or character in "\r\n\t")
+    return "\n".join(text.replace("\r", "").splitlines()[-24:])[-maximum:]
 
 
 def run(*arguments):
@@ -52,11 +77,18 @@ def wait_for(check, description, timeout=60):
 
 
 class GuestConsole:
-    def __init__(self, path, evidence):
-        self.connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        self.connection.connect(str(path))
+    def __init__(self, path, evidence, *, connected_socket=None):
+        # The optional already-connected socket lets the Windows-only console
+        # regression use a loopback QEMU TCP serial port. Product control is not
+        # involved; the Linux PXE harness always uses its private Unix socket.
+        self.connection = connected_socket or socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        if connected_socket is None:
+            self.connection.connect(str(path))
         self.log = evidence.open("wb")
+        self.evidence = evidence
         self.text = ""
+        self.qmp = None
+        self.timeout_count = 0
 
     def pump(self):
         while select.select([self.connection], [], [], 0)[0]:
@@ -71,16 +103,82 @@ class GuestConsole:
             self.text += data.decode("utf-8", errors="replace")
         return self.text
 
-    def expect(self, pattern, timeout=120, offset=0):
-        return wait_for(lambda: re.search(pattern, self.pump()[offset:]), f"guest serial {pattern}", timeout)
+    def expect(self, pattern, timeout=120, offset=0, label=None):
+        description = label or f"guest serial {pattern}"
+        try:
+            return wait_for(lambda: re.search(pattern, terminal_text(self.pump()[offset:])), description, timeout)
+        except AssertionError:
+            self.diagnostics(description)
+            raise
+
+    def diagnostics(self, description, kind="TIMEOUT"):
+        self.timeout_count += 1
+        progress(f"{kind} {self.evidence.name}: {description}")
+        print("--- bounded guest serial tail ---\n" + serial_tail(self.pump()) + "\n--- end serial tail ---", flush=True)
+        if self.qmp:
+            screenshot = self.evidence.with_name(self.evidence.stem + f".timeout-{self.timeout_count}.ppm")
+            try:
+                self.qmp.execute("screendump", {"filename": str(screenshot)})
+                progress(f"Saved failure screenshot: {screenshot.name}")
+            except (OSError, ValueError, RuntimeError) as error:
+                progress(f"Failure screenshot unavailable: {type(error).__name__}")
 
     def send(self, value):
-        self.connection.sendall(value.encode("ascii"))
+        # Serial keyboard Enter is CR. LF alone can leave agetty/login input
+        # pending, while output still contains an earlier prompt in its history.
+        self.connection.sendall(value.replace("\r\n", "\r").replace("\n", "\r").encode("ascii"))
 
     def command(self, command, marker, timeout=60):
         offset = len(self.pump())
-        self.send(command + "\n")
-        self.expect(re.escape(marker), timeout, offset)
+        completion = "SLT_CMD_" + uuid.uuid4().hex + "_RC"
+        # A completion line must be produced by the shell. Neither the command's
+        # echoed printf format nor terminal wrapping contains `completion=N`.
+        self.send(command + "; slt_lab_rc=$?; printf '\\n%s=%s\\n' '" + completion + "' \"$slt_lab_rc\"\n")
+        result = self.expect(r"(?m)^" + re.escape(completion) + r"=(\d+)\r?$", timeout, offset, label="guest shell command completion")
+        if result.group(1) != "0":
+            self.diagnostics("guest shell command returned exit " + result.group(1), kind="FAILURE")
+            raise AssertionError("Guest shell command failed with exit " + result.group(1))
+        output = terminal_text(self.pump()[offset:])
+        if re.search(r"(?m)^" + re.escape(marker) + r"\r?$", output) is None:
+            self.diagnostics("expected command output marker absent", kind="FAILURE")
+            raise AssertionError("Expected guest command output marker absent")
+        return output
+
+    def login(self, marker="SLT_PXE_LOGIN_OK", timeout=90):
+        """Drive fresh getty/login prompts, then prove technician identity/sudo.
+
+        Every transition uses an offset recorded before sending input. A stale
+        `login:`/`Password:` in boot history can never trigger another password
+        or be mistaken for an authenticated shell.
+        """
+        deadline = time.monotonic() + timeout
+        offset = len(self.pump())
+        self.send("\n")
+        state = "AWAIT_PROMPT"
+        pattern = (r"(?m)(?P<login>^[^\r\n]*\blogin:[ \t]*\r?$)|"
+                   r"(?P<password>^[^\r\n]*Password:[ \t]*\r?$)|"
+                   r"(?P<shell>technician@[^\r\n]*\$[ \t]*\r?$)|"
+                   r"(?P<rejected>Login incorrect)")
+        while True:
+            result = self.expect(pattern, max(1, deadline - time.monotonic()), offset, label="fresh local login state " + state)
+            transition = result.lastgroup
+            offset = len(self.pump())
+            if transition == "shell":
+                break
+            if transition == "login" and state == "AWAIT_PROMPT":
+                progress("Local serial login prompt received; submitting technician username")
+                self.send("technician\n")
+                state = "USERNAME_SENT"
+            elif transition == "password" and state == "USERNAME_SENT":
+                progress("Fresh Live password prompt received")
+                self.send("live\n")
+                state = "PASSWORD_SENT"
+            else:
+                self.diagnostics("unexpected or rejected local login transition", kind="FAILURE")
+                raise AssertionError("Local technician login rejected or unexpected prompt state")
+        # Exact identity and sudo success are required; reaching a root shell,
+        # seeing a username in MOTD or merely echoing a command is insufficient.
+        self.command("sudo -n true && test \"$(id -un)\" = technician && printf '%s%s\\n' '" + marker[:4] + "' '" + marker[4:] + "'", marker)
 
     def close(self):
         self.pump()
@@ -195,7 +293,15 @@ def main():
         processes.append(process)
         return process
 
+    def on_termination(signum, _frame):
+        results["cancelledBySignal"] = signum
+        results["success"] = False
+        progress(f"Received signal {signum}; stopping owned lab processes and preserving receipt")
+        raise SystemExit(128 + signum)
+
     try:
+        signal.signal(signal.SIGTERM, on_termination)
+        progress("Creating isolated bridge/tap; host interfaces remain outside this namespace")
         run("ip", "link", "set", "lo", "up")
         run("ip", "link", "add", "sltbr0", "type", "bridge")
         run("ip", "address", "add", "10.77.0.1/24", "dev", "sltbr0")
@@ -210,6 +316,7 @@ def main():
             store = private / "boot-store"
             store.mkdir()
             profiles = [import_profile(args.rescue_profile, store), import_profile(args.bootstrap_profile, store)]
+            progress("Verified and staged Rescue/iPXE profiles")
             local_disk = None
             local_hash = None
             if args.local_system_image:
@@ -224,6 +331,7 @@ def main():
                 results["localSystemFixture"] = {"kind": "HYBRID_RESCUE_BYTES_AS_VIRTIO_RAW_DISK",
                     "sha256": local_hash, "sizeBytes": local_disk.stat().st_size,
                     "installedPersistentSystem": False, "cdromAttached": False, "usbAttached": False}
+                progress("Prepared same-build Linux local-disk fixture (readonly RAW, no CD/USB)")
             results["profiles"] = [{"id": profile["id"], "version": profile["version"],
                                     "artifacts": [{"id": artifact["id"], "sizeBytes": artifact["sizeBytes"], "sha256": artifact["sha256"]}
                                                   for artifact in profile["artifacts"]]} for profile in profiles]
@@ -243,6 +351,7 @@ def main():
                 process.stdin.write((json.dumps(launch) + "\n").encode())
                 process.stdin.flush()
                 wait_for(lambda: '"state":"RUNNING"' in service_log.read_text(errors="replace"), "boot service RUNNING", 90)
+                progress(f"SLT boot service RUNNING ({name})")
                 return process
 
             def transmitted_bytes():
@@ -264,6 +373,7 @@ def main():
                     assert probe.connect_ex(("10.77.0.1", 8088)) != 0, "HTTP listener remained after stop"
                 with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
                     probe.bind(("10.77.0.1", 69))
+                progress("SLT boot service stopped; HTTP and TFTP sockets released")
 
             service = start_boot_service()
             dnsconfig = private / "dnsmasq.conf"
@@ -282,6 +392,7 @@ def main():
             dhcp = start(["dnsmasq", "--keep-in-foreground", "--conf-file=" + str(dnsconfig)], "external-dhcp")
             time.sleep(0.3)
             assert dhcp.poll() is None
+            progress("External lab DHCP running exclusively in isolated namespace")
             connection = None
             if args.controller_dll:
                 controller = start(["dotnet", str(args.controller_dll), "--state-dir", str(private / "controller"),
@@ -305,7 +416,9 @@ def main():
 
             if connection:
                 wait_for(lambda: request("GET", "/health"), "Controller HTTPS")
+                progress("Controller HTTPS ready; administrative token stays in private temporary state")
             for index, mode in enumerate(modes):
+                progress(f"Starting {mode.upper()} positive PXE boot")
                 fixture = private / f"{mode}-synthetic.raw"
                 fixture.write_bytes(bytes(n % 251 for n in range(8 * 1024 * 1024)))
                 fixture_hash = digest(fixture)
@@ -334,23 +447,19 @@ def main():
                     wait_for(lambda: serial_path.exists() and qmp_path.exists(), "QEMU console")
                     console = GuestConsole(serial_path, args.output / f"{mode}.serial.log")
                     qmp = Qmp(qmp_path)
+                    console.qmp = qmp
                     console.expect("SLT Network Boot", 180)
+                    progress(f"{mode.upper()} PXE menu reached")
                     menu_seconds = time.monotonic() - started
                     qmp.execute("screendump", {"filename": str(args.output / f"{mode}-menu.ppm")})
                     qmp.key("down")
                     time.sleep(0.2)
                     qmp.key("ret")
                     console.expect("SLT_RESCUE_BOOT_READY:" + mode.upper(), 600)
+                    progress(f"{mode.upper()} Rescue Linux userspace readiness confirmed")
                     boot_seconds = time.monotonic() - started
-                    console.send("\n")
-                    console.expect(r"login:|technician@|\$ ", 60)
-                    tail = console.pump()[-1500:]
-                    if "login:" in tail and "technician@" not in tail:
-                        console.send("technician\n")
-                        console.expect(r"Password:|technician@|\$ ", 30, len(console.text) - 100)
-                        if "Password:" in console.pump()[-300:]:
-                            console.send("live\n")
-                    console.command("sudo -n true && printf '%s%s\\n' 'SLT_PXE_' 'LOGIN_OK'", "SLT_PXE_LOGIN_OK")
+                    console.login("SLT_PXE_LOGIN_OK")
+                    progress(f"{mode.upper()} local technician login and sudo confirmed")
                     console.command("ip -4 route; ip -4 addr; printf '%s%s\\n' 'SLT_PXE_' 'NETWORK_OK'", "SLT_PXE_NETWORK_OK")
                     console.command("sudo -n smartctl -a /dev/vda; printf 'SMART_EXIT=%s\\n' \"$?\"; printf '%s%s\\n' 'SLT_PXE_' 'SMART_CHECKED'", "SLT_PXE_SMART_CHECKED")
                     qmp.execute("screendump", {"filename": str(args.output / f"{mode}-rescue.ppm")})
@@ -361,6 +470,7 @@ def main():
                         old_devices = {d["id"] for d in request("GET", "/api/v1/devices")}
                         offset = len(console.text)
                         console.send("sudo slt-start\n")
+                        progress(f"{mode.upper()} launching local slt-start in its default mode without physical write")
                         console.expect("Escolha \\[1\\]:", 30, offset)
                         console.send("1\n")
                         console.expect("Endere", 45, offset)
@@ -370,15 +480,18 @@ def main():
                         console.expect("Modo \\[1\\]:", 30, offset)
                         console.send("1\n")
                         pending = wait_for(lambda: next((e for e in request("GET", "/api/v1/enrollments") if e["status"] == "PENDING"), None), "guest CSR enrollment", 90)
-                        console.expect(re.escape(pending["code"]), 30, offset)
+                        progress(f"{mode.upper()} CSR enrollment received; checking code on local console")
+                        console.expect(re.escape(pending["code"]), 30, offset, label="pairing code shown on guest console")
                         request("POST", f"/api/v1/enrollments/{pending['id']}/approve", {"code": pending["code"]})
                         device = wait_for(lambda: next((d for d in request("GET", "/api/v1/devices") if d["id"] not in old_devices and d.get("inventory")), None), "guest mTLS inventory", 120)
                         disk = next(d for d in device["inventory"]["disks"] if d["serial"] == "SLT-PXE-FIXTURE")
                         assert disk["isReadOnly"] and disk["sizeBytes"] == fixture.stat().st_size
+                        progress(f"{mode.upper()} individual certificate/mTLS inventory received; synthetic disk is readonly")
                         job = request("POST", "/api/v1/jobs/plan", {"kind": "INVENTORY", "deviceId": device["id"], "diskFingerprint": disk["fingerprint"], "consent": True})
                         request("POST", f"/api/v1/jobs/{job['id']}/approve", {"challenge": job["plan"]["challenge"]})
                         final = wait_for(lambda: next((j for j in request("GET", "/api/v1/jobs") if j["id"] == job["id"] and j["state"] in ("COMPLETED", "FAILED")), None), "signed INVENTORY job", 90)
                         assert final["state"] == "COMPLETED", final
+                        progress(f"{mode.upper()} signed INVENTORY job completed")
                         entry["csrMtlsInventory"] = True
                         entry["signedInventoryJob"] = True
                         request("POST", f"/api/v1/devices/{device['id']}/revoke", {})
@@ -403,12 +516,15 @@ def main():
                 if mode == "uefi":
                     shutil.copyfile(template, variables)
                 vm = start(vm_command, mode + "-outage-qemu")
+                progress(f"Starting {mode.upper()} negative boot: stop server after menu, before kernel/filesystem")
                 console, qmp = None, None
                 try:
                     wait_for(lambda: serial_path.exists() and qmp_path.exists(), "outage QEMU console")
                     console = GuestConsole(serial_path, args.output / f"{mode}-outage.serial.log")
                     qmp = Qmp(qmp_path)
+                    console.qmp = qmp
                     console.expect("SLT Network Boot", 180)
+                    progress(f"{mode.upper()} negative boot menu reached; stopping SLT boot service")
                     assert "SLT_RESCUE_BOOT_READY:" not in console.pump()
                     stop_boot_service(service)
                     failed_at = time.monotonic()
@@ -450,6 +566,7 @@ def main():
                 if mode == "uefi":
                     shutil.copyfile(template, variables)
                 run("tc", "qdisc", "add", "dev", "slttap0", "root", "tbf", "rate", "16mbit", "burst", "64kb", "latency", "100ms")
+                progress(f"Starting {mode.upper()} negative boot: interrupt rootfs fetch with isolated NIC limited to 16 Mbit/s")
                 vm = None
                 console, qmp = None, None
                 try:
@@ -457,7 +574,9 @@ def main():
                     wait_for(lambda: serial_path.exists() and qmp_path.exists(), "fetch outage QEMU console")
                     console = GuestConsole(serial_path, args.output / f"{mode}-fetch-outage.serial.log")
                     qmp = Qmp(qmp_path)
+                    console.qmp = qmp
                     console.expect("SLT Network Boot", 180)
+                    progress(f"{mode.upper()} throttled PXE menu reached; waiting for real rootfs HTTP transfer")
                     qmp.key("down")
                     time.sleep(0.2)
                     qmp.key("ret")
@@ -474,13 +593,19 @@ def main():
                                 return event
                         return None
 
-                    event = wait_for(rootfs_started, "actual rootfs HTTP_BEGIN (new service log)", 300)
+                    try:
+                        event = wait_for(rootfs_started, "actual rootfs HTTP_BEGIN (new service log)", 300)
+                    except AssertionError:
+                        console.diagnostics("actual rootfs HTTP_BEGIN in new service log")
+                        raise
+                    progress(f"{mode.upper()} rootfs HTTP_BEGIN observed; measuring partial network transfer")
                     bytes_before = transmitted_bytes()
                     time.sleep(1)
                     bytes_after = transmitted_bytes()
                     delta = bytes_after - bytes_before
                     rootfs_size = next(a["sizeBytes"] for p in profiles if p["kind"] == "RESCUE_LINUX" for a in p["artifacts"] if a["id"] == "rootfs")
                     assert 65536 < delta < rootfs_size, (delta, rootfs_size)
+                    progress(f"{mode.upper()} observed {delta} network bytes after rootfs HTTP_BEGIN; stopping boot service")
                     # Namespace traffic since HTTP_BEGIN consists of this boot
                     # and its TCP framing. At 16 Mbit/s, even the bounded 3-second
                     # graceful stop cannot finish the hundreds-of-MiB rootfs.
@@ -527,23 +652,19 @@ def main():
                     local_command += ["-drive", f"if=none,id=local-system,file={local_disk},format=raw,readonly=on",
                         "-device", "virtio-blk-pci,drive=local-system,serial=SLT-LOCAL-SYSTEM,bootindex=2"]
                     vm = start(local_command, mode + "-local-fallback-qemu")
+                    progress(f"Starting {mode.upper()} local Linux fallback with SLT boot disabled and Ethernet retained")
                     console, qmp = None, None
                     began = time.monotonic()
                     try:
                         wait_for(lambda: serial_path.exists() and qmp_path.exists(), "local fallback QEMU console")
                         console = GuestConsole(serial_path, args.output / f"{mode}-local-fallback.serial.log")
                         qmp = Qmp(qmp_path)
+                        console.qmp = qmp
                         console.expect("SLT_RESCUE_BOOT_READY:" + mode.upper(), 600)
+                        progress(f"{mode.upper()} local Linux userspace readiness confirmed")
                         assert "SLT Network Boot" not in console.pump(), "Boot menu unexpectedly served while SLT boot service was stopped"
-                        console.send("\n")
-                        console.expect(r"login:|technician@|\$ ", 60)
-                        tail = console.pump()[-1500:]
-                        if "login:" in tail and "technician@" not in tail:
-                            console.send("technician\n")
-                            console.expect(r"Password:|technician@|\$ ", 30, len(console.text) - 100)
-                            if "Password:" in console.pump()[-300:]:
-                                console.send("live\n")
-                        console.command("sudo -n true && printf '%s%s\\n' 'SLT_LOCAL_' 'LOGIN_OK'", "SLT_LOCAL_LOGIN_OK")
+                        console.login("SLT_LOCAL_LOGIN_OK")
+                        progress(f"{mode.upper()} local-disk technician login confirmed; checking block-device boot provenance")
                         # A userspace readiness marker alone could be confused
                         # with PXE. Prove no fetch= parameter and a local virtio
                         # block device as live medium, then record real login.
@@ -582,20 +703,31 @@ def main():
             results["duringFilesystemFailureGatePassed"] = set(modes) == {"bios", "uefi"} and len(results["fetchOutages"]) == 2
             results["localLinuxFallbackGatePassed"] = bool(local_disk) and set(modes) == {"bios", "uefi"} and len(results["localFallbacks"]) == 2
     finally:
-        for process in reversed(processes):
+        # Repeated termination signals must not abort cleanup halfway through.
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        progress("Stopping all remaining owned lab process groups")
+        remaining = [process for process in reversed(processes) if process.poll() is None]
+        # Send termination to every owned group before waiting. A cancelled CI
+        # job must not spend ten seconds per process before preserving evidence.
+        for process in remaining:
+            try:
+                os.killpg(process.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+        deadline = time.monotonic() + 6
+        for process in remaining:
+            try:
+                process.wait(timeout=max(0, deadline - time.monotonic()))
+            except subprocess.TimeoutExpired:
+                pass
+        for process in remaining:
             if process.poll() is None:
                 try:
-                    os.killpg(process.pid, signal.SIGTERM)
+                    os.killpg(process.pid, signal.SIGKILL)
                 except ProcessLookupError:
-                    pass  # Child exited between poll() and the signal.
-                try:
-                    process.wait(timeout=10)
-                except subprocess.TimeoutExpired:
-                    try:
-                        os.killpg(process.pid, signal.SIGKILL)
-                    except ProcessLookupError:
-                        pass
-                    process.wait(timeout=10)
+                    pass
+        for process in remaining:
+            process.wait(timeout=2)
         for log in logs:
             log.close()
         results["allOwnedProcessesStopped"] = all(process.poll() is not None for process in processes)

@@ -10,6 +10,7 @@ public sealed class NetworkBootManagement : IAsyncDisposable
     private readonly string root;
     private readonly string executable;
     private readonly Action<string, string> audit;
+    private readonly TrustedBootProfiles trusted = new();
     private readonly SemaphoreSlim gate = new(1);
     private readonly Queue<BootEvent> events = new();
     private Task? eventReader;
@@ -25,10 +26,11 @@ public sealed class NetworkBootManagement : IAsyncDisposable
         Directory.CreateDirectory(Store);
         try
         {
+            trusted = new TrustedBootProfiles(Path.Combine(Path.GetDirectoryName(this.executable)!, "trusted-boot-profiles.json"));
             if (File.Exists(ConfigPath)) config = BootJson.Parse<NetworkBootConfig>(File.ReadAllText(ConfigPath));
             profiles = Directory.GetDirectories(Store).Where(p => !Path.GetFileName(p).StartsWith("incoming-", StringComparison.Ordinal)).Select(p =>
             {
-                var f = BootJson.Parse<BootProfile>(File.ReadAllText(BootArtifactStore.SafeFile(p, "netboot-manifest.json"))); BootArtifactStore.Validate(f); return f with { ValidationStatus = "NETWORK_BOOT_DEV", SecureBootStatus = "UNSUPPORTED" };
+                var f = BootJson.Parse<BootProfile>(File.ReadAllText(BootArtifactStore.SafeFile(p, "netboot-manifest.json"))); BootArtifactStore.Validate(f); return trusted.Classify(f);
             }).ToArray();
         }
         catch (Exception e) when (e is IOException or ArgumentException or System.Text.Json.JsonException) { lastError = "Configuração de boot inválida: " + e.Message; profiles = []; }
@@ -69,6 +71,7 @@ public sealed class NetworkBootManagement : IAsyncDisposable
         if (!File.Exists(executable)) errors.Add("Executável do serviço Network Boot ausente no pacote.");
         if (profiles.Count(p => p.Enabled && p.Kind == "IPXE_BOOTSTRAP") != 1) errors.Add("Habilite exatamente um perfil iPXE BIOS/UEFI.");
         if (!profiles.Any(p => p.Enabled && p.Kind == "RESCUE_LINUX")) errors.Add("Importe/habilite um perfil Rescue Linux.");
+        if (profiles.Any(p => p.Enabled && p.ValidationStatus != "NETWORK_BOOT_LAB")) errors.Add("Perfil de desenvolvimento bloqueado: importe o pacote netboot que passou pelo laboratório da mesma release.");
         try { BootArtifactStore.VerifyAll(Store, profiles.Where(p => p.Enabled)); }
         catch (Exception e) when (e is IOException or ArgumentException) { errors.Add("Artefatos: " + e.Message); }
         if (ports && initial.Valid)
@@ -92,7 +95,7 @@ public sealed class NetworkBootManagement : IAsyncDisposable
         await gate.WaitAsync(); try
         {
             EnsureStopped(); if (profiles.Length >= 32) throw new ApiException(409, "Limite de 32 perfis.");
-            var p = BootArtifactStore.Import(Path.GetFullPath(directory), Store); profiles = [.. profiles, p]; Record("IMPORTED", p.Id); return p;
+            var p = trusted.Classify(BootArtifactStore.Import(Path.GetFullPath(directory), Store)); profiles = [.. profiles, p]; Record("IMPORTED", p.Id); return p;
         }
         finally { gate.Release(); }
     }

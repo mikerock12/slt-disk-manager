@@ -17,7 +17,11 @@ dois loaders e autoexec; HTTP somente menu e artefatos publicados por ID.
 
 Importação local copia arquivos de um manifesto fechado para armazenamento separado,
 verifica tamanho/SHA256, recusa reparse points e parâmetros arbitrários. Perfis Rescue
-são DEV até evidência BIOS/UEFI; o manifesto não pode autodeclarar homologação.
+são DEV até correspondência exata com o catálogo instalado pelo pipeline, que só
+é produzido após os gates BIOS/UEFI, falhas de rede e fallback local. O manifesto
+importado não pode autodeclarar homologação. O catálogo exige a mesma proteção
+do diretório dos executáveis; alterá-lo requer acesso equivalente a substituir
+o próprio programa. Perfis desconhecidos não podem iniciar pelo painel.
 HTTP/TFTP pré-boot não autenticam a máquina e não fornecem integridade contra um
 atacante ativo da LAN: SHA256 detecta corrupção no armazenamento; Secure Boot não
 está homologado. Só rede de bancada explicitamente escolhida. Pareamento e pin TLS

@@ -23,5 +23,7 @@ try {
         if($LASTEXITCODE -ne 0){throw 'Integração de arquivos falhou.'}
         python tests/integration/media-import-e2e.py
         if($LASTEXITCODE -ne 0){throw 'Integração de catálogo de mídia falhou.'}
+        python tests/integration/network-boot-admin-e2e.py
+        if($LASTEXITCODE -ne 0){throw 'Integração administrativa Network Boot falhou.'}
     }
 } finally {Pop-Location}

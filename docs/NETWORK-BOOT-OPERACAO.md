@@ -14,6 +14,10 @@ homologados. O boot não aprova nenhum job nem autoriza gravação.
    `ipxe-bootstrap`. A cópia gerenciada fica separada das mídias de implantação
    no estado privado do Controller. Importação confere tamanhos/SHA256; um ID é
    imutável. Para substituir arquivos, importe um novo ID versionado.
+   Somente fingerprints incluídos no catálogo instalado pela mesma release,
+   depois dos gates reais do CI, recebem NETWORK_BOOT_LAB e podem iniciar pelo
+   painel. O texto de homologação do manifesto importado é ignorado; perfis
+   desconhecidos ficam NETWORK_BOOT_DEV e não podem distribuir boot pela UI.
 4. Selecione Ethernet, IP, CIDR e porta HTTP (8088 padrão), salve e valide.
    Mantenha exatamente um perfil iPXE e pelo menos um Rescue habilitados.
 5. Configure explicitamente seu DHCP externo: IP normal para o cliente,

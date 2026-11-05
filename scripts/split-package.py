@@ -10,7 +10,9 @@ args = parser.parse_args()
 package = Path(args.package).resolve(strict=True)
 destination = package.parent / (package.stem + "-drive-parts")
 destination.mkdir(exist_ok=False)
-manifest = {"packageName": package.name, "sizeBytes": package.stat().st_size, "sha256": hashlib.sha256(package.read_bytes()).hexdigest(), "parts": []}
+with package.open("rb") as source:
+    package_sha256 = hashlib.file_digest(source, "sha256").hexdigest()
+manifest = {"packageName": package.name, "sizeBytes": package.stat().st_size, "sha256": package_sha256, "parts": []}
 with package.open("rb") as source:
     sequence = 1
     while data := source.read(64 * 1024 * 1024):

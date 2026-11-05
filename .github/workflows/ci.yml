@@ -12,7 +12,12 @@ concurrency:
 jobs:
   windows:
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      package: ${{ steps.package-plan.outputs.build }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@v6
@@ -35,7 +40,48 @@ jobs:
           $env:NUGET_PACKAGES=Join-Path $PWD '.tools/nuget'
           dotnet restore SLT.DiskManager.slnx -p:NuGetAudit=true
           if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
+      - name: Select new-version package validation
+        id: package-plan
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $build='true'
+          if($env:GITHUB_EVENT_NAME -eq 'push' -and $env:GITHUB_REF -ne 'refs/heads/main'){$build='false'}
+          $version=(Get-Content VERSION -Raw).Trim()
+          $target=gh release view "v$version" --json targetCommitish --jq .targetCommitish 2>$null
+          if($LASTEXITCODE -eq 0 -and $target.Trim() -ne $env:GITHUB_SHA){$build='false'}
+          "build=$build" >> $env:GITHUB_OUTPUT
+          exit 0
+      - name: Require exact-snapshot PXE gate and its approved profile catalog
+        if: steps.package-plan.outputs.build == 'true'
+        id: netboot
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SLT_CI_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          for($attempt=0;$attempt -lt 270;$attempt++){
+            $run=gh api "repos/$env:GITHUB_REPOSITORY/actions/workflows/rescue-iso.yml/runs?head_sha=$env:SLT_CI_HEAD_SHA" --jq '.workflow_runs[0].id // empty'
+            if($LASTEXITCODE -ne 0){throw 'Consulta do laboratório PXE falhou.'}
+            if($run){
+              $result=gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$run/jobs" --jq '.jobs[] | select(.name=="build-and-boot") | .conclusion // empty'
+              if($LASTEXITCODE -ne 0){throw 'Consulta dos jobs PXE falhou.'}
+              if($result -eq 'success'){"run-id=$run" >> $env:GITHUB_OUTPUT; exit 0}
+              if($result){throw "Laboratório PXE reprovado: $result"}
+            }
+            Start-Sleep -Seconds 20
+          }
+          throw 'Laboratório PXE não concluiu; não empacotar.'
+      - uses: actions/download-artifact@v7
+        if: steps.package-plan.outputs.build == 'true'
+        with:
+          name: slt-netboot-profiles
+          github-token: ${{ github.token }}
+          run-id: ${{ steps.netboot.outputs.run-id }}
+          path: artifacts/trusted-netboot
       - name: Build portable package
+        if: steps.package-plan.outputs.build == 'true'
         shell: pwsh
         run: |
           $version=(Get-Content VERSION -Raw).Trim()
@@ -46,6 +92,7 @@ jobs:
           ./tests/integration/installer-smoke.ps1 -ServerInstaller "artifacts/SLT-Disk-Manager-Servidor-Setup-$version.exe" -ClientInstaller "artifacts/SLT-Disk-Manager-Cliente-Setup-$version.exe"
           Get-ChildItem artifacts -File | Where-Object {$_.Name -like "SLT-Disk-Manager-*$version*.exe" -or $_.Name -like "SLT-Disk-Manager-*$version*.zip"} | Get-FileHash -Algorithm SHA256 | ForEach-Object { '{0}  {1}' -f $_.Hash.ToLowerInvariant(),(Split-Path $_.Path -Leaf) } | Set-Content artifacts/SHA256SUMS.txt -Encoding ascii
       - uses: actions/upload-artifact@v7
+        if: steps.package-plan.outputs.build == 'true'
         with:
           name: slt-disk-manager-win-x64
           path: |
@@ -74,7 +121,7 @@ jobs:
           sudo env PATH="$PATH" bash rescue/scripts/test-adaptive-linux.sh
       - run: for script in rescue/scripts/*.sh; do bash -n "$script"; done
   release:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.windows.outputs.package == 'true'
     needs: [windows, rescue-linux]
     runs-on: ubuntu-latest
     timeout-minutes: 90

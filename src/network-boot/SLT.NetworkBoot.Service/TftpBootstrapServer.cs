@@ -26,6 +26,7 @@ public sealed class TftpBootstrapServer : IAsyncDisposable
         listener = new UdpClient(new IPEndPoint(bind, port));
     }
     public int Port => ((IPEndPoint)listener.Client.LocalEndPoint!).Port;
+    public Task Completion => loop ?? Task.CompletedTask;
     public void Start() => loop = Run();
     public static (string Name, int BlockSize, string[] Options) Parse(byte[] packet)
     {
@@ -106,8 +107,11 @@ public sealed class TftpBootstrapServer : IAsyncDisposable
     }
     public async ValueTask DisposeAsync()
     {
-        await stop.CancelAsync(); if (loop != null) await loop;
-        Task[] active; lock (transfers) active = transfers.ToArray(); await Task.WhenAll(active);
-        listener.Dispose(); slots.Dispose(); stop.Dispose();
+        try
+        {
+            await stop.CancelAsync(); if (loop != null) await loop;
+            Task[] active; lock (transfers) active = transfers.ToArray(); await Task.WhenAll(active);
+        }
+        finally { listener.Dispose(); slots.Dispose(); stop.Dispose(); }
     }
 }

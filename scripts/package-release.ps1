@@ -19,6 +19,12 @@ try {
         dotnet publish $projects[$name] -c Release -r win-x64 --self-contained true -o (Join-Path $output $name) --nologo
         if($LASTEXITCODE -ne 0){throw "Falha no publish $name"}
     }
+    $trustedProfiles=Join-Path $projectRoot 'artifacts/trusted-netboot/trusted-boot-profiles.json'
+    if(-not(Test-Path -LiteralPath $trustedProfiles)){throw 'Catálogo dos perfis aprovados pelo laboratório PXE ausente; não empacotar boot de desenvolvimento.'}
+    $registry=Get-Content -LiteralPath $trustedProfiles -Raw | ConvertFrom-Json
+    $sourceRevision=(& git rev-parse HEAD).Trim()
+    if($registry.schemaVersion -ne 1 -or $registry.sourceCommit -ne $sourceRevision -or $registry.profiles.Count -lt 2){throw 'Catálogo PXE não corresponde ao commit que está sendo empacotado.'}
+    Copy-Item -LiteralPath $trustedProfiles -Destination (Join-Path $output 'network-boot/trusted-boot-profiles.json')
     # Third-party tools the app calls, shipped with their licenses (docs/12-licensing-third-party.md).
     $sevenSource=Join-Path $env:ProgramFiles '7-Zip'
     foreach($file in '7z.exe','7z.dll','License.txt'){if(-not(Test-Path -LiteralPath (Join-Path $sevenSource $file))){throw "7-Zip ausente em $sevenSource; instale-o para empacotar o servidor."}}
