@@ -1,0 +1,68 @@
+name: Diagnose isolated iPXE bootstrap outage
+on:
+  workflow_dispatch:
+  push:
+    branches: ['codex/pxe-uefi-diagnostic']
+permissions:
+  contents: read
+concurrency:
+  group: bootstrap-diagnostic-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  bootstrap-outage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: default
+            firmware: both
+          - variant: traced
+            firmware: uefi
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+      - name: Build actual isolated boot service
+        run: dotnet build src/network-boot/SLT.NetworkBoot.Service -c Release
+      - name: Install disposable VM tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends qemu-system-x86 ovmf dnsmasq iproute2 build-essential liblzma-dev git
+      - name: Build exact pinned SLT iPXE chainloaders
+        run: bash scripts/build-ipxe-bootstrap.sh "$PWD/artifacts/ipxe-bootstrap"
+      - name: Trace EFI script execution without changing the release loader
+        if: matrix.variant == 'traced'
+        run: |
+          make -C .tools/ipxe-efd0b257a924f7c83cfcf27dfbf3e3ee7df7adac/src -j2 bin-x86_64-efi/ipxe.efi DEBUG=script,exec,efi_init EMBED="$PWD/artifacts/ipxe-bootstrap/slt-chain.ipxe"
+          cp .tools/ipxe-efd0b257a924f7c83cfcf27dfbf3e3ee7df7adac/src/bin-x86_64-efi/ipxe.efi artifacts/ipxe-bootstrap/ipxe.efi
+          python3 - <<'PY'
+          import hashlib,json
+          from pathlib import Path
+          root=Path('artifacts/ipxe-bootstrap')
+          manifest=root/'netboot-manifest.json'
+          profile=json.loads(manifest.read_text())
+          artifact=next(a for a in profile['artifacts'] if a['id']=='uefi')
+          loader=root/'ipxe.efi'
+          artifact.update(sizeBytes=loader.stat().st_size,sha256=hashlib.sha256(loader.read_bytes()).hexdigest())
+          manifest.write_text(json.dumps(profile,indent=2)+'\n')
+          with (root/'SLT-BUILD.txt').open('a') as f:f.write('DIAGNOSTIC ONLY: EFI DEBUG=script,exec,efi_init; never approved for a release.\n')
+          PY
+      - name: Observe pre-kernel failure without ISO or disks
+        timeout-minutes: 12
+        run: |
+          sudo env PATH="$PATH" python3 rescue/pxe/test-bootstrap-outage-vm.py --service-dll src/network-boot/SLT.NetworkBoot.Service/bin/Release/net10.0/SLT.NetworkBoot.Service.dll --bootstrap-profile artifacts/ipxe-bootstrap --output artifacts/bootstrap-outage --firmware ${{ matrix.firmware }}
+      - name: Preserve bounded diagnostic evidence
+        if: always()
+        run: |
+          if test -d artifacts/bootstrap-outage; then sudo chown -R "$(id -u):$(id -g)" artifacts/bootstrap-outage; fi
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: slt-bootstrap-outage-diagnostic-${{ matrix.variant }}
+          path: |
+            artifacts/bootstrap-outage/
+            artifacts/ipxe-bootstrap/
+          retention-days: 14
