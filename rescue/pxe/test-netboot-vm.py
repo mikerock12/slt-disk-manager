@@ -465,7 +465,8 @@ def main():
                     qmp.execute("screendump", {"filename": str(args.output / f"{mode}-rescue.ppm")})
                     entry = {"firmware": mode, "menuSeconds": round(menu_seconds, 2), "bootSeconds": round(boot_seconds, 2),
                              "syntheticSha256Before": fixture_hash, "bootReady": True, "localLogin": True,
-                             "smartDiagnosticAttempted": True, "smartAttributesExpected": False}
+                             "smartDiagnosticAttempted": True, "smartAttributesExpected": False,
+                             "inventoryAfterBootServiceStop": False}
                     if connection:
                         old_devices = {d["id"] for d in request("GET", "/api/v1/devices")}
                         offset = len(console.text)
@@ -487,14 +488,34 @@ def main():
                         disk = next(d for d in device["inventory"]["disks"] if d["serial"] == "SLT-PXE-FIXTURE")
                         assert disk["isReadOnly"] and disk["sizeBytes"] == fixture.stat().st_size
                         progress(f"{mode.upper()} individual certificate/mTLS inventory received; synthetic disk is readonly")
+                        # fetch= has loaded the Live filesystem into RAM. Prove
+                        # the already enrolled agent can still perform a NEW
+                        # signed job after the entire boot distribution process
+                        # (HTTP/TFTP) exits, while Controller HTTPS remains live.
+                        stop_boot_service(service)
+                        assert service.poll() == 0 and vm.poll() is None and controller.poll() is None
+                        assert request("GET", "/health"), "Controller stopped responding after boot service shutdown"
+                        assert digest(fixture) == fixture_hash
+                        entry["postBootServiceStop"] = {"serviceExited": True, "returnCode": service.returncode,
+                            "httpAndTftpReleased": True, "controllerHealthResponding": True,
+                            "existingGuestRetained": True}
+                        progress(f"{mode.upper()} boot HTTP/TFTP process exited after enrollment; Controller HTTPS still responds; submitting a new signed INVENTORY")
                         job = request("POST", "/api/v1/jobs/plan", {"kind": "INVENTORY", "deviceId": device["id"], "diskFingerprint": disk["fingerprint"], "consent": True})
                         request("POST", f"/api/v1/jobs/{job['id']}/approve", {"challenge": job["plan"]["challenge"]})
                         final = wait_for(lambda: next((j for j in request("GET", "/api/v1/jobs") if j["id"] == job["id"] and j["state"] in ("COMPLETED", "FAILED")), None), "signed INVENTORY job", 90)
                         assert final["state"] == "COMPLETED", final
-                        progress(f"{mode.upper()} signed INVENTORY job completed")
+                        assert service.poll() == 0 and vm.poll() is None and controller.poll() is None
+                        assert request("GET", "/health") and digest(fixture) == fixture_hash
+                        progress(f"{mode.upper()} signed INVENTORY completed with boot HTTP/TFTP still stopped; existing agent and readonly data remain intact")
                         entry["csrMtlsInventory"] = True
                         entry["signedInventoryJob"] = True
+                        entry["inventoryAfterBootServiceStop"] = True
+                        entry["postBootServiceStop"]["signedJobState"] = final["state"]
+                        entry["postBootServiceStop"]["syntheticSha256After"] = digest(fixture)
                         request("POST", f"/api/v1/devices/{device['id']}/revoke", {})
+                        # The next negative test must independently reach a new
+                        # menu before its own server outage; restore boot first.
+                        service = start_boot_service()
                     qmp.execute("quit")
                     vm.wait(timeout=15)
                     entry["syntheticSha256After"] = digest(fixture)
@@ -699,6 +720,8 @@ def main():
             results["success"] = True
             results["bootAndInventoryGatePassed"] = bool(args.controller_dll) and set(modes) == {"bios", "uefi"} and all(
                 entry.get("csrMtlsInventory") and entry.get("signedInventoryJob") for entry in results["firmware"])
+            results["postBootServiceStopGatePassed"] = bool(args.controller_dll) and set(modes) == {"bios", "uefi"} and len(results["firmware"]) == 2 and all(
+                entry.get("inventoryAfterBootServiceStop") is True for entry in results["firmware"])
             results["preFilesystemFailureGatePassed"] = set(modes) == {"bios", "uefi"} and len(results["outages"]) == 2
             results["duringFilesystemFailureGatePassed"] = set(modes) == {"bios", "uefi"} and len(results["fetchOutages"]) == 2
             results["localLinuxFallbackGatePassed"] = bool(local_disk) and set(modes) == {"bios", "uefi"} and len(results["localFallbacks"]) == 2

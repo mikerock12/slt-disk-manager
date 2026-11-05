@@ -15,6 +15,7 @@ Checkpoint 2026-11-05, implementação P0–P2 em validação. Não é aceite P3
 | API administrativa Network Boot via HTTPS real | Integração local11/11 | Token, consentimento, config inválida, traversal, auditoria e ausência de jobs; nenhum listener boot iniciado |
 | ProxyDHCP | Bloqueado | Somente DHCP externo implementado |
 | Falha antes do kernel e durante fetch, retorno Linux local após parar PXE | Cenários adicionados ao harness, execução pendente | Fallback usa fixture Linux live em disco RAW readonly; não comprova Windows instalado |
+| Parar HTTP/TFTP após boot preserva agente e Controller | Novo gate exige processo encerrado, portas liberadas e um novo INVENTORY assinado concluído em cada firmware | Execução real pendente; validações locais do harness passaram |
 | WinPE PXE/Windows sem scratch | P3/P4 pendentes | Fluxo USB legado preservado |
 | Secure Boot/hardware físico | Não homologados | Não generalizar VM a NICs/PCs reais |
 

@@ -18,7 +18,9 @@ CI41960628537 passou o fluxo BIOS completo: boot, login, CSR/mTLS/INVENTORY,
 duas falhas de rede e fallback Linux local, com hashes intactos. UEFI chegou ao
 menu, mas a saída serial de dois consoles duplicou caracteres e o leitor expirou.
 Foi mantido console EFI nativo e UART explícito só no BIOS; o gate completo será
-repetido no PR13 antes de publicar.
+repetido no PR13 antes de publicar. O gate final também exige novo INVENTORY
+assinado com o serviço HTTP/TFTP já encerrado após o boot, comprovando que
+Controller e agente carregado continuam operando sem distribuir arquivos de boot.
 
 WinPE PXE, Windows sem scratch, ProxyDHCP, Secure Boot e hardware físico ficam
 fora desta entrega. O portal tem PR55 em rascunho, com validação local e QA
