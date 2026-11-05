@@ -14,9 +14,11 @@ exportador10/10; diagnóstico/login serial8/8. A prova interativa QEMU confirmou
 usuário, sudo, saída real do comando e disco sintético readonly intacto.
 
 O CI anterior passou Windows/Linux, auditoria, pacote e smoke dos instaladores.
-O laboratório PXE alcançou Linux BIOS, mas falhou no login automatizado; essa
-execução foi reprovada e não liberou publicação. A correção do harness e os gates
-de queda de rede/fallback aguardam nova execução do PR13.
+CI41960628537 passou o fluxo BIOS completo: boot, login, CSR/mTLS/INVENTORY,
+duas falhas de rede e fallback Linux local, com hashes intactos. UEFI chegou ao
+menu, mas a saída serial de dois consoles duplicou caracteres e o leitor expirou.
+Foi mantido console EFI nativo e UART explícito só no BIOS; o gate completo será
+repetido no PR13 antes de publicar.
 
 WinPE PXE, Windows sem scratch, ProxyDHCP, Secure Boot e hardware físico ficam
 fora desta entrega. O portal tem PR55 em rascunho, com validação local e QA

@@ -9,8 +9,8 @@ Checkpoint 2026-11-05, implementação P0–P2 em validação. Não é aceite P3
 | UI salvar/validar/consentimento/start/stop | Desktop 45/45; renders sintéticos | Não é screenshot de firmware |
 | Export ISO → kernel/initrd/SquashFS | Exportador 10/10 e ISO beta.5.1 real extraída | Exportar não prova boot |
 | Login serial após senha | Prova interativa QEMU local com technician/live, identidade e sudo; regressões8/8 | Corrige o harness; não substitui os gates PXE completos |
-| PXE BIOS sem ISO/USB | CI41946920318 alcançou Linux ready, falhou no login automatizado | Gate reprovado; ainda não libera publicação |
-| PXE UEFI sem ISO/USB | Harness `rescue/pxe/test-netboot-vm.py` preparado | Execução real pendente após corrigir login |
+| PXE BIOS sem ISO/USB | CI41960628537 passou boot, login, CSR/mTLS/INVENTORY, duas falhas de rede e fallback Linux local; hashes intactos | Ainda aguarda o gate UEFI |
+| PXE UEFI sem ISO/USB | Mesmo CI alcançou menu, mas dois consoles duplicaram caracteres e o leitor expirou | Configuração iPXE corrigida para UART explícito só no BIOS; gate completo será repetido |
 | CSR/mTLS/INVENTORY por PXE | Incluído no harness com disco RAW readonly e hashes antes/depois | Não alegar aprovado até recibo |
 | API administrativa Network Boot via HTTPS real | Integração local11/11 | Token, consentimento, config inválida, traversal, auditoria e ausência de jobs; nenhum listener boot iniciado |
 | ProxyDHCP | Bloqueado | Somente DHCP externo implementado |

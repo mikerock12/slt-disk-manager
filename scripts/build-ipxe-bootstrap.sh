@@ -13,7 +13,10 @@ git -C "$work" checkout --detach FETCH_HEAD
 test "$(git -C "$work" rev-parse HEAD)" = "$revision"
 git -C "$work" archive --format=tar --prefix=ipxe/ HEAD | gzip -n > "$out/ipxe-source.tar.gz"
 mkdir -p "$work/src/config/local"
-printf '#define CONSOLE_SERIAL\n' > "$work/src/config/local/console.h"
+# OVMF already mirrors EFI ConOut to COM1. A second UART console duplicates
+# every character. BIOS needs the explicit UART driver; EFI retains its native
+# screen/keyboard console (and firmware-provided serial redirection).
+printf '#if defined ( PLATFORM_pcbios )\n#define CONSOLE_SERIAL\n#endif\n' > "$work/src/config/local/console.h"
 cat > "$out/slt-chain.ipxe" <<'IPXE'
 #!ipxe
 dhcp || exit
@@ -23,15 +26,17 @@ make -C "$work/src" -j2 bin/undionly.kpxe bin-x86_64-efi/ipxe.efi EMBED="$out/sl
 cp "$work/src/bin/undionly.kpxe" "$out/undionly.kpxe"
 cp "$work/src/bin-x86_64-efi/ipxe.efi" "$out/ipxe.efi"
 cp "$work/COPYING" "$out/COPYING"
-python3 - "$out" "$revision" <<'PY'
-import hashlib,json,sys
+python3 - "$out" "$revision" "$root/VERSION" <<'PY'
+import hashlib,json,re,sys
 from pathlib import Path
 p=Path(sys.argv[1]); revision=sys.argv[2]
+app_version=Path(sys.argv[3]).read_text().strip()
+profile_version=re.sub('[^a-z0-9]+','-',app_version.lower()).strip('-')
 artifacts=[]
 for id,name in [('bios','undionly.kpxe'),('uefi','ipxe.efi')]:
     f=p/name
     artifacts.append(dict(id=id,relativePath=name,sizeBytes=f.stat().st_size,sha256=hashlib.sha256(f.read_bytes()).hexdigest(),source='https://github.com/ipxe/ipxe/commit/'+revision))
-manifest=dict(schemaVersion=1,id='ipxe-'+revision[:12],displayName='iPXE SLT chainload BIOS/UEFI',kind='IPXE_BOOTSTRAP',architecture='X64',firmwareSupport=['BIOS','UEFI'],secureBootStatus='UNSUPPORTED',validationStatus='NETWORK_BOOT_DEV',version=revision,artifacts=artifacts)
+manifest=dict(schemaVersion=1,id='ipxe-'+profile_version+'-'+revision[:12],displayName='iPXE SLT chainload BIOS/UEFI '+app_version,kind='IPXE_BOOTSTRAP',architecture='X64',firmwareSupport=['BIOS','UEFI'],secureBootStatus='UNSUPPORTED',validationStatus='NETWORK_BOOT_DEV',version=revision,artifacts=artifacts)
 (p/'netboot-manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
-(p/'SLT-BUILD.txt').write_text('iPXE https://ipxe.org\nPinned upstream '+revision+'\nLocal build: config/local/console.h contains #define CONSOLE_SERIAL\nEMBED=slt-chain.ipxe (included); make bin/undionly.kpxe bin-x86_64-efi/ipxe.efi\nNo Secure Boot signature/homologation. Source tar and license included.\n')
+(p/'SLT-BUILD.txt').write_text('iPXE https://ipxe.org\nPinned upstream '+revision+'\nSLT package '+app_version+'\nLocal build: config/local/console.h enables CONSOLE_SERIAL only for PLATFORM_pcbios; native EFI console retained.\nEMBED=slt-chain.ipxe (included); make bin/undionly.kpxe bin-x86_64-efi/ipxe.efi\nNo Secure Boot signature/homologation. Source tar and license included.\n')
 PY
