@@ -1,5 +1,10 @@
 # Mídia SLT Rescue
 
+O exportador de artefatos para boot pela rede está em
+[`pxe/README.md`](pxe/README.md). Ele usa a mesma ISO e preserva o fluxo USB.
+Exportar o perfil não comprova PXE: o aceite depende de boot BIOS/UEFI em
+laboratório e pareamento/inventário no Controller, registrados separadamente.
+
 Para instalação Windows pela mídia oficial do operador, consulte
 [`windows-pe/README.md`](windows-pe/README.md). O agente Go WinPE é separado do
 Rescue Linux e exige novo pareamento, plano assinado e confirmação local.

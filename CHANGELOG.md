@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.1.0-beta.6 — 2026-11-04 — Network Boot de laboratório
+
+- Novo processo isolado opt-in com TFTP bootstrap read-only, HTTP por ID/CIDR,
+  catálogo de boot separado com SHA256 e painel administrativo WPF local.
+- DHCP externo sem leases ou alteração do roteador; loaders iPXE BIOS/UEFI
+  versionados e export kernel/initrd/SquashFS a partir do build Rescue.
+- Módulo desligado após instalar/reiniciar; ativação exige Ethernet/CIDR,
+  pré-verificação e ação explícita. Firewall opcional por script com UAC.
+- Testes sintéticos de segurança/lifecycle e laboratório QEMU em namespace
+  isolada. Evidências/pendências em NETWORK-BOOT-HOMOLOGACAO.md; não atribuir
+  suporte a hardware, Secure Boot, ProxyDHCP ou WinPE PXE.
+- Fluxos USB/ISO, arquivos, clone, implantação e autorizações preservados.
+
 ## 0.1.0-beta.5.1 — 2026-10-29 — instaladores separados e IP fixo
 
 - **Dois instaladores:** `SLT-Disk-Manager-Servidor-Setup` para o computador da bancada

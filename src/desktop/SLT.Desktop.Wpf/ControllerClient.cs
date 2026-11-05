@@ -34,6 +34,7 @@ public sealed class ControllerClient : IDisposable
     }
     public Task<T> GetAsync<T>(string path, CancellationToken ct = default) => SendAsync<T>(HttpMethod.Get, path, null, ct);
     public Task<T> PostAsync<T>(string path, object data, CancellationToken ct = default) => SendAsync<T>(HttpMethod.Post, path, data, ct);
+    public Task<T> PutAsync<T>(string path, object data, CancellationToken ct = default) => SendAsync<T>(HttpMethod.Put, path, data, ct);
     private async Task<T> SendAsync<T>(HttpMethod method, string path, object? data, CancellationToken ct)
     {
         using var request = new HttpRequestMessage(method, path);

@@ -28,7 +28,7 @@ function Uninstall-Fixture([string]$Target,[string]$Name,[string]$StateDir,[stri
 }
 
 $client=Install-Fixture $ClientInstaller 'cliente'
-foreach($absent in @('server','desktop','windows-pe','rescue')){if(Test-Path -LiteralPath (Join-Path $client $absent)){throw "Instalador do cliente trouxe $absent."}}
+foreach($absent in @('server','desktop','windows-pe','rescue','network-boot')){if(Test-Path -LiteralPath (Join-Path $client $absent)){throw "Instalador do cliente trouxe $absent."}}
 & (Join-Path $client 'client/SLT.WindowsAgent.exe') --help
 if($LASTEXITCODE -ne 0){throw 'Cliente instalado não iniciou.'}
 $smartctl=Join-Path $client 'client/tools/smartmontools/smartctl.exe'
@@ -38,7 +38,7 @@ if($LASTEXITCODE -ne 0 -or -not ($version -match 'smartctl 7\.5')){throw 'smartc
 
 $server=Install-Fixture $ServerInstaller 'servidor'
 if(Test-Path -LiteralPath (Join-Path $server 'client')){throw 'Instalador do servidor trouxe o cliente.'}
-foreach($present in @('server/SLT.Controller.Host.exe','desktop/SLT.Desktop.exe','server/tools/7-Zip/7z.exe','server/tools/7-Zip/License.txt','windows-pe/slt-winpe-agent.exe','windows-pe/New-WinPEKit.ps1','install-server/Install-Server.ps1')){
+foreach($present in @('server/SLT.Controller.Host.exe','network-boot/SLT.NetworkBoot.Service.exe','desktop/SLT.Desktop.exe','server/tools/7-Zip/7z.exe','server/tools/7-Zip/License.txt','windows-pe/slt-winpe-agent.exe','windows-pe/New-WinPEKit.ps1','install-server/Install-Server.ps1','install-server/Configure-NetworkBootFirewall.ps1')){
  if(!(Test-Path -LiteralPath (Join-Path $server $present))){throw "Servidor instalado sem $present."}
 }
 & (Join-Path $server 'server/tools/7-Zip/7z.exe') i | Out-Null

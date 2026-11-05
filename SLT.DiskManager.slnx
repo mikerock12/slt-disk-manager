@@ -1,5 +1,9 @@
 <Solution>
   <Folder Name="/src/" />
+  <Folder Name="/src/network-boot/">
+    <Project Path="src/network-boot/SLT.NetworkBoot.Core/SLT.NetworkBoot.Core.csproj" />
+    <Project Path="src/network-boot/SLT.NetworkBoot.Service/SLT.NetworkBoot.Service.csproj" />
+  </Folder>
   <Folder Name="/src/desktop/">
     <Project Path="src/desktop/SLT.Desktop.Wpf/SLT.Desktop.Wpf.csproj" />
   </Folder>
@@ -10,6 +14,7 @@
     <Project Path="src/windows-agent/SLT.WindowsAgent/SLT.WindowsAgent.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="src/network-boot/tests/SLT.NetworkBoot.Tests/SLT.NetworkBoot.Tests.csproj" />
     <Project Path="tests/SLT.Controller.Tests/SLT.Controller.Tests.csproj" />
     <Project Path="tests/SLT.WindowsAgent.Tests/SLT.WindowsAgent.Tests.csproj" />
   </Folder>

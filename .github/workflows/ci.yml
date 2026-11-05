@@ -1,7 +1,7 @@
 name: Build, safety and integration
 on:
   push:
-    branches: [main, 'feat/**', 'fix/**']
+    branches: [main, 'feat/**', 'fix/**', 'codex/**']
   pull_request:
   workflow_dispatch:
 permissions:
@@ -12,7 +12,12 @@ concurrency:
 jobs:
   windows:
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      package: ${{ steps.package-plan.outputs.build }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@v6
@@ -35,7 +40,48 @@ jobs:
           $env:NUGET_PACKAGES=Join-Path $PWD '.tools/nuget'
           dotnet restore SLT.DiskManager.slnx -p:NuGetAudit=true
           if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
+      - name: Select new-version package validation
+        id: package-plan
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $build='true'
+          if($env:GITHUB_EVENT_NAME -eq 'push' -and $env:GITHUB_REF -ne 'refs/heads/main'){$build='false'}
+          $version=(Get-Content VERSION -Raw).Trim()
+          $target=gh release view "v$version" --json targetCommitish --jq .targetCommitish 2>$null
+          if($LASTEXITCODE -eq 0 -and $target.Trim() -ne $env:GITHUB_SHA){$build='false'}
+          "build=$build" >> $env:GITHUB_OUTPUT
+          exit 0
+      - name: Require exact-snapshot PXE gate and its approved profile catalog
+        if: steps.package-plan.outputs.build == 'true'
+        id: netboot
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SLT_CI_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          for($attempt=0;$attempt -lt 270;$attempt++){
+            $run=gh api "repos/$env:GITHUB_REPOSITORY/actions/workflows/rescue-iso.yml/runs?head_sha=$env:SLT_CI_HEAD_SHA" --jq '.workflow_runs[0].id // empty'
+            if($LASTEXITCODE -ne 0){throw 'Consulta do laboratório PXE falhou.'}
+            if($run){
+              $result=gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$run/jobs" --jq '.jobs[] | select(.name=="build-and-boot") | .conclusion // empty'
+              if($LASTEXITCODE -ne 0){throw 'Consulta dos jobs PXE falhou.'}
+              if($result -eq 'success'){"run-id=$run" >> $env:GITHUB_OUTPUT; exit 0}
+              if($result){throw "Laboratório PXE reprovado: $result"}
+            }
+            Start-Sleep -Seconds 20
+          }
+          throw 'Laboratório PXE não concluiu; não empacotar.'
+      - uses: actions/download-artifact@v7
+        if: steps.package-plan.outputs.build == 'true'
+        with:
+          name: slt-netboot-profiles
+          github-token: ${{ github.token }}
+          run-id: ${{ steps.netboot.outputs.run-id }}
+          path: artifacts/trusted-netboot
       - name: Build portable package
+        if: steps.package-plan.outputs.build == 'true'
         shell: pwsh
         run: |
           $version=(Get-Content VERSION -Raw).Trim()
@@ -46,6 +92,7 @@ jobs:
           ./tests/integration/installer-smoke.ps1 -ServerInstaller "artifacts/SLT-Disk-Manager-Servidor-Setup-$version.exe" -ClientInstaller "artifacts/SLT-Disk-Manager-Cliente-Setup-$version.exe"
           Get-ChildItem artifacts -File | Where-Object {$_.Name -like "SLT-Disk-Manager-*$version*.exe" -or $_.Name -like "SLT-Disk-Manager-*$version*.zip"} | Get-FileHash -Algorithm SHA256 | ForEach-Object { '{0}  {1}' -f $_.Hash.ToLowerInvariant(),(Split-Path $_.Path -Leaf) } | Set-Content artifacts/SHA256SUMS.txt -Encoding ascii
       - uses: actions/upload-artifact@v7
+        if: steps.package-plan.outputs.build == 'true'
         with:
           name: slt-disk-manager-win-x64
           path: |
@@ -74,17 +121,38 @@ jobs:
           sudo env PATH="$PATH" bash rescue/scripts/test-adaptive-linux.sh
       - run: for script in rescue/scripts/*.sh; do bash -n "$script"; done
   release:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.windows.outputs.package == 'true'
     needs: [windows, rescue-linux]
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     permissions:
       contents: write
+      actions: read
     steps:
       - uses: actions/checkout@v7
       - uses: actions/download-artifact@v7
         with:
           name: slt-disk-manager-win-x64
           path: release
+      - name: Require actual ISO and PXE laboratory gate before publishing binaries
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(tr -d '\r\n' < VERSION)
+          if gh release view "v$version" --json targetCommitish >/dev/null 2>&1; then
+            target=$(gh release view "v$version" --json targetCommitish --jq .targetCommitish)
+            test "$target" = "$GITHUB_SHA" || { echo 'Existing release preserved; no new VERSION.'; exit 0; }
+          fi
+          for attempt in $(seq 1 180); do
+            run=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/rescue-iso.yml/runs?head_sha=$GITHUB_SHA&event=push" --jq '.workflow_runs[0].id // empty')
+            if test -n "$run"; then
+              result=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/jobs" --jq '.jobs[] | select(.name=="build-and-boot") | .conclusion // empty')
+              if test "$result" = success; then exit 0; fi
+              if test -n "$result"; then echo "PXE lab gate failed: $result"; exit 1; fi
+            fi
+            sleep 20
+          done
+          echo 'Timed out waiting for the ISO/PXE gate; no binaries published.'; exit 1
       - name: Publish verified beta installers and portable package
         env:
           GH_TOKEN: ${{ github.token }}
@@ -96,5 +164,5 @@ jobs:
             test "$target" = "$GITHUB_SHA" || { echo 'Existing release preserved. Bump VERSION to publish a new build.'; exit 0; }
             gh release upload "$tag" release/* --clobber
           else
-            gh release create "$tag" release/* --target "$GITHUB_SHA" --prerelease --title "SLT Disk Manager $version" --notes 'Beta de laboratório com instaladores separados para o servidor da bancada e para o cliente Windows, ambos com dependências embutidas; clone em lotes entre clientes (inclusive para disco menor), arquivos com escopos, instalação Windows (WinPE) e Xubuntu/Ubuntu (Rescue) e conversão MBR→GPT/UEFI. Gravação apaga o destino e exige confirmação no painel e no cliente. Hardware físico ainda não homologado. Guia: https://github.com/mikerock12/slt-disk-manager/blob/main/docs/WORKFLOWS.md'
+            gh release create "$tag" release/* --target "$GITHUB_SHA" --prerelease --title "SLT Disk Manager $version" --notes 'Beta de laboratório: novo Boot pela rede opcional para SLT Rescue Linux, validado em VMs BIOS/UEFI com pareamento mTLS, inventário e falhas de rede. Requer Ethernet, DHCP externo configurado e o pacote SLT-Netboot desta release; inicia desligado e não altera o roteador. Sem ProxyDHCP, WinPE PXE, Windows sem scratch, Secure Boot ou hardware físico homologados nesta fase. Instaladores separados Servidor/Cliente com dependências embutidas; preserva clone em lotes, arquivos com escopos, instalação por Rescue/WinPE USB e conversão MBR→GPT/UEFI. Gravação exige plano e confirmações no painel e no cliente. Guia: https://github.com/mikerock12/slt-disk-manager/blob/main/docs/NETWORK-BOOT-OPERACAO.md'
           fi

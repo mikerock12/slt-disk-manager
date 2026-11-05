@@ -69,6 +69,9 @@ builder.WebHost.ConfigureKestrel(options =>
     Listen(IPAddress.Loopback); if (!IPAddress.IsLoopback(bind)) Listen(bind);
 });
 var app = builder.Build();
+var bootExecutable = builder.Configuration["network-boot-executable"] ?? Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../network-boot/SLT.NetworkBoot.Service" + (OperatingSystem.IsWindows() ? ".exe" : "")));
+var networkBoot = new NetworkBootManagement(directory, bootExecutable, (action, details) => { lock (controller.Gate) store.Log("local-admin", action, details); });
+app.Lifetime.ApplicationStopping.Register(() => networkBoot.DisposeAsync().AsTask().GetAwaiter().GetResult());
 app.Use(async (ctx, next) =>
 {
     try
@@ -141,6 +144,7 @@ app.MapGet("/agent/v1/jobs/{id}/stream", (string id, HttpContext ctx) => Locked(
 app.MapPost("/agent/v1/jobs/{id}/stream-ack", (string id, StreamAck r, HttpContext ctx) => Locked(() => controller.StreamAcknowledge(DeviceId(ctx), id, r)));
 app.MapGet("/api/v1/audit", () => Locked(() => store.Audit()));
 FileEndpoints.Map(app,controller);
+NetworkBootEndpoints.Map(app, networkBoot);
 app.MapGet("/api/v1/dashboard", () => Locked(() => new
 {
     devices = store.All<Device>("device").Count,
