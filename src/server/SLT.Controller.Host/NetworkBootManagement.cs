@@ -12,6 +12,7 @@ public sealed class NetworkBootManagement : IAsyncDisposable
     private readonly Action<string, string> audit;
     private readonly SemaphoreSlim gate = new(1);
     private readonly Queue<BootEvent> events = new();
+    private Task? eventReader;
     private NetworkBootConfig config = new();
     private Process? process;
     private string state = "STOPPED";
@@ -37,13 +38,15 @@ public sealed class NetworkBootManagement : IAsyncDisposable
     private string ConfigPath => Path.Combine(root, "config.json");
     private void Record(string action, string message)
     {
-        events.Enqueue(new(DateTimeOffset.UtcNow, action, message)); while (events.Count > 200) events.Dequeue(); audit("NETWORK_BOOT_" + action, message);
+        AddEvent(new(DateTimeOffset.UtcNow, action, message)); audit("NETWORK_BOOT_" + action, message);
     }
+    private void AddEvent(BootEvent item) { lock (events) { events.Enqueue(item); while (events.Count > 200) events.Dequeue(); } }
+    private BootEvent[] Events() { lock (events) return events.ToArray(); }
     private void CheckProcess()
     {
         if (process != null && process.HasExited && state == "RUNNING") { state = "FAILED"; lastError = "Processo de boot encerrou; nenhum reinício automático."; Record("FAILED", lastError); }
     }
-    private BootStatus Snapshot() { CheckProcess(); return new(state, config, started, lastError, profiles.ToArray(), events.ToArray()); }
+    private BootStatus Snapshot() { CheckProcess(); return new(state, config, started, lastError, profiles.ToArray(), Events()); }
     public async Task<BootStatus> Status()
     {
         await gate.WaitAsync(); try { return Snapshot(); } finally { gate.Release(); }
@@ -125,6 +128,20 @@ public sealed class NetworkBootManagement : IAsyncDisposable
                 using var json = System.Text.Json.JsonDocument.Parse(reply ?? "{}");
                 if (!json.RootElement.TryGetProperty("state", out var response) || response.GetString() != "RUNNING") throw new IOException(json.RootElement.TryGetProperty("error", out var error) ? error.GetString() : "Processo não confirmou os listeners.");
                 state = "RUNNING"; started = DateTimeOffset.UtcNow; Record("STARTED", $"{config.BindIPv4}:69/{config.HttpPort}; rede isolada confirmada localmente.");
+                var reader = process.StandardOutput;
+                eventReader = Task.Run(async () =>
+                {
+                    try
+                    {
+                        while (await reader.ReadLineAsync() is { } item)
+                        {
+                            if (item.Length > 2048) continue;
+                            var value = BootJson.Parse<BootEvent>(item);
+                            if (value.Event is "TFTP" or "HTTP" or "HTTP_BEGIN" && value.Message.Length <= 1024) AddEvent(value);
+                        }
+                    }
+                    catch (Exception e) when (e is IOException or ObjectDisposedException or System.Text.Json.JsonException or InvalidDataException) { }
+                });
             }
             catch (Exception e)
             {
@@ -144,6 +161,7 @@ public sealed class NetworkBootManagement : IAsyncDisposable
                 process.StandardInput.Close(); using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(8));
                 try { await process.WaitForExitAsync(deadline.Token); } catch (OperationCanceledException) { process.Kill(true); await process.WaitForExitAsync(); }
             }
+            if (eventReader != null) { await eventReader; eventReader = null; }
             process?.Dispose(); process = null; state = "STOPPED"; started = null; Record("STOPPED", "Listeners encerrados; jobs do Controller preservados."); return Snapshot();
         }
         finally { gate.Release(); }

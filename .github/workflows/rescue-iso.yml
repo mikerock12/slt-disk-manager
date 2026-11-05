@@ -72,7 +72,7 @@ jobs:
       - name: Actual PXE BIOS and UEFI in isolated network namespace (no ISO/USB)
         timeout-minutes: 30
         run: |
-          sudo env PATH="$PATH" python3 rescue/pxe/test-netboot-vm.py --service-dll src/network-boot/SLT.NetworkBoot.Service/bin/Release/net10.0/SLT.NetworkBoot.Service.dll --rescue-profile artifacts/rescue-netboot --bootstrap-profile artifacts/ipxe-bootstrap --controller-dll src/server/SLT.Controller.Host/bin/Release/net10.0/SLT.Controller.Host.dll --output artifacts/pxe-lab
+          sudo env PATH="$PATH" python3 rescue/pxe/test-netboot-vm.py --service-dll src/network-boot/SLT.NetworkBoot.Service/bin/Release/net10.0/SLT.NetworkBoot.Service.dll --rescue-profile artifacts/rescue-netboot --bootstrap-profile artifacts/ipxe-bootstrap --controller-dll src/server/SLT.Controller.Host/bin/Release/net10.0/SLT.Controller.Host.dll --local-system-image artifacts/rescue-iso/live-image-amd64.hybrid.iso --output artifacts/pxe-lab
           sudo chown -R "$(id -u):$(id -g)" artifacts/pxe-lab
       - name: Boot actual ISO in BIOS and UEFI (no disks, no network)
         timeout-minutes: 14
@@ -95,14 +95,26 @@ jobs:
             artifacts/ipxe-bootstrap/
           compression-level: 0
           retention-days: 14
-      - name: Attach tested Rescue ISO to matching release
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+  publish-assets:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [build-and-boot]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v7
+        with:
+          name: slt-rescue-iso-and-boot-evidence
+          path: artifacts
+      - name: Attach tested Rescue ISO and netboot to matching release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           version=$(tr -d '\r\n' < VERSION)
           tag="v$version"
-          for attempt in $(seq 1 30); do
+          for attempt in $(seq 1 90); do
             if gh release view "$tag" --json targetCommitish >/dev/null 2>&1; then break; fi
             sleep 10
           done

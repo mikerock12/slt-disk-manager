@@ -34,9 +34,15 @@ try
     File.AppendAllText(Path.Combine(source, "kernel"), "tampered");
     Reject(() => BootArtifactStore.Import(source, Path.Combine(root, "tamper-store")), "corrupt import fails before publication");
     Check(!Directory.Exists(Path.Combine(root, "tamper-store", profile.Id)), "failed import is not published");
+    if (!OperatingSystem.IsWindows())
+    {
+        Directory.CreateSymbolicLink(Path.Combine(source, "linked"), store);
+        Reject(() => BootArtifactStore.SafeFile(source, "linked/rescue-test/rootfs"), "symlink parent rejected on Linux");
+    }
+    Reject(() => BootArtifactStore.Validate(profile with { Artifacts = [null!, profile.Artifacts[1], profile.Artifacts[2]] }), "null artifact metadata rejected");
     var menu = BootScriptRenderer.Menu(c, [imported]);
     Check(menu.Contains("--default exit") && !menu.Contains("${shell}") && !menu.Contains("install.wim"), "generated menu no imported commands and safe default");
-    Check(menu.Contains("initrd=initrd.img") && menu.Contains("fetch=http://10.77.0.1:8088/boot/v1/assets/rescue-test-rootfs"), "live-boot network-only renderer");
+    Check(menu.Contains("initrd=initrd.img") && menu.Contains("fetch=http://10.77.0.1:8088/boot/v1/assets/rescue-test-rootfs.squashfs"), "live-boot network-only renderer with mandatory decoder extension");
     Check(!BootScriptRenderer.Autoexec(c).Contains("undionly") && BootScriptRenderer.Autoexec(c).Contains("menu.ipxe"), "autoexec second stage avoids chainload loop");
     foreach (var packet in new byte[][] { [0, 2, 1, 0], [0, 1, 65, 0], [0, 1, 255, 0] }) Reject(() => TftpBootstrapServer.Parse(packet), "invalid TFTP RRQ refuses");
     byte[] Rrq(string name, string suffix = "") => [0, 1, .. Encoding.ASCII.GetBytes(name + "\0octet\0" + suffix)];
@@ -70,10 +76,14 @@ try
         await using var http = await BootHttpServer.Start(launch);
         using var client = new HttpClient(new HttpClientHandler { UseProxy = false }) { BaseAddress = new Uri($"http://127.0.0.1:{port}") };
         Check((await client.GetStringAsync("/boot/v1/health")).Contains("running"), "HTTP lifecycle " + cycle);
+        Check((await client.GetStringAsync("/boot/v1/menu.ipxe")).Contains("--default exit"), "actual HTTP menu safe timeout " + cycle);
+        Check((await client.GetByteArrayAsync("/boot/v1/assets/rescue-test-rootfs.squashfs")).SequenceEqual(bytes), "exact rootfs decoder alias " + cycle);
         var tasks = Enumerable.Range(0, 8).Select(_ => client.GetByteArrayAsync("/boot/v1/assets/rescue-test-rootfs"));
         Check((await Task.WhenAll(tasks)).All(a => a.SequenceEqual(bytes)), "concurrent positional streaming exact " + cycle);
         using var range = new HttpRequestMessage(HttpMethod.Get, "/boot/v1/assets/rescue-test-rootfs"); range.Headers.Range = new RangeHeaderValue(123, 200);
         using var response = await client.SendAsync(range); Check(response.StatusCode == HttpStatusCode.PartialContent && (await response.Content.ReadAsByteArrayAsync()).SequenceEqual(bytes[123..201]), "HTTP bounded range " + cycle);
+        using var head = await client.SendAsync(new HttpRequestMessage(HttpMethod.Head, "/boot/v1/assets/rescue-test-rootfs.squashfs"));
+        Check(head.Content.Headers.ContentLength == bytes.Length && (await head.Content.ReadAsByteArrayAsync()).Length == 0, "HEAD no payload " + cycle);
         foreach (var path in new[] { "/api/v1/devices", "/agent/v1/jobs", "/boot/v1/assets/admin.token", "/boot/v1/assets/%2e%2e%2fadmin.token" }) Check((await client.GetAsync(path)).StatusCode == HttpStatusCode.NotFound, "public listener denies " + path);
     }
     await using (var management = new NetworkBootManagement(Path.Combine(root, "state"), Path.Combine(root, "absent.exe"), (_, _) => { }))

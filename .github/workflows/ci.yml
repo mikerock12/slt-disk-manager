@@ -77,14 +77,35 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: [windows, rescue-linux]
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     permissions:
       contents: write
+      actions: read
     steps:
       - uses: actions/checkout@v7
       - uses: actions/download-artifact@v7
         with:
           name: slt-disk-manager-win-x64
           path: release
+      - name: Require actual ISO and PXE laboratory gate before publishing binaries
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(tr -d '\r\n' < VERSION)
+          if gh release view "v$version" --json targetCommitish >/dev/null 2>&1; then
+            target=$(gh release view "v$version" --json targetCommitish --jq .targetCommitish)
+            test "$target" = "$GITHUB_SHA" || { echo 'Existing release preserved; no new VERSION.'; exit 0; }
+          fi
+          for attempt in $(seq 1 180); do
+            run=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/rescue-iso.yml/runs?head_sha=$GITHUB_SHA&event=push" --jq '.workflow_runs[0].id // empty')
+            if test -n "$run"; then
+              result=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/jobs" --jq '.jobs[] | select(.name=="build-and-boot") | .conclusion // empty')
+              if test "$result" = success; then exit 0; fi
+              if test -n "$result"; then echo "PXE lab gate failed: $result"; exit 1; fi
+            fi
+            sleep 20
+          done
+          echo 'Timed out waiting for the ISO/PXE gate; no binaries published.'; exit 1
       - name: Publish verified beta installers and portable package
         env:
           GH_TOKEN: ${{ github.token }}

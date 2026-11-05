@@ -15,7 +15,7 @@ public static class BootScriptRenderer
         lines.AddRange(["choose --timeout 15000 --default exit selected || goto exit", "goto ${selected}"]);
         foreach (var profile in p)
         {
-            lines.AddRange([$":{profile.Id}", "imgfree", $"kernel --name vmlinuz {url}{profile.Id}-kernel boot=live components nopersistence noeject fetch={url}{profile.Id}-rootfs hostname=slt-rescue username=technician initrd=initrd.img console=tty0 console=ttyS0,115200n8 || goto failed", $"initrd --name initrd.img {url}{profile.Id}-initrd || goto failed", "boot || goto failed"]);
+            lines.AddRange([$":{profile.Id}", "imgfree", $"kernel --name vmlinuz {url}{profile.Id}-kernel boot=live components nopersistence noeject fetch={url}{profile.Id}-rootfs.squashfs hostname=slt-rescue username=technician initrd=initrd.img console=tty0 console=ttyS0,115200n8 || goto failed", $"initrd --name initrd.img {url}{profile.Id}-initrd || goto failed", "boot || goto failed"]);
         }
         lines.AddRange([":failed", "echo Falha de boot. Verifique rede/servidor; nenhum disco foi modificado.", "sleep 5", ":exit", "exit"]);
         return string.Join('\n', lines) + "\n";

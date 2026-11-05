@@ -1,5 +1,13 @@
 # Licenças e redistribuição
 
+iPXE no pacote netboot: fonte oficial fixada no commit
+`efd0b257a924f7c83cfcf27dfbf3e3ee7df7adac` de
+https://github.com/ipxe/ipxe. O build inclui `COPYING`, tar da fonte exata,
+script EMBED e instrução da alteração CONSOLE_SERIAL. Não aplica a licença do
+SLT a esses binários; termos GPL e demais permissões estão no COPYING upstream.
+Os loaders não têm cadeia Secure Boot homologada. Não há código/payload Microsoft
+no pacote netboot desta fase.
+
 O proprietário ainda não escolheu licença comercial/open-source. O repositório
 público publica o código com direitos reservados; não atribuir MIT/GPL ao código
 do projeto sem decisão explícita do proprietário.

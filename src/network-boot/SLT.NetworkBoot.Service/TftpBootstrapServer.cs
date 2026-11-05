@@ -16,12 +16,13 @@ public sealed class TftpBootstrapServer : IAsyncDisposable
     private readonly SemaphoreSlim slots;
     private readonly CancellationTokenSource stop = new();
     private readonly List<Task> transfers = [];
+    private readonly Action<BootEvent>? report;
     private Task? loop;
     private int requests;
     private long window = Environment.TickCount64;
-    public TftpBootstrapServer(IPAddress bind, IPNetwork network, IReadOnlyDictionary<string, byte[]> files, int concurrent, int port = 69)
+    public TftpBootstrapServer(IPAddress bind, IPNetwork network, IReadOnlyDictionary<string, byte[]> files, int concurrent, int port = 69, Action<BootEvent>? report = null)
     {
-        this.bind = bind; this.network = network; this.files = files; slots = new(concurrent);
+        this.bind = bind; this.network = network; this.files = files; slots = new(concurrent); this.report = report;
         listener = new UdpClient(new IPEndPoint(bind, port));
     }
     public int Port => ((IPEndPoint)listener.Client.LocalEndPoint!).Port;
@@ -98,6 +99,7 @@ public sealed class TftpBootstrapServer : IAsyncDisposable
                 if (!await SendAck(packet, (ushort)(sequence - 1))) return;
                 offset += count; if (count < parsed.block) break;
             } while (!timeout.IsCancellationRequested);
+            report?.Invoke(new(DateTimeOffset.UtcNow, "TFTP", $"{r.RemoteEndPoint.Address} {parsed.name}: {data.Length} bytes confirmados."));
         }
         catch (Exception e) when (e is OperationCanceledException or SocketException or ObjectDisposedException) { }
         finally { slots.Release(); }

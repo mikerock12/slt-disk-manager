@@ -39,7 +39,13 @@ public static class NetworkTopologyValidator
             for (int i = 0; i < 4; i++) last[i] |= (byte)(network.PrefixLength >= (i + 1) * 8 ? 0 : network.PrefixLength <= i * 8 ? 255 : 255 >> network.PrefixLength % 8);
             if (!(BootJson.Private(new IPAddress(last)) || laboratory && IPAddress.IsLoopback(new IPAddress(last)))) errors.Add("Todo o CIDR deve permanecer em RFC1918.");
         }
-        if (ip != null && !laboratory && !Interfaces().Any(n => n.Id == c.InterfaceId && n.Ipv4 == c.BindIPv4 && n.Eligible)) errors.Add("Interface/IP não é uma Ethernet física elegível e ativa.");
+        if (ip != null && !laboratory)
+        {
+            var selected = Interfaces().SingleOrDefault(n => n.Id == c.InterfaceId && n.Ipv4 == c.BindIPv4 && n.Eligible);
+            if (selected == null) errors.Add("Interface/IP não é uma Ethernet física elegível e ativa.");
+            else if (IPNetwork.TryParse(c.AllowedCidr, out var requested) && IPNetwork.Parse(selected.Cidr) is var actual &&
+                     (requested.PrefixLength < actual.PrefixLength || !actual.Contains(requested.BaseAddress))) errors.Add("CIDR autorizado deve ficar dentro da sub-rede da Ethernet selecionada.");
+        }
         return new(errors.Count == 0, errors.ToArray(), ["DHCP externo deve fornecer IP, next-server e bootfile por arquitetura; SLT não altera o roteador.", "Secure Boot e hardware físico não homologados. HTTP/TFTP pré-boot exigem rede de bancada isolada."]);
     }
 }

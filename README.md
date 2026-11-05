@@ -1,5 +1,12 @@
 # SLT Disk Manager
 
+Network Boot (beta.6): módulo separado e desligado por padrão, com painel, DHCP
+externo, TFTP read-only e menu iPXE para SLT Rescue x64. Use uma rede de bancada
+isolada e os perfis do pacote netboot da mesma release. Evidências e limitações
+por BIOS/UEFI em [homologação](docs/NETWORK-BOOT-HOMOLOGACAO.md); configuração e
+reversão em [operação](docs/NETWORK-BOOT-OPERACAO.md). ProxyDHCP, Secure Boot,
+WinPE PXE e instalação Windows sem scratch permanecem fora desta entrega.
+
 Cliente e servidor para bancada de manutenção na LAN, com painel WPF em português,
 agente Windows e agente Rescue Linux. Marca: **Smells Like Tech Informática**.
 

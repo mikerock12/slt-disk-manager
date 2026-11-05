@@ -67,6 +67,7 @@ sudo env PATH="$PATH" python3 rescue/pxe/test-netboot-vm.py \
   --controller-dll src/server/SLT.Controller.Host/bin/Release/net10.0/SLT.Controller.Host.dll \
   --rescue-profile artifacts/rescue-netboot \
   --bootstrap-profile artifacts/ipxe-bootstrap \
+  --local-system-image artifacts/rescue-iso/live-image-amd64.hybrid.iso \
   --output artifacts/pxe-lab
 ```
 
@@ -86,3 +87,30 @@ recibo distingue boot somente de aceite MVP. Logs, telas e hashes são evidênci
 na saída; chaves e token do Controller ficam em pasta temporária separada e nunca
 são copiados para a saída pública. Execute o harness para produzir evidências;
 sua presença no código não equivale a teste aprovado.
+
+Para cada firmware, o harness também inicia uma VM nova, carrega somente o menu,
+interrompe o serviço SLT e verifica liberação de HTTP/TFTP. Selecionar Rescue deve
+produzir erro explícito de boot, sem alcançar o marcador de userspace e mantendo
+o hash do disco de dados. Isso cobre perda do servidor **antes** de kernel e
+filesystem.
+
+Outro cenário limita a NIC virtual a 16 Mbit/s por `tc` na namespace isolada e
+interrompe o serviço durante o download do SquashFS. O teste espera o evento
+`HTTP_BEGIN` do rootfs no log de uma instância nova do serviço e mede mais de
+64 KiB de tráfego nessa transferência antes da parada. O limite de banda impede
+que o rootfs completo seja entregue nesse intervalo. O aceite exige erro de
+download/initramfs, ausência de userspace Rescue e hash do disco de dados intacto;
+o recibo registra os bytes de rede observados, incluindo framing TCP, e não os
+confunde com bytes úteis exatos de SquashFS. O shaping é removido ao fim dessa
+VM. Esse cenário não cobre perda da rede durante operações destrutivas.
+
+Com `--local-system-image`, o SHA da ISO híbrida deve coincidir com a origem do
+perfil exportado. O harness copia seus bytes para um arquivo temporário `.raw`,
+conectado exclusivamente como disco virtio somente leitura. Após parar o boot
+SLT, mantém NIC e DHCP externo e configura ordem rede → disco. O aceite exige
+Linux real iniciado, login local, ausência de `fetch=` no cmdline e origem do
+Live em `/dev/vdb` ou partição desse disco, além dos hashes intactos. Isso comprova
+retorno a uma **fixture Linux local baseada no Rescue híbrido**; não comprova
+retorno a Windows instalado, a um SO persistente de cliente, nem hardware real.
+Não há CD-ROM ou USB nessa VM. O recibo registra separadamente os gates de
+boot/inventário, falha anterior ao filesystem e fallback Linux local.

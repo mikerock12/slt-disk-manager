@@ -4,14 +4,14 @@ Checkpoint 2026-11-04, implementação P0–P2 em validação. Não é aceite P3
 
 | Componente/cenário | Evidência atual | Limite |
 |---|---|---|
-| Rede RFC1918/CIDR/NIC, import/hash/paths/menu | Suíte Network Boot 72/72 local | Arquivos sintéticos e sockets loopback |
+| Rede RFC1918/CIDR/NIC, import/hash/paths/menu | Suíte Network Boot 82/82 local | Arquivos sintéticos e sockets loopback |
 | HTTP concorrente/range, TFTP UDP, WRQ/traversal, colisão e start/stop | Mesma suíte | Sem DHCP na LAN do host |
 | UI salvar/validar/consentimento/start/stop | Desktop 45/45; renders sintéticos | Não é screenshot de firmware |
 | Export ISO → kernel/initrd/SquashFS | Exportador 10/10 e ISO beta.5.1 real extraída | Exportar não prova boot |
 | PXE BIOS/UEFI sem ISO/USB | Harness `rescue/pxe/test-netboot-vm.py` preparado | Execução real pendente no CI |
 | CSR/mTLS/INVENTORY por PXE | Incluído no harness com disco RAW readonly e hashes antes/depois | Não alegar aprovado até recibo |
 | ProxyDHCP | Bloqueado | Somente DHCP externo implementado |
-| Falha de rede durante fetch, retorno SO local após parar PXE | Pendente | Gate completo MVP ainda depende desses testes |
+| Falha antes do kernel e durante fetch, retorno Linux local após parar PXE | Cenários adicionados ao harness, execução pendente | Fallback usa fixture Linux live em disco RAW readonly; não comprova Windows instalado |
 | WinPE PXE/Windows sem scratch | P3/P4 pendentes | Fluxo USB legado preservado |
 | Secure Boot/hardware físico | Não homologados | Não generalizar VM a NICs/PCs reais |
 

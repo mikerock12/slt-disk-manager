@@ -16,9 +16,11 @@ try
     var bootstrap = launch.Profiles.SingleOrDefault(p => p.Enabled && p.Kind == "IPXE_BOOTSTRAP") ?? throw new InvalidDataException("Importe exatamente um perfil iPXE BIOS/UEFI.");
     byte[] Read(string id) => File.ReadAllBytes(BootArtifactStore.SafeFile(launch.StorePath, bootstrap.Id + "/" + bootstrap.Artifacts.Single(a => a.Id == id).RelativePath));
     var files = new Dictionary<string, byte[]>(StringComparer.Ordinal) { ["undionly.kpxe"] = Read("bios"), ["ipxe.efi"] = Read("uefi"), ["autoexec.ipxe"] = Encoding.ASCII.GetBytes(BootScriptRenderer.Autoexec(launch.Config)) };
-    await using var tftp = new TftpBootstrapServer(IPAddress.Parse(launch.Config.BindIPv4), IPNetwork.Parse(launch.Config.AllowedCidr), files, launch.Config.MaxConcurrentTransfers);
-    await using var http = await BootHttpServer.Start(launch);
-    tftp.Start(); Console.WriteLine(BootJson.Serialize(new { state = "RUNNING" }));
+    bool ready = false;
+    void Report(BootEvent e) { if (ready) Console.WriteLine(BootJson.Serialize(e)); }
+    await using var tftp = new TftpBootstrapServer(IPAddress.Parse(launch.Config.BindIPv4), IPNetwork.Parse(launch.Config.AllowedCidr), files, launch.Config.MaxConcurrentTransfers, report: Report);
+    await using var http = await BootHttpServer.Start(launch, report: Report);
+    Console.WriteLine(BootJson.Serialize(new { state = "RUNNING" })); ready = true; tftp.Start();
     // Any command/EOF means stop. No arbitrary remote commands or process launch inputs.
     await Console.In.ReadLineAsync();
 }

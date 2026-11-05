@@ -7,7 +7,7 @@ if(!$PackageDirectory){$PackageDirectory=Join-Path $root "artifacts/SLT-Disk-Man
 $PackageDirectory=(Resolve-Path -LiteralPath $PackageDirectory).Path
 # Separate installers: the server/panel for the bench and the Windows client for serviced PCs.
 $required=@{
- server=@('server/SLT.Controller.Host.exe','desktop/SLT.Desktop.exe','windows-pe/slt-winpe-agent.exe','server/tools/7-Zip/7z.exe','server/tools/7-Zip/7z.dll','server/tools/7-Zip/License.txt','install-server/Install-Server.ps1')
+ server=@('server/SLT.Controller.Host.exe','network-boot/SLT.NetworkBoot.Service.exe','desktop/SLT.Desktop.exe','windows-pe/slt-winpe-agent.exe','server/tools/7-Zip/7z.exe','server/tools/7-Zip/7z.dll','server/tools/7-Zip/License.txt','install-server/Install-Server.ps1','install-server/Configure-NetworkBootFirewall.ps1')
  client=@('client/SLT.WindowsAgent.exe','client/tools/smartmontools/smartctl.exe','client/tools/smartmontools/COPYING.txt','install-agent/Install-Agent.ps1')
 }
 $names=@{server='Servidor';client='Cliente'}

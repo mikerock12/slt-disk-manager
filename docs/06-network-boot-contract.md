@@ -19,6 +19,8 @@ BootArtifact: `{id,relativePath,sizeBytes,sha256,source}`. Manifesto de importa�
 contém schemaVersion=1 e mesmos campos do perfil, sem enabled obrigatório.
 Tipos aceitos RESCUE_LINUX (kernel,initrd,rootfs), IPXE_BOOTSTRAP (bios,uefi).
 IDs de artefatos são locais ao perfil; HTTP usa `{profileId}-{artifactId}`.
+O rootfs Rescue também tem alias fechado `{profileId}-rootfs.squashfs`, obrigatório
+no fetch do live-boot (o decoder depende da extensão da URL).
 IDs `[a-z0-9][a-z0-9-]{0,63}`. firmwareSupport BIOS e UEFI, architecture X64;
 secureBootStatus UNSUPPORTED. Sem argumentos/URLs/comandos fornecidos pelo manifesto.
 Importação nunca confia em validationStatus recebido: começa NETWORK_BOOT_DEV.
