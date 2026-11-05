@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Real BIOS/UEFI PXE lab using a disposable Linux network namespace.
 
-Requires root, unshare, iproute2, dnsmasq, QEMU, OVMF and dotnet. Never attaches
+Requires root, unshare, iproute2, dnsmasq, QEMU, OVMF, dotnet and Tesseract. Never attaches
 an ISO/USB or host disk. DHCP is a lab-only external dnsmasq, not SLT's service.
 Evidence excludes the Controller state directory (individual keys/admin token).
 """
@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import http.client
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -257,6 +258,11 @@ def main():
     args = parser.parse_args()
     if sys.platform != "linux" or os.geteuid() != 0:
         parser.error("Run this dedicated lab with sudo on Linux; no DHCP is sent on the host network")
+    if not shutil.which("tesseract"):
+        parser.error("The strict PXE failure gate requires Tesseract; install tesseract-ocr before starting this lab")
+    observer_spec = importlib.util.spec_from_file_location("slt_boot_failure_observer", Path(__file__).with_name("boot_failure_observer.py"))
+    failure_observer = importlib.util.module_from_spec(observer_spec)
+    observer_spec.loader.exec_module(failure_observer)
     modes = args.firmware.split(",")
     assert modes and set(modes) <= {"bios", "uefi"} and len(modes) == len(set(modes))
     assert 2048 <= args.memory_mib <= 16384
@@ -552,7 +558,10 @@ def main():
                     qmp.key("down")
                     time.sleep(0.2)
                     qmp.key("ret")
-                    console.expect("Falha de boot", 180)
+                    failure_evidence = failure_observer.observe_failure(console, qmp, args.output, mode + "-outage", terminal_text,
+                        selected_at=time.monotonic(), timeout=180)
+                    assert failure_evidence["passed"]
+                    progress(f"{mode.upper()} explicit boot failure confirmed via {failure_evidence['source']}")
                     # Also observe the renderer's exit/fallback, rather than
                     # stopping the VM immediately after the first error line.
                     until = time.monotonic() + 10
@@ -564,6 +573,10 @@ def main():
                     assert digest(fixture) == fixture_hash
                     results["outages"].append({"firmware": mode, "stage": "AFTER_MENU_BEFORE_KERNEL",
                         "serviceStopped": True, "httpAndTftpReleased": True, "explicitBootFailure": True,
+                        "failureEvidenceSource": failure_evidence["source"],
+                        "failureEvidenceReport": mode + "-outage-visual-observation.json",
+                        "serialExplicitFailureObserved": failure_evidence["serialExplicitFailureObserved"],
+                        "visualCorroboration": failure_evidence["visualCorroboration"],
                         "userspaceReached": False, "observedSeconds": round(time.monotonic() - failed_at, 2),
                         "syntheticSha256Before": fixture_hash, "syntheticSha256After": digest(fixture)})
                     qmp.execute("quit")

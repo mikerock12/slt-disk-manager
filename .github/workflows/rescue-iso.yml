@@ -62,7 +62,7 @@ jobs:
       - name: Install isolated VM test tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends qemu-system-x86 ovmf dnsmasq iproute2 xorriso build-essential liblzma-dev git
+          sudo apt-get install -y --no-install-recommends qemu-system-x86 ovmf dnsmasq iproute2 xorriso build-essential liblzma-dev git tesseract-ocr
       - name: Export Rescue netboot and build pinned iPXE bootstrap
         run: |
           version=$(tr -d '\r\n' < VERSION)
@@ -70,6 +70,7 @@ jobs:
           bash scripts/build-ipxe-bootstrap.sh "$PWD/artifacts/ipxe-bootstrap"
           python3 rescue/pxe/test-export-rescue-netboot.py
           python3 rescue/pxe/test-netboot-diagnostics.py
+          python3 rescue/pxe/test-boot-failure-observer.py
       - name: Actual PXE BIOS and UEFI in isolated network namespace (no ISO/USB)
         timeout-minutes: 30
         run: |
@@ -89,6 +90,18 @@ jobs:
         if: always()
         run: |
           if test -d artifacts/pxe-lab; then sudo chown -R "$(id -u):$(id -g)" artifacts/pxe-lab; fi
+      - name: Preserve small diagnostics separately from large boot images
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: slt-netboot-lab-diagnostics
+          path: |
+            artifacts/pxe-lab/
+            artifacts/rescue-boot/
+            artifacts/rescue-netboot/netboot-manifest.json
+            artifacts/ipxe-bootstrap/netboot-manifest.json
+            artifacts/ipxe-bootstrap/SLT-BUILD.txt
+          retention-days: 14
       - name: Preserve ISO, hashes and boot evidence
         if: always()
         uses: actions/upload-artifact@v7
