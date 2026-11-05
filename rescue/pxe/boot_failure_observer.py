@@ -3,6 +3,8 @@
 Tesseract TSV word confidences are averaged across the complete expected line;
 the required mean is >= 80. No fuzzy text, substrings or command traces count.
 Two independently captured frames at least 0.3 seconds apart are required.
+Only the observed OCR ambiguity between semicolon and colon immediately after
+"rede/servidor" is accepted, as two exact complete lines with audited raw text.
 """
 from __future__ import annotations
 
@@ -21,6 +23,8 @@ import tempfile
 import time
 
 EXPECTED_FAILURE = "Falha de boot. Verifique rede/servidor; nenhum disco foi modificado."
+OCR_COLON_FAILURE = "Falha de boot. Verifique rede/servidor: nenhum disco foi modificado."
+ACCEPTED_OCR_LINES = (EXPECTED_FAILURE, OCR_COLON_FAILURE)
 MINIMUM_MEAN_CONFIDENCE = 80.0
 MINIMUM_FRAME_SEPARATION = 0.3
 CAPTURE_TIMES = (0.3, 1.0, 3.0, 5.0, 7.0, 9.0, 11.0, 15.0, 30.0, 60.0, 120.0, 170.0)
@@ -54,7 +58,7 @@ def failure_line_from_tsv(tsv):
     for key, words in lines.items():
         words.sort(key=lambda word: (word["word_num"], word["left"]))
         text = " ".join(word["text"] for word in words)
-        if text != EXPECTED_FAILURE or any(not 0 <= word["confidence"] <= 100 for word in words):
+        if text not in ACCEPTED_OCR_LINES or any(not 0 <= word["confidence"] <= 100 for word in words):
             continue
         confidence = sum(word["confidence"] for word in words) / len(words)
         if confidence < MINIMUM_MEAN_CONFIDENCE:
@@ -66,11 +70,12 @@ def failure_line_from_tsv(tsv):
             min(word["top"] + word["height"], candidate["top"] + candidate["height"]) - max(word["top"], candidate["top"])
             >= min(word["height"], candidate["height"]) / 2 for candidate in words)]
         row_words.sort(key=lambda word: word["left"])
-        if " ".join(word["text"] for word in row_words) != EXPECTED_FAILURE:
+        if " ".join(word["text"] for word in row_words) != text:
             continue
         left = min(word["left"] for word in words)
         top = min(word["top"] for word in words)
-        return {"text": text, "rowAnchored": True, "meanConfidence": round(confidence, 6), "wordConfidences": [word["confidence"] for word in words],
+        return {"text": EXPECTED_FAILURE, "ocrText": text, "normalizedSeparator": text == OCR_COLON_FAILURE,
+                "rowAnchored": True, "meanConfidence": round(confidence, 6), "wordConfidences": [word["confidence"] for word in words],
                 "lineKey": list(key), "box": {"left": left, "top": top,
                     "width": max(word["left"] + word["width"] for word in words) - left,
                     "height": max(word["top"] + word["height"] for word in words) - top}}
@@ -80,6 +85,7 @@ def failure_line_from_tsv(tsv):
 def corroborating_frames(frames):
     candidates = [frame for frame in frames if frame.get("candidate") and frame["candidate"].get("rowAnchored") is True
                   and frame["candidate"].get("text") == EXPECTED_FAILURE
+                  and frame["candidate"].get("ocrText") in ACCEPTED_OCR_LINES
                   and frame["candidate"].get("meanConfidence", -1) >= MINIMUM_MEAN_CONFIDENCE]
     candidates.sort(key=lambda frame: frame["capturedSeconds"])
     for first_index, first in enumerate(candidates):
@@ -172,6 +178,7 @@ def observe_failure(console, qmp, output, prefix, normalize_serial, *, selected_
     if not tesseract:
         raise FileNotFoundError("--visual-evidence requires the official Tesseract CLI")
     report = {"expectedFailure": EXPECTED_FAILURE, "minimumMeanConfidence": MINIMUM_MEAN_CONFIDENCE,
+              "acceptedOcrLines": list(ACCEPTED_OCR_LINES),
               "minimumFrameSeparationSeconds": MINIMUM_FRAME_SEPARATION, "visualOnlyDiagnostic": visual_only,
               "frames": [], "serialExplicitFailureObserved": False, "visualCorroboration": None, "passed": False}
     report_path = output / (prefix + "-visual-observation.json")

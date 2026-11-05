@@ -35,16 +35,35 @@ class FailureLineTests(unittest.TestCase):
         candidate = observer.failure_line_from_tsv(tsv(observer.EXPECTED_FAILURE))
         self.assertEqual(candidate["text"], observer.EXPECTED_FAILURE)
         self.assertEqual(candidate["meanConfidence"], 90)
+        self.assertEqual(candidate["ocrText"], observer.EXPECTED_FAILURE)
+        self.assertFalse(candidate["normalizedSeparator"])
         self.assertGreater(candidate["box"]["width"], 0)
 
     def test_confidence_boundary(self):
         self.assertIsNotNone(observer.failure_line_from_tsv(tsv(observer.EXPECTED_FAILURE, 80)))
         self.assertIsNone(observer.failure_line_from_tsv(tsv(observer.EXPECTED_FAILURE, 79.999)))
 
+    def test_observed_colon_ambiguity_is_explicit_and_auditable(self):
+        candidate = observer.failure_line_from_tsv(tsv(observer.OCR_COLON_FAILURE, 80))
+        self.assertEqual(candidate["text"], observer.EXPECTED_FAILURE)
+        self.assertEqual(candidate["ocrText"], observer.OCR_COLON_FAILURE)
+        self.assertTrue(candidate["normalizedSeparator"])
+        self.assertIsNone(observer.failure_line_from_tsv(tsv(observer.OCR_COLON_FAILURE, 79.999)))
+
+    def test_other_punctuation_positions_and_text_remain_exact(self):
+        for text in [observer.EXPECTED_FAILURE.replace("boot.", "boot:"),
+                     observer.EXPECTED_FAILURE.replace("rede/servidor;", "rede:servidor;"),
+                     observer.EXPECTED_FAILURE.replace("rede/servidor;", "rede/servidor,"),
+                     observer.OCR_COLON_FAILURE.replace("nenhum", "nenhun"),
+                     observer.OCR_COLON_FAILURE.replace("modificado.", "modificado:")]:
+            with self.subTest(text=text):
+                self.assertIsNone(observer.failure_line_from_tsv(tsv(text)))
+
     def test_debug_echo_is_not_actual_output(self):
         for prefix in ["echo ", "[001a] $ echo ", "Executing: echo "]:
             with self.subTest(prefix=prefix):
                 self.assertIsNone(observer.failure_line_from_tsv(tsv(prefix + observer.EXPECTED_FAILURE)))
+                self.assertIsNone(observer.failure_line_from_tsv(tsv(prefix + observer.OCR_COLON_FAILURE)))
 
     def test_prefix_in_another_ocr_block_on_same_row_still_fails(self):
         candidate = tsv(observer.EXPECTED_FAILURE)
@@ -92,6 +111,12 @@ class CorroborationTests(unittest.TestCase):
 
     def test_temporal_order_is_preserved(self):
         self.assertEqual(observer.corroborating_frames([frame("b.ppm", 3.0), frame("a.ppm", 1.0)]), ["a.ppm", "b.ppm"])
+
+    def test_only_the_known_separator_variant_can_corroborate(self):
+        self.assertEqual(observer.corroborating_frames([frame("a.ppm", 1.0), frame("b.ppm", 3.0, text=observer.OCR_COLON_FAILURE)]), ["a.ppm", "b.ppm"])
+        changed = frame("b.ppm", 3.0)
+        changed["candidate"]["ocrText"] = observer.EXPECTED_FAILURE.replace("boot.", "boot:")
+        self.assertIsNone(observer.corroborating_frames([frame("a.ppm", 1.0), changed]))
 
 
 if __name__ == "__main__":
