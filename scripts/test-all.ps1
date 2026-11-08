@@ -6,7 +6,7 @@ Push-Location $projectRoot
 try {
     $env:DOTNET_CLI_HOME=Join-Path $projectRoot '.tools/dotnet-home'
     $env:NUGET_PACKAGES=Join-Path $projectRoot '.tools/nuget'
-    foreach($project in @('tests/SLT.Controller.Tests','tests/SLT.WindowsAgent.Tests','src/desktop/tests/SLT.Desktop.SmokeTests')) {
+    foreach($project in @('tests/SLT.Controller.Tests','tests/SLT.WindowsAgent.Tests','src/desktop/tests/SLT.Desktop.SmokeTests','src/network-boot/tests/SLT.NetworkBoot.Tests')) {
         dotnet run --project $project
         if($LASTEXITCODE -ne 0) { throw "Falha: $project" }
     }
@@ -23,5 +23,7 @@ try {
         if($LASTEXITCODE -ne 0){throw 'Integração de arquivos falhou.'}
         python tests/integration/media-import-e2e.py
         if($LASTEXITCODE -ne 0){throw 'Integração de catálogo de mídia falhou.'}
+        python tests/integration/network-boot-admin-e2e.py
+        if($LASTEXITCODE -ne 0){throw 'Integração administrativa Network Boot falhou.'}
     }
 } finally {Pop-Location}

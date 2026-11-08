@@ -52,3 +52,14 @@ Na aba **Instalar sistema**, escolha uma ISO/WIM/ESD local, nomeie e importe. A 
 Os filtros da interface não substituem as validações do servidor e do agente. Um disco montado pode ser destino apenas no ambiente WinPE e após suas verificações locais; discos protegidos ou somente leitura permanecem bloqueados. Instalações e clones em computadores diferentes podem progredir simultaneamente. A conclusão da aplicação da imagem não comprova primeiro boot, drivers ou OOBE.
 
 O harness Desktop passou 26 verificações sintéticas, incluindo modo/capacidade WinPE, mídia ainda importando, disco protegido, contrato de implantação e aprovação destrutiva. `--render artifacts/ui` produz PNGs claramente marcados como fixtures para revisão visual; não representam instalação real nem homologação.
+
+## Boot pela rede
+
+A aba **Boot pela rede** consulta o estado real do serviço isolado pelo Controller local autenticado. Abrir a aba, conectar o painel ou atualizar o estado não inicia o serviço. O modo deste incremento é `EXTERNAL_DHCP`: o técnico configura manualmente `next-server`, o bootfile BIOS/UEFI e a regra para clientes iPXE no DHCP existente. O painel não configura o roteador nem fornece leases DHCP.
+
+1. Selecione a interface Ethernet elegível, confira IPv4 privado, CIDR da bancada e porta HTTP. Salve e use **Validar rede e artefatos**. O servidor repete as validações ao iniciar; os filtros do painel não substituem as barreiras do servidor.
+2. Se necessário, importe `netboot-manifest.json` dos pacotes locais Rescue e iPXE. O Controller mantém os artefatos em catálogo de boot separado das imagens de instalação. Confira arquitetura, firmware, Secure Boot e status de validação de cada perfil. Perfis podem ser habilitados/desabilitados apenas com o serviço parado.
+3. Após a validação, marque a autorização da rede de bancada e clique **Iniciar boot pela rede**. A autorização começa vazia, não é persistida e é descartada ao editar configuração ou trocar de conexão. O início não é botão padrão de Enter.
+4. Consulte estado, erro de bind e eventos. **Parar distribuição de boot** encerra os listeners de boot; os jobs autenticados do Controller têm ciclo independente. Para reconfigurar ou importar um perfil, pare primeiro.
+
+O Rescue continua exigindo pin TLS e pareamento CSR/mTLS no console. Boot pela rede não cria planos de disco nem autoriza escrita. WinPE PXE, instalação Windows sem scratch, Secure Boot e hardware físico não herdam homologação dos perfis Rescue e devem ter sua própria evidência. O painel mostra os estados retornados pelo servidor, sem converter `NETWORK_BOOT_DEV` em suporte homologado.

@@ -26,7 +26,7 @@
 AppId={#EditionId}
 AppName=SLT Disk Manager {#EditionName}
 AppVersion={#AppVersion}
-VersionInfoVersion=0.1.0.51
+VersionInfoVersion=0.1.0.60
 AppPublisher=Smells Like Tech
 AppPublisherURL=https://softwares.smellsliketech.com.br
 AppSupportURL=https://github.com/mikerock12/slt-disk-manager
@@ -64,6 +64,7 @@ Name: "clientservice"; Description: "Instalar o cliente como serviço do Windows
 [Files]
 #if Edition == "server"
 Source: "{#PackageDir}\server\*"; DestDir: "{app}\server"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#PackageDir}\network-boot\*"; DestDir: "{app}\network-boot"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#PackageDir}\desktop\*"; DestDir: "{app}\desktop"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#PackageDir}\Servidor.cmd"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#PackageDir}\Iniciar-Servidor.ps1"; DestDir: "{app}"; Flags: ignoreversion

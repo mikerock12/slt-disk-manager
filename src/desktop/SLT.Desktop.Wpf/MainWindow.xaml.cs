@@ -25,6 +25,7 @@ public partial class MainWindow : Window
         Cloning.Configure(RequireClient, ReviewPlanAsync, RefreshAsync);
         Files.Configure(RequireClient, ReviewPlanAsync, RefreshAsync);
         Deployment.Configure(RequireClient, ReviewPlanAsync, RefreshAsync);
+        NetworkBoot.Configure(RequireClient);
         _timer.Tick += async (_, _) => { if (!_busy && _client is not null) await RunAsync(RefreshAsync, false); };
         Loaded += async (_, _) =>
         {
@@ -81,6 +82,7 @@ public partial class MainWindow : Window
         catch { candidate.Dispose(); throw; }
         _client?.Dispose();
         _client = candidate;
+        NetworkBoot.ResetConnection();
         await RefreshAsync();
         _timer.Start();
     }
@@ -131,6 +133,7 @@ public partial class MainWindow : Window
         Files.UpdateData(_devices, _fileBundles);
         _media = await mediaTask;
         Deployment.UpdateData(_devices, _media);
+        if (NetworkBoot.IsVisible) await NetworkBoot.RefreshStatusAsync();
         StatusLine.Text = $"Atualizado às {DateTime.Now:HH:mm:ss}. Comunicação HTTPS com certificado fixado. Intervalo: 10 segundos.";
         ConnectionBadge.Text = "CONECTADO / LOCAL";
     }

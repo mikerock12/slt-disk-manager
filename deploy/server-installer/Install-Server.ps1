@@ -40,8 +40,12 @@ foreach($path in @($InstallDirectory,$StateDirectory)){
     Set-Acl -LiteralPath $path -AclObject $acl
 }
 Copy-Item -Path (Join-Path $PackageDirectory '*') -Destination $InstallDirectory -Recurse -Force
+$bootSource=Join-Path (Split-Path -Parent ([IO.Path]::GetFullPath($PackageDirectory))) 'network-boot'
+if(-not(Test-Path -LiteralPath (Join-Path $bootSource 'SLT.NetworkBoot.Service.exe'))){throw 'Pacote incompleto: network-boot ausente.'}
+Copy-Item -LiteralPath $bootSource -Destination (Join-Path $InstallDirectory 'network-boot') -Recurse
 $exe=Join-Path $InstallDirectory 'SLT.Controller.Host.exe'
-$binary='"'+$exe+'" --bind '+$Bind+' --allowed-subnet '+$AllowedSubnet+' --port '+$Port+' --state-dir "'+$StateDirectory+'"'
+$bootExe=Join-Path $InstallDirectory 'network-boot/SLT.NetworkBoot.Service.exe'
+$binary='"'+$exe+'" --bind '+$Bind+' --allowed-subnet '+$AllowedSubnet+' --port '+$Port+' --state-dir "'+$StateDirectory+'" --network-boot-executable "'+$bootExe+'"'
 New-Service -Name SLTDiskManagerController -DisplayName 'SLT Disk Manager Controller' -BinaryPathName $binary -StartupType Automatic | Out-Null
 New-NetFirewallRule -Name SLTDiskManagerControllerLAN -DisplayName 'SLT Disk Manager LAN privada' -Direction Inbound -Action Allow -Protocol TCP -LocalPort $Port -LocalAddress $Bind -RemoteAddress $AllowedSubnet -Profile Private -Program $exe | Out-Null
 Start-Service SLTDiskManagerController

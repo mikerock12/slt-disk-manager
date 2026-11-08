@@ -10,6 +10,7 @@ try {
     $env:DOTNET_CLI_HOME=Join-Path $projectRoot '.tools/dotnet-home'
     $env:NUGET_PACKAGES=Join-Path $projectRoot '.tools/nuget'
     $projects=@{
+        'network-boot'='src/network-boot/SLT.NetworkBoot.Service/SLT.NetworkBoot.Service.csproj'
         server='src/server/SLT.Controller.Host/SLT.Controller.Host.csproj'
         desktop='src/desktop/SLT.Desktop.Wpf/SLT.Desktop.Wpf.csproj'
         client='src/windows-agent/SLT.WindowsAgent/SLT.WindowsAgent.csproj'
@@ -18,6 +19,12 @@ try {
         dotnet publish $projects[$name] -c Release -r win-x64 --self-contained true -o (Join-Path $output $name) --nologo
         if($LASTEXITCODE -ne 0){throw "Falha no publish $name"}
     }
+    $trustedProfiles=Join-Path $projectRoot 'artifacts/trusted-netboot/trusted-boot-profiles.json'
+    if(-not(Test-Path -LiteralPath $trustedProfiles)){throw 'Catálogo dos perfis aprovados pelo laboratório PXE ausente; não empacotar boot de desenvolvimento.'}
+    $registry=Get-Content -LiteralPath $trustedProfiles -Raw | ConvertFrom-Json
+    $sourceRevision=(& git rev-parse HEAD).Trim()
+    if($registry.schemaVersion -ne 1 -or $registry.sourceCommit -ne $sourceRevision -or $registry.profiles.Count -lt 2){throw 'Catálogo PXE não corresponde ao commit que está sendo empacotado.'}
+    Copy-Item -LiteralPath $trustedProfiles -Destination (Join-Path $output 'network-boot/trusted-boot-profiles.json')
     # Third-party tools the app calls, shipped with their licenses (docs/12-licensing-third-party.md).
     $sevenSource=Join-Path $env:ProgramFiles '7-Zip'
     foreach($file in '7z.exe','7z.dll','License.txt'){if(-not(Test-Path -LiteralPath (Join-Path $sevenSource $file))){throw "7-Zip ausente em $sevenSource; instale-o para empacotar o servidor."}}
@@ -51,6 +58,7 @@ try {
     Copy-Item -LiteralPath $rescueBinary -Destination (Join-Path $output 'rescue/slt-rescue-agent')
     Copy-Item -LiteralPath rescue/README.md -Destination (Join-Path $output 'rescue/README.md')
     Copy-Item -LiteralPath rescue/scripts -Destination (Join-Path $output 'rescue/scripts') -Recurse
+    Copy-Item -LiteralPath rescue/pxe -Destination (Join-Path $output 'rescue/pxe') -Recurse
     Copy-Item -LiteralPath rescue/profiles -Destination (Join-Path $output 'rescue/profiles') -Recurse
     Copy-Item -LiteralPath rescue/windows-pe -Destination (Join-Path $output 'windows-pe') -Recurse
     Copy-Item -LiteralPath artifacts/slt-winpe-agent.exe -Destination (Join-Path $output 'windows-pe/slt-winpe-agent.exe')

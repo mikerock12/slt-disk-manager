@@ -1,5 +1,10 @@
 # Clone, arquivos e instalação em paralelo
 
+Boot sem pendrive: o módulo opcional Network Boot usa DHCP externo e os perfis
+Rescue/iPXE da release. Inicia desligado e mantém pareamento e confirmações de
+disco. Siga [o guia](NETWORK-BOOT-OPERACAO.md) e confira a
+[matriz de evidências](NETWORK-BOOT-HOMOLOGACAO.md) antes de operar.
+
 ## Clonar cliente 1 para cliente 2
 
 Inicie os dois clientes pelo SLT Rescue/Linux de manutenção independente. Confira

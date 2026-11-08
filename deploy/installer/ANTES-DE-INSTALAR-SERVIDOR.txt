@@ -19,6 +19,9 @@ O QUE ACOMPANHA (nada é baixado da internet durante a instalação)
   o UCRT, conferido antes de instalar.
 - 7-Zip (LGPL), usado para ler as ISOs Windows/Ubuntu que você importar.
 - Agentes SLT Rescue (Linux) e WinPE, kit WinPE e guias de preparação dos pendrives.
+- Processo Network Boot separado, desligado por padrão. DHCP externo e pacote
+  SLT-Netboot da mesma release são necessários para Rescue PXE BIOS/UEFI de laboratório.
+  Não altera o roteador; firewall PXE é uma ação administrativa explícita separada.
 As licenças ficam em server\tools e docs\12-licensing-third-party.md.
 
 SERVIÇO DO WINDOWS (opcional, com seu aviso)

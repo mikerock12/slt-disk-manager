@@ -1,5 +1,9 @@
 # Primeiro teste na bancada
 
+Para SLT Rescue sem pendrive, consulte [Boot pela rede](NETWORK-BOOT-OPERACAO.md).
+É opcional, desligado por padrão e requer DHCP externo configurado na bancada;
+WinPE por PXE e Secure Boot não são oferecidos nesta fase.
+
 ## Servidor Windows 10/11 x64
 
 Use Ethernet e uma rede privada da assistência.

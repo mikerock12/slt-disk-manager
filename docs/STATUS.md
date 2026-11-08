@@ -1,6 +1,6 @@
 # Matriz de entrega e homologação
 
-Esta é a beta 0.1.0-beta.5.1, não o aceite integral da seção 25 da especificação.
+Esta é a beta 0.1.0-beta.6 em validação, não o aceite integral da seção 25 da especificação.
 Downloads e evidências atuais em ENTREGA-2026-10-29-beta5.md; registros anteriores são históricos.
 
 | Requisito | Estado nesta entrega | Evidência/limite |
@@ -25,7 +25,7 @@ Downloads e evidências atuais em ENTREGA-2026-10-29-beta5.md; registros anterio
 | Particionamento/formatação remoto | Limitado aos perfis de instalação | Perfis tipados Windows (WinPE) e Linux (Rescue); sem particionador arbitrário |
 | Conversão MBR→GPT/UEFI | Implementado na beta.5 | MBR2GPT da mídia importada, hash no plano assinado, /validate, confirmação local e conferência do layout; laboratório VM: Windows clonado iniciou em UEFI até a área de trabalho; hardware não homologado |
 | Instalação Windows/Linux | Windows WinPE com unattend e Ubuntu/Xubuntu pelo Rescue (UEFI) implementados na beta.5 | Laboratório VM: instalados ao mesmo tempo, Windows até a área de trabalho sem OOBE e Xubuntu com troca de senha obrigatória (ENTREGA-2026-10-29-beta5.md); hardware não homologado |
-| PXE/Rescue local | Pendente | USB/boot manual primeiro |
+| Network Boot / Rescue PXE | P0–P2 implementados, validação VM em execução | Processo isolado opt-in, DHCP externo, TFTP/HTTP e perfis Rescue/iPXE; consulte NETWORK-BOOT-HOMOLOGACAO.md. ProxyDHCP, WinPE PXE, Secure Boot e hardware físico pendentes |
 | Contas/RBAC | Pendente | Uma credencial administrativa local, sem multiusuário |
 | Auditoria/plano/locks/anti-replay | Implementado | Registro encadeado; não é WORM nem auditoria externa |
 | Retomada de imagem pela rede | Pendente | Recibo idempotente; queda encerra sem retomar escrita |
