@@ -79,6 +79,13 @@ internal static class PairingTests
             "exit") + "\n";
         RescueBootOptions Options(string? script = null) => new(Convert.ToHexStringLower(SHA256.HashData(loader)), loader.Length, script ?? Script(), ticket, true, 30);
         check("server-rendered SLT boot script accepted", () => RescueBoot.ValidateOptions(Options()));
+        check("golden boot script rendered by the server is accepted", () =>
+        {
+            var directory = AppContext.BaseDirectory;
+            while (!File.Exists(Path.Combine(directory, "tests", "fixtures", "slt-mode-boot.ipxe"))) directory = Path.GetDirectoryName(directory) ?? throw new InvalidOperationException("tests/fixtures/slt-mode-boot.ipxe not found");
+            var golden = File.ReadAllText(Path.Combine(directory, "tests", "fixtures", "slt-mode-boot.ipxe")).Replace("\r\n", "\n").Replace("{PIN}", pin).Replace("{TICKET}", ticket);
+            RescueBoot.ValidateOptions(Options(golden));
+        });
         check("SLT boot script cannot fetch from a public address", () => reject(() => RescueBoot.ValidateOptions(Options(Script(kernel: "http://8.8.8.8:8088/boot/v1/assets/rescue-kernel")))));
         check("SLT boot script cannot leave the boot asset path", () => reject(() => RescueBoot.ValidateOptions(Options(Script(kernel: "http://192.168.1.23:8088/other/file")))));
         check("SLT boot script cannot add kernel arguments", () => reject(() => RescueBoot.ValidateOptions(Options(Script(extra: " init=/bin/sh")))));

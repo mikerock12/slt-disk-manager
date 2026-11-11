@@ -48,6 +48,14 @@ try
         Reject(() => BootArtifactStore.SafeFile(source, "linked/rescue-test/rootfs"), "symlink parent rejected on Linux");
     }
     Reject(() => BootArtifactStore.Validate(profile with { Artifacts = [null!, profile.Artifacts[1], profile.Artifacts[2]] }), "null artifact metadata rejected");
+    BootArtifact Loader(string id) => new(id, id, bytes.Length, Convert.ToHexStringLower(SHA256.HashData(bytes)), "synthetic");
+    var bootstrapProfile = new BootProfile(1, "ipxe-test", "iPXE", "IPXE_BOOTSTRAP", "X64", ["BIOS", "UEFI"], "UNSUPPORTED", "NETWORK_BOOT_DEV", "test", [Loader("bios"), Loader("uefi")]);
+    BootArtifactStore.Validate(bootstrapProfile); Check(true, "bootstrap profile without the SLT-mode loader stays valid");
+    BootArtifactStore.Validate(bootstrapProfile with { Artifacts = [.. bootstrapProfile.Artifacts, Loader("uefi-local")] }); Check(true, "bootstrap profile may carry the optional SLT-mode loader");
+    Reject(() => BootArtifactStore.Validate(bootstrapProfile with { Artifacts = [.. bootstrapProfile.Artifacts, Loader("extra")] }), "unknown bootstrap artifact rejected");
+    Reject(() => BootArtifactStore.Validate(bootstrapProfile with { Artifacts = [.. bootstrapProfile.Artifacts, Loader("uefi-local"), Loader("uefi-local")] }), "duplicate SLT-mode loader rejected");
+    Reject(() => BootArtifactStore.Validate(profile with { Artifacts = [.. profile.Artifacts, Loader("uefi-local")] }), "Rescue profile cannot carry a loader");
+    Check(TrustedBootProfiles.Fingerprint(bootstrapProfile) != TrustedBootProfiles.Fingerprint(bootstrapProfile with { Artifacts = [.. bootstrapProfile.Artifacts, Loader("uefi-local")] }), "laboratory fingerprint covers the SLT-mode loader");
     var menu = BootScriptRenderer.Menu(c, [imported]);
     Check(menu.Contains("--default exit") && !menu.Contains("${shell}") && !menu.Contains("install.wim"), "generated menu no imported commands and safe default");
     Check(menu.Contains("initrd=initrd.img") && menu.Contains("fetch=http://10.77.0.1:8088/boot/v1/assets/rescue-test-rootfs.squashfs"), "live-boot network-only renderer with mandatory decoder extension");

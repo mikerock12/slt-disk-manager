@@ -66,6 +66,7 @@ parted
 gdisk
 ntfs-3g
 dosfstools
+exfatprogs
 e2fsprogs
 dmsetup
 squashfs-tools
@@ -97,6 +98,30 @@ mkdir -p config/includes.chroot/usr/share/doc/slt-rescue
 install -m 0644 -- "$root_dir/../docs/licenses/Go-LICENSE.txt" config/includes.chroot/usr/share/doc/slt-rescue/Go-LICENSE.txt
 install -m 0644 -- "$root_dir/README.md" config/includes.chroot/usr/share/doc/slt-rescue/README.md
 install -m 0755 -- "$root_dir/scripts/start-rescue.sh" config/includes.chroot/usr/local/bin/slt-start
+install -m 0755 -- "$root_dir/scripts/slt-mode.sh" config/includes.chroot/usr/local/lib/slt/slt-mode.sh
+# "SLT mode": this unit exists only when a paired Windows client restarted the PC into Rescue
+# and left server, pin and single-use ticket on the kernel command line. It owns tty1.
+cat > config/includes.chroot/etc/systemd/system/slt-mode.service <<'SERVICE'
+[Unit]
+Description=SLT Disk Manager - modo SLT (controlado pelo servidor da bancada)
+ConditionKernelCommandLine=slt.ticket
+After=NetworkManager.service systemd-user-sessions.service live-config.service
+Conflicts=getty@tty1.service
+[Service]
+Type=simple
+ExecStart=/usr/local/lib/slt/slt-mode.sh
+StandardInput=tty
+StandardOutput=tty
+StandardError=tty
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+Restart=on-failure
+RestartSec=5
+[Install]
+WantedBy=multi-user.target
+SERVICE
+ln -s ../slt-mode.service config/includes.chroot/etc/systemd/system/multi-user.target.wants/slt-mode.service
 # Readiness never enrolls or starts a disk job. The smoke test powers down only
 # when the QEMU guest carries our explicit SMBIOS fixture marker.
 cat > config/includes.chroot/usr/local/lib/slt/boot-readiness.sh <<'READINESS'
@@ -105,10 +130,12 @@ set -euo pipefail
 umask 077
 /usr/local/bin/slt-rescue-agent --help > /run/slt-agent-help.log 2>&1
 grep -q -- '-server-pin' /run/slt-agent-help.log
+grep -q -- '-slt-mode' /run/slt-agent-help.log
 bash -n /usr/local/bin/slt-start
+bash -n /usr/local/lib/slt/slt-mode.sh
 id -u technician >/dev/null
 sudo -n -u technician sudo -n true
-for engine in lsblk blkid sfdisk smartctl nvme ddrescue partclone.restore ntfsresize ntfs-3g.probe resize2fs e2fsck losetup dmsetup unsquashfs mkfs.fat mkfs.ext4 chroot nmcli nmtui nm-online iw wpa_supplicant; do
+for engine in lsblk blkid sfdisk smartctl nvme ddrescue partclone.restore ntfsresize ntfs-3g.probe resize2fs e2fsck losetup dmsetup unsquashfs mkfs.fat mkfs.ext4 mkfs.ntfs mkfs.exfat chroot nmcli nmtui nm-online iw wpa_supplicant; do
   command -v "$engine" >/dev/null
 done
 nmcli --version > /run/slt-network-tools.log

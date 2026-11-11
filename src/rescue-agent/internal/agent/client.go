@@ -224,6 +224,13 @@ func Enroll(ctx context.Context, c *Client, stateDir string, output io.Writer) (
 }
 
 func EnrollMode(ctx context.Context, c *Client, stateDir string, output io.Writer, mode string) (string, *tls.Certificate, error) {
+	return enrollWith(ctx, c, stateDir, output, mode, true, "")
+}
+
+// enrollWith pairs this agent. pinTyped false selects the short-code pairing: the code shown here
+// is derived from the certificate this connection presented, so the operator typing it in the
+// panel confirms the discovered server. A ticket (SLT mode) is accepted by the server at once.
+func enrollWith(ctx context.Context, c *Client, stateDir string, output io.Writer, mode string, pinTyped bool, ticket string) (string, *tls.Certificate, error) {
 	if mode != "RESCUE" && mode != "WINPE" {
 		return "", nil, errors.New("modo de pareamento não suportado")
 	}
@@ -301,10 +308,36 @@ func EnrollMode(ctx context.Context, c *Client, stateDir string, output io.Write
 			ID           string    `json:"id"`
 			Code         string    `json:"code"`
 			ExpiresAtUTC time.Time `json:"expiresAtUtc"`
+			ServerNonce  string    `json:"serverNonce"`
 		}
-		_, err = c.JSON(ctx, "POST", "/agent/v1/enroll", map[string]string{"hostname": hostname, "mode": mode, "csrPem": string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: der})), "secret": pending.Secret}, &result)
+		csrPEM := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: der}))
+		request := map[string]string{"hostname": hostname, "mode": mode, "csrPem": csrPEM, "secret": pending.Secret}
+		nonceBytes := make([]byte, 32)
+		if _, err = rand.Read(nonceBytes); err != nil {
+			return "", nil, err
+		}
+		nonce := hex.EncodeToString(nonceBytes)
+		if ticket != "" {
+			request["ticket"] = ticket
+		} else if !pinTyped {
+			if request["commitment"], err = PairingCommit(nonce); err != nil {
+				return "", nil, err
+			}
+		}
+		_, err = c.JSON(ctx, "POST", "/agent/v1/enroll", request, &result)
 		if err != nil {
 			return "", nil, err
+		}
+		if ticket == "" && !pinTyped {
+			if !hex64Pattern.MatchString(result.ServerNonce) {
+				return "", nil, errors.New("servidor de versão anterior não confirma o pareamento por código; atualize o servidor ou informe --server e --server-pin")
+			}
+			reveal, _ := json.Marshal(map[string]string{"nonce": nonce})
+			if _, _, err = c.Request(ctx, "POST", "/agent/v1/enroll/"+url.PathEscape(result.ID)+"/reveal", bytes.NewReader(reveal), map[string]string{"X-Enrollment-Secret": pending.Secret}); err != nil {
+				return "", nil, err
+			}
+			// Bound to the certificate this connection presented (the pin the TLS callback enforced).
+			result.Code = PairingCode(hex.EncodeToString(c.pin), csrPEM, nonce, result.ServerNonce)
 		}
 		pending.ID = result.ID
 		pending.Code = result.Code
@@ -314,7 +347,14 @@ func EnrollMode(ctx context.Context, c *Client, stateDir string, output io.Write
 			return "", nil, err
 		}
 	}
-	fmt.Fprintf(output, "Pareamento %s: código %s. Confira e aprove no painel do servidor.\n", mode, pending.Code)
+	if ticket != "" {
+		fmt.Fprintln(output, "Modo SLT: sessão autorizada pelo cliente Windows já pareado; conectando ao servidor.")
+	} else {
+		fmt.Fprintf(output, "Pareamento %s: código %s. Confira e aprove no painel do servidor.\n", mode, pending.Code)
+		if len(pending.Code) == 8 {
+			fmt.Fprintf(output, "\n      CÓDIGO :   %s %s\n\n   No painel do servidor, aba \"Conectar computador\", selecione este\n   computador e digite o código acima.\n\n", pending.Code[:4], pending.Code[4:])
+		}
+	}
 	for {
 		if !time.Now().Before(pending.ExpiresAtUTC) {
 			return "", nil, errors.New("pareamento expirou; execute novamente")

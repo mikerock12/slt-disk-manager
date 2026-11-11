@@ -116,7 +116,7 @@ public sealed partial class Controller
         Db.Put("enrollment", id, e with { Status = "REJECTED" }); Db.Log("admin", "enrollment.rejected", id);
     }
 
-    private static string RescueScript(RescueBootSource source, string serverUrl, string pin, string ticket, bool write)
+    public static string RescueScript(RescueBootSource source, string serverUrl, string pin, string ticket, bool write)
     {
         var assets = $"{source.HttpBase}/boot/v1/assets/{source.ProfileId}";
         return string.Join('\n',

@@ -107,6 +107,10 @@ internal static class PairingTests
             var stored = controller.GetJob(reboot.Id).Plan.RescueBoot!;
             check(stored.Ticket.Length == 64 && stored.Script.StartsWith("#!ipxe\n", StringComparison.Ordinal) && stored.Script.Contains("slt.ticket=" + stored.Ticket, StringComparison.Ordinal) && stored.Script.Contains("slt.pin=" + certificates.Pin, StringComparison.Ordinal) && stored.Script.Contains("slt.server=https://192.168.50.10:7443 ", StringComparison.Ordinal) && stored.Script.Contains("http://192.168.50.10:8088/boot/v1/assets/rescue-test-kernel ", StringComparison.Ordinal), "approved reboot plan renders the boot script with server, pin and ticket");
             check(stored.Script.All(ch => ch is '\n' or >= ' ' and < (char)127), "boot script is plain ASCII");
+            var goldenDirectory = AppContext.BaseDirectory;
+            while (!File.Exists(Path.Combine(goldenDirectory, "tests", "fixtures", "slt-mode-boot.ipxe"))) goldenDirectory = Path.GetDirectoryName(goldenDirectory) ?? throw new Exception("tests/fixtures/slt-mode-boot.ipxe not found");
+            var golden = File.ReadAllText(Path.Combine(goldenDirectory, "tests", "fixtures", "slt-mode-boot.ipxe")).Replace("\r\n", "\n").Replace("{PIN}", certificates.Pin).Replace("{TICKET}", stored.Ticket);
+            check(stored.Script == golden, "boot script equals the golden file the Windows client validates");
             var listed = Provisioning.WithoutSecrets(controller.GetJob(reboot.Id)).Plan.RescueBoot!;
             check(listed.Ticket == "***" && listed.Script == "***", "administrative listings never show the ticket");
             check(!db.Audit().Any(a => a.Details.Contains(stored.Ticket, StringComparison.Ordinal)), "audit trail never records the ticket");

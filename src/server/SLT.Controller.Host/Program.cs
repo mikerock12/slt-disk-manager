@@ -73,6 +73,14 @@ var app = builder.Build();
 var bootExecutable = builder.Configuration["network-boot-executable"] ?? Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../network-boot/SLT.NetworkBoot.Service" + (OperatingSystem.IsWindows() ? ".exe" : "")));
 var networkBoot = new NetworkBootManagement(directory, bootExecutable, (action, details) => { lock (controller.Gate) store.Log("local-admin", action, details); });
 controller.RescueBootProvider = networkBoot.RescueSource;
+// LABORATORY ONLY (rescue/pxe/test-netboot-vm.py): the isolated namespace starts the boot service
+// itself, so the Controller is told where that service is instead of managing it.
+if (builder.Configuration["lab-rescue-source"] is { } labSource)
+{
+    var source = Wire.Read<RescueBootSource>(File.ReadAllText(labSource));
+    controller.RescueBootProvider = () => (source, "");
+    Console.Error.WriteLine("LABORATÓRIO: origem do modo SLT definida por --lab-rescue-source; não use em produção.");
+}
 // LAN discovery: clients find this server without typing its address or the 64-character pin.
 // The reply grants nothing; the pairing code typed in the panel is what establishes trust.
 DiscoveryResponder? discovery = null;

@@ -243,6 +243,178 @@ def firmware_files():
     raise FileNotFoundError("Matching non-Secure-Boot OVMF code/variables missing")
 
 
+def slt_mode_scenario(args, private, start, request, connection, firmware_files, loader_hash):
+    """SLT mode: a paired Windows client restarts into Rescue from its own EFI partition.
+
+    The Windows side is represented by the same HTTPS calls the real agent makes (legacy
+    pairing, mTLS inventory with REBOOT_RESCUE, signed job, loader download). What that
+    agent would write to \\EFI\\SLT is written here to a synthetic GPT disk, which a fresh
+    UEFI VM then starts from: no PXE ROM, ISO or USB. Not covered here: the Windows
+    bcdedit/firmware-entry step itself.
+    """
+    progress("Starting SLT mode scenario: paired client restarts into Rescue from its own EFI partition")
+    work = private / "slt-mode"
+    work.mkdir()
+    key, csr = work / "client-key.pem", work / "client.csr"
+    subprocess.run(["openssl", "req", "-new", "-newkey", "rsa:2048", "-nodes", "-keyout", str(key), "-out", str(csr),
+                    "-subj", "/CN=SLT-Windows-Enrollment"], check=True, capture_output=True)
+
+    def agent(method, path, body=None, certificate=None, headers=None, raw=False, expected=200):
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE  # Exact DER pin checked below, before any request byte.
+        if certificate:
+            context.load_cert_chain(str(certificate), str(key))
+        client = http.client.HTTPSConnection("127.0.0.1", 7443, context=context, timeout=20)
+        client.connect()
+        assert hashlib.sha256(client.sock.getpeercert(binary_form=True)).hexdigest() == connection["serverPin"]
+        client.request(method, path, json.dumps(body) if body is not None else None, {"Content-Type": "application/json", **(headers or {})})
+        response = client.getresponse()
+        payload = response.read()
+        client.close()
+        assert response.status == expected, (path, response.status, payload[:300])
+        return payload if raw else (json.loads(payload) if payload else None)
+
+    secret = os.urandom(32).hex()
+    created = agent("POST", "/agent/v1/enroll", {"hostname": "PC-CLIENTE-LAB", "mode": "WINDOWS", "csrPem": csr.read_text(), "secret": secret})
+    request("POST", f"/api/v1/enrollments/{created['id']}/approve", {"code": created["code"]})
+    status = agent("GET", f"/agent/v1/enroll/{created['id']}", headers={"X-Enrollment-Secret": secret})
+    assert status["status"] == "APPROVED"
+    certificate = work / "client-cert.pem"
+    certificate.write_text(status["certificatePem"])
+    windows_id = status["deviceId"]
+    inventory = {"deviceId": windows_id, "hostname": "PC-CLIENTE-LAB", "os": "Windows 10 (simulado pelo laboratório)", "mode": "WINDOWS",
+                 "agentVersion": "0.1.0", "capabilities": ["INVENTORY", "REBOOT_RESCUE"], "disks": [],
+                 "capturedAtUtc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "notes": ["SYNTHETIC_FIXTURE"]}
+    agent("POST", "/agent/v1/inventory", inventory, certificate)
+    job = request("POST", "/api/v1/jobs/plan", {"kind": "REBOOT_RESCUE", "deviceId": windows_id, "diskFingerprint": "", "consent": True, "rescueBoot": {"unattendedWrite": True}})
+    assert job["plan"]["challenge"] == "REINICIAR PC-CLIENTE-LAB MODO SLT" and not job["plan"]["rescueBoot"]["ticket"]
+    request("POST", f"/api/v1/jobs/{job['id']}/approve", {"challenge": job["plan"]["challenge"]})
+    listed = next(j for j in request("GET", "/api/v1/jobs") if j["id"] == job["id"])
+    assert listed["plan"]["rescueBoot"]["ticket"] == "***" and listed["plan"]["rescueBoot"]["script"] == "***", "ticket leaked to the administrative listing"
+    assignment = agent("GET", "/agent/v1/jobs/next", certificate=certificate)
+    import base64
+    payload = base64.b64decode(assignment["payload"])
+    (work / "payload.bin").write_bytes(payload)
+    (work / "signature.bin").write_bytes(base64.b64decode(assignment["signature"]))
+    # The plan is signed by the pinned server certificate, exactly what the Windows agent checks.
+    server_pem = ssl.get_server_certificate(("127.0.0.1", 7443))
+    assert hashlib.sha256(ssl.PEM_cert_to_DER_cert(server_pem)).hexdigest() == connection["serverPin"]
+    (work / "server.pem").write_text(server_pem)
+    public = subprocess.run(["openssl", "x509", "-in", str(work / "server.pem"), "-pubkey", "-noout"], check=True, capture_output=True).stdout
+    (work / "server-public.pem").write_bytes(public)
+    subprocess.run(["openssl", "dgst", "-sha256", "-verify", str(work / "server-public.pem"), "-signature", str(work / "signature.bin"), str(work / "payload.bin")], check=True, capture_output=True)
+    plan = json.loads(payload)
+    boot = plan["rescueBoot"]
+    assert plan["kind"] == "REBOOT_RESCUE" and plan["deviceId"] == windows_id and re.fullmatch("[0-9a-f]{64}", boot["ticket"])
+    assert boot["loaderSha256"] == loader_hash and boot["script"].startswith("#!ipxe\n") and ("slt.ticket=" + boot["ticket"]) in boot["script"]
+    loader = agent("GET", f"/agent/v1/jobs/{plan['id']}/rescue-loader", certificate=certificate, raw=True)
+    assert hashlib.sha256(loader).hexdigest() == boot["loaderSha256"] and len(loader) == boot["loaderSizeBytes"]
+    agent("POST", f"/agent/v1/jobs/{plan['id']}/progress", {"phase": "VALIDATING", "bytesProcessed": 0, "bytesTotal": 1}, certificate)
+    agent("POST", f"/agent/v1/jobs/{plan['id']}/result", {"success": True, "message": "Reinício em modo SLT agendado (laboratório).", "details": "REBOOT_SCHEDULED"}, certificate)
+    progress("SLT mode: signed REBOOT_RESCUE received over mTLS; loader hash and server signature verified")
+
+    # The client's "system disk": GPT + EFI System Partition holding what the agent stages.
+    mib = 1024 * 1024
+    system_disk = work / "client-system.raw"
+    with system_disk.open("wb") as stream:
+        stream.truncate(96 * mib)
+    subprocess.run(["sfdisk", "--quiet", str(system_disk)], input=b"label: gpt\nstart=2048, size=131072, type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B, name=\"EFI\"\n", check=True)
+    esp = f"{system_disk}@@{mib}"
+    mtools = {**os.environ, "MTOOLS_SKIP_CHECK": "1"}
+    subprocess.run(["mformat", "-i", esp, "-T", "131072", "-v", "ESP", "::"], check=True, env=mtools)
+    (work / "ipxe.efi").write_bytes(loader)
+    (work / "autoexec.ipxe").write_text(boot["script"], encoding="ascii", newline="\n")
+    # \EFI\SLT is what the Windows agent writes. The copy in \EFI\BOOT only stands in for the
+    # one-time firmware entry (BootNext) that bcdedit creates on a real PC.
+    for directory in ("::/EFI", "::/EFI/SLT", "::/EFI/BOOT"):
+        subprocess.run(["mmd", "-i", esp, directory], check=True, env=mtools)
+    subprocess.run(["mcopy", "-i", esp, str(work / "ipxe.efi"), "::/EFI/SLT/ipxe.efi"], check=True, env=mtools)
+    subprocess.run(["mcopy", "-i", esp, str(work / "autoexec.ipxe"), "::/EFI/SLT/autoexec.ipxe"], check=True, env=mtools)
+    subprocess.run(["mcopy", "-i", esp, str(work / "ipxe.efi"), "::/EFI/BOOT/BOOTX64.EFI"], check=True, env=mtools)
+    subprocess.run(["mcopy", "-i", esp, str(work / "autoexec.ipxe"), "::/EFI/BOOT/autoexec.ipxe"], check=True, env=mtools)
+    system_hash = digest(system_disk)
+    target = work / "format-target.raw"
+    target.write_bytes(bytes((n * 7 + 3) % 251 for n in range(mib)) * 96)
+    target_before = digest(target)
+
+    code, template = firmware_files()
+    variables = work / "OVMF_VARS.fd"
+    shutil.copyfile(template, variables)
+    qmp_path, serial_path = work / "qmp.sock", work / "serial.sock"
+    vm = start(["qemu-system-x86_64", "-no-user-config", "-nodefaults", "-device", "VGA", "-machine", "q35,accel=tcg", "-cpu", "max",
+                "-m", str(args.memory_mib), "-smp", "2", "-display", "none", "-no-reboot",
+                "-qmp", f"unix:{qmp_path},server=on,wait=off", "-serial", f"unix:{serial_path},server=on,wait=off",
+                "-drive", f"if=pflash,format=raw,unit=0,readonly=on,file={code}", "-drive", f"if=pflash,format=raw,unit=1,file={variables}",
+                "-netdev", "tap,id=net0,ifname=slttap0,script=no,downscript=no",
+                # No bootindex on the NIC and its option ROM removed: this VM cannot PXE boot by itself.
+                "-device", "e1000,netdev=net0,mac=52:54:00:77:00:5a,romfile=",
+                "-drive", f"if=none,id=system,file={system_disk},format=raw,readonly=on",
+                "-device", "virtio-blk-pci,drive=system,serial=SLT-CLIENT-SYSTEM,bootindex=0",
+                "-drive", f"if=none,id=target,file={target},format=raw",
+                "-device", "virtio-blk-pci,drive=target,serial=SLT-FORMAT-TARGET",
+                "-smbios", "type=1,manufacturer=SLT_QEMU_ONLY,product=SLT_MODE_LAB"], "slt-mode-qemu")
+    console, qmp = None, None
+    began = time.monotonic()
+    try:
+        wait_for(lambda: serial_path.exists() and qmp_path.exists(), "SLT mode QEMU console")
+        console = GuestConsole(serial_path, args.output / "slt-mode.serial.log")
+        qmp = Qmp(qmp_path)
+        console.qmp = qmp
+        console.expect("SLT_RESCUE_BOOT_READY:UEFI", 900, label="Rescue userspace started from the client's EFI partition")
+        progress("SLT mode: Rescue userspace reached from the local EFI loader (no PXE ROM, ISO or USB)")
+        boot_seconds = time.monotonic() - began
+        # No login, no keyboard: the session must enrol by itself with the ticket.
+        device = wait_for(lambda: next((d for d in request("GET", "/api/v1/devices") if d.get("originDeviceId") == windows_id and d.get("inventory")), None), "SLT mode session enrolled by ticket", 240)
+        assert device["mode"] == "RESCUE" and device["hostname"] == "PC-CLIENTE-LAB (modo SLT)" and device["unattendedWrite"] is True
+        assert "FORMAT_DISK" in device["inventory"]["capabilities"], device["inventory"]["capabilities"]
+        disks = {disk["serial"]: disk for disk in device["inventory"]["disks"]}
+        assert disks["SLT-CLIENT-SYSTEM"]["isReadOnly"] and not disks["SLT-FORMAT-TARGET"]["isReadOnly"]
+        qmp.execute("screendump", {"filename": str(args.output / "slt-mode-session.ppm")})
+        progress("SLT mode: session enrolled with the single-use ticket and sent its mTLS inventory, without typing anything on the client")
+        replay = agent("POST", "/agent/v1/enroll", {"hostname": "intruso", "mode": "RESCUE", "csrPem": csr.read_text(), "secret": os.urandom(32).hex(), "ticket": boot["ticket"]}, expected=403)
+        assert "utilizado" in replay["error"] or "expirado" in replay["error"], replay
+        refused = False
+        try:
+            request("POST", "/api/v1/jobs/plan", {"kind": "FORMAT_DISK", "deviceId": device["id"], "diskFingerprint": disks["SLT-CLIENT-SYSTEM"]["fingerprint"], "consent": True, "format": {"tableType": "GPT", "fileSystem": "NTFS", "label": "X"}})
+        except AssertionError:
+            refused = True
+        assert refused, "format of a write-protected disk was planned"
+        job = request("POST", "/api/v1/jobs/plan", {"kind": "FORMAT_DISK", "deviceId": device["id"], "diskFingerprint": disks["SLT-FORMAT-TARGET"]["fingerprint"], "consent": True, "format": {"tableType": "GPT", "fileSystem": "NTFS", "label": "SLTLAB"}})
+        assert job["plan"]["challenge"].startswith("FORMATAR PC-CLIENTE-LAB (modo SLT) ")
+        request("POST", f"/api/v1/jobs/{job['id']}/approve", {"challenge": job["plan"]["challenge"]})
+        final = wait_for(lambda: next((j for j in request("GET", "/api/v1/jobs") if j["id"] == job["id"] and j["state"] in ("COMPLETED", "FAILED")), None), "FORMAT_DISK ordered from the server in SLT mode", 300)
+        assert final["state"] == "COMPLETED", final
+        report = json.loads(final["result"]["details"])
+        assert report["verified"] and report["fileSystem"] == "NTFS"
+        progress("SLT mode: FORMAT_DISK authorised in the panel API ran on the synthetic disk with no keyboard confirmation on the client")
+        qmp.execute("quit")
+        vm.wait(timeout=20)
+    finally:
+        if qmp:
+            qmp.close()
+        if console:
+            console.close()
+        if vm.poll() is None:
+            vm.terminate()
+            vm.wait(timeout=15)
+    table = json.loads(run("sfdisk", "--json", str(target)))["partitiontable"]
+    assert table["label"] == "gpt" and len(table["partitions"]) == 1 and table["partitions"][0]["start"] == 2048, table
+    filesystem = run("blkid", "-p", "-O", str(mib), "-s", "TYPE", "-o", "value", str(target))
+    label = run("blkid", "-p", "-O", str(mib), "-s", "LABEL", "-o", "value", str(target))
+    assert filesystem == "ntfs" and label == "SLTLAB", (filesystem, label)
+    assert digest(system_disk) == system_hash and digest(target) != target_before
+    request("POST", f"/api/v1/devices/{device['id']}/revoke", {})
+    request("POST", f"/api/v1/devices/{windows_id}/revoke", {})
+    print("PASS slt-mode: UEFI client restarted into Rescue from its own EFI partition, enrolled by ticket, formatted a synthetic disk on server order", flush=True)
+    return {"firmware": "uefi", "bootSource": "LOCAL_EFI_SYSTEM_PARTITION", "pxeRomUsed": False, "isoAttached": False, "usbAttached": False,
+            "windowsAgentSimulated": True, "windowsBootEntryStepCovered": False, "signedPlanVerified": True, "loaderSha256": loader_hash,
+            "ticketEnrollment": True, "ticketSingleUse": True, "ticketHiddenFromAdminListing": True, "keyboardInputOnClient": False,
+            "bootSeconds": round(boot_seconds, 2), "formatVerified": True, "formatTable": table["label"], "formatFileSystem": filesystem,
+            "clientSystemDiskSha256Before": system_hash, "clientSystemDiskSha256After": digest(system_disk),
+            "writeProtectedDiskFormatRefused": True}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--service-dll", type=Path, required=True)
@@ -338,6 +510,15 @@ def main():
                     "sha256": local_hash, "sizeBytes": local_disk.stat().st_size,
                     "installedPersistentSystem": False, "cdromAttached": False, "usbAttached": False}
                 progress("Prepared same-build Linux local-disk fixture (readonly RAW, no CD/USB)")
+            bootstrap = next(profile for profile in profiles if profile["kind"] == "IPXE_BOOTSTRAP")
+            rescue = next(profile for profile in profiles if profile["kind"] == "RESCUE_LINUX")
+            local_loader = next((artifact for artifact in bootstrap["artifacts"] if artifact["id"] == "uefi-local"), None)
+            slt_source = None
+            if local_loader:
+                slt_source = private / "slt-mode-source.json"
+                slt_source.write_text(json.dumps({"httpBase": "http://10.77.0.1:8088", "profileId": rescue["id"],
+                    "loaderPath": str(store / bootstrap["id"] / "uefi-local"), "loaderSha256": local_loader["sha256"],
+                    "loaderSizeBytes": local_loader["sizeBytes"]}))
             results["profiles"] = [{"id": profile["id"], "version": profile["version"],
                                     "artifacts": [{"id": artifact["id"], "sizeBytes": artifact["sizeBytes"], "sha256": artifact["sha256"]}
                                                   for artifact in profile["artifacts"]]} for profile in profiles]
@@ -402,7 +583,8 @@ def main():
             connection = None
             if args.controller_dll:
                 controller = start(["dotnet", str(args.controller_dll), "--state-dir", str(private / "controller"),
-                                    "--bind", "10.77.0.1", "--allowed-subnet", "10.77.0.0/24"], "controller")
+                                    "--bind", "10.77.0.1", "--allowed-subnet", "10.77.0.0/24",
+                                    *(["--lab-rescue-source", str(slt_source)] if slt_source else [])], "controller")
                 connection = wait_for(lambda: json.loads((private / "controller/connection.json").read_text()), "Controller identity")
 
             def request(method, path, body=None):
@@ -727,10 +909,13 @@ def main():
                             vm.terminate()
                             vm.wait(timeout=15)
                 service = start_boot_service()
+            if connection and slt_source and "uefi" in modes:
+                results["sltMode"] = slt_mode_scenario(args, private, start, request, connection, firmware_files, digest(store / bootstrap["id"] / "uefi-local"))
             stop_boot_service(service)
             results["serviceStopped"] = True
             results["serviceStarts"] = service_starts
             results["success"] = True
+            results["sltModeGatePassed"] = bool(results.get("sltMode", {}).get("formatVerified"))
             results["bootAndInventoryGatePassed"] = bool(args.controller_dll) and set(modes) == {"bios", "uefi"} and all(
                 entry.get("csrMtlsInventory") and entry.get("signedInventoryJob") for entry in results["firmware"])
             results["postBootServiceStopGatePassed"] = bool(args.controller_dll) and set(modes) == {"bios", "uefi"} and len(results["firmware"]) == 2 and all(

@@ -8,7 +8,7 @@ import sys
 
 receipt_path, *manifest_paths, output_path = map(Path, sys.argv[1:])
 receipt = json.loads(receipt_path.read_text())
-for gate in ['success', 'namespaceIsolated', 'allOwnedProcessesStopped', 'bootAndInventoryGatePassed', 'postBootServiceStopGatePassed', 'preFilesystemFailureGatePassed', 'duringFilesystemFailureGatePassed', 'localLinuxFallbackGatePassed']:
+for gate in ['success', 'namespaceIsolated', 'allOwnedProcessesStopped', 'bootAndInventoryGatePassed', 'postBootServiceStopGatePassed', 'preFilesystemFailureGatePassed', 'duringFilesystemFailureGatePassed', 'localLinuxFallbackGatePassed', 'sltModeGatePassed']:
     if receipt.get(gate) is not True:
         raise SystemExit('Laboratory gate missing/failed: ' + gate)
 if receipt.get('isoAttached') or receipt.get('usbAttached') or receipt.get('physicalHardwareTested') or receipt.get('secureBoot'):

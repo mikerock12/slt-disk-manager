@@ -57,6 +57,7 @@ type Plan struct {
 	Clone              *CloneOptions      `json:"clone,omitempty"`
 	Deployment         *DeploymentOptions `json:"deployment,omitempty"`
 	StreamID           string             `json:"streamId,omitempty"`
+	Format             *FormatOptions     `json:"format,omitempty"`
 }
 
 // StreamStatus is the server view of a batch clone: hashes of the batches not yet

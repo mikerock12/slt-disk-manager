@@ -46,7 +46,7 @@ func VerifyAssignment(s SignedAssignment, certificate *x509.Certificate, deviceI
 		return p, errors.New("plano expirado ou validade excessiva")
 	}
 	switch p.Kind {
-	case "INVENTORY", "SMART", "CAPTURE", "RESTORE", "DEPLOY_WINDOWS", "DEPLOY_LINUX", "CONVERT_GPT":
+	case "INVENTORY", "SMART", "CAPTURE", "RESTORE", "DEPLOY_WINDOWS", "DEPLOY_LINUX", "CONVERT_GPT", "FORMAT_DISK":
 	default:
 		return p, errors.New("tipo de tarefa não permitido")
 	}
@@ -58,6 +58,13 @@ func VerifyAssignment(s SignedAssignment, certificate *x509.Certificate, deviceI
 	}
 	if p.StreamID != "" && (!identifierPattern.MatchString(p.StreamID) || p.ImageID != "" || p.Kind != "CAPTURE" && p.Kind != "RESTORE" || p.Kind == "RESTORE" && p.Clone == nil) {
 		return p, errors.New("clone em lotes com identificador, tipo ou estratégia inválidos")
+	}
+	if p.Kind == "FORMAT_DISK" {
+		if err := validateFormat(p.Format); err != nil || strings.TrimSpace(p.Challenge) == "" || (p.LogicalSectorBytes != 512 && p.LogicalSectorBytes != 4096) || p.Clone != nil || p.Deployment != nil || p.StreamID != "" || p.ImageID != "" {
+			return p, errors.New("formatação sem opções válidas ou confirmação contextual")
+		}
+	} else if p.Format != nil {
+		return p, errors.New("opções de formatação em tipo de job diferente")
 	}
 	if p.Clone != nil {
 		switch p.Clone.Strategy {
