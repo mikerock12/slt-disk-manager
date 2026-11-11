@@ -57,6 +57,12 @@ try
         Check(answer[0] == 2 && answer.AsSpan(16, 4).SequenceEqual(new byte[4]) && Options(answer)[53][0] == 2, "live ProxyDHCP socket answers a PXE discover without offering an address");
         await pxe.SendAsync(Dhcp(3, "PXEClient:Arch:00007:UNDI:003016", 7, client: IPAddress.Loopback), new IPEndPoint(IPAddress.Loopback, proxy.BootPort));
         Check(Options((await pxe.ReceiveAsync(proxyDeadline.Token)).Buffer)[53][0] == 5, "live boot-server port acknowledges the boot file request");
+        // The address request that follows a discover is for the network's DHCP server, never for the proxy.
+        await pxe.SendAsync(Dhcp(3, "PXEClient:Arch:00007:UNDI:003016", 7, machineUuid), new IPEndPoint(IPAddress.Loopback, proxy.Port));
+        await pxe.SendAsync(Dhcp(1, "PXEClient:Arch:00007:UNDI:003016", 7, machineUuid), new IPEndPoint(IPAddress.Loopback, proxy.BootPort));
+        using var requestSilence = new CancellationTokenSource(700); var ignoredRequest = false;
+        try { await pxe.ReceiveAsync(requestSilence.Token); } catch (OperationCanceledException) { ignoredRequest = true; }
+        Check(ignoredRequest, "ProxyDHCP never acknowledges an address request on the DHCP port, nor a discover on the boot-server port");
         await pxe.SendAsync(Dhcp(1, "MSFT 5.0", -1), new IPEndPoint(IPAddress.Loopback, proxy.Port));
         using var silence = new CancellationTokenSource(700); var silent = false;
         try { await pxe.ReceiveAsync(silence.Token); } catch (OperationCanceledException) { silent = true; }

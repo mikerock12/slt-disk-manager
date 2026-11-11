@@ -124,6 +124,11 @@ Requisitos e limites:
   gravado no disco pelo reinício;
 - instalar **Windows** continua usando o cliente WinPE (pendrive); o modo SLT cobre
   clonagem, formatação, captura, restauração e instalação de Ubuntu/Xubuntu.
+- o modo SLT não foi testado em computadores com **BitLocker**. Ele não altera o disco
+  nem a entrada de boot do Windows, mas tenha a chave de recuperação à mão antes do
+  primeiro uso;
+- depois de reiniciar o servidor, o Boot pela rede volta desligado: ligue-o de novo na
+  página "Boot pela rede" antes de pedir o modo SLT.
 
 ## Diagnóstico
 

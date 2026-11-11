@@ -56,6 +56,10 @@ Plano assinado, validade, disco offline e revalidação local do fingerprint nã
   pendrive.
 - Exige cabo de rede e o Boot pela rede em execução no servidor com o pacote netboot
   da mesma versão.
+- Não testado com BitLocker. O reinício não altera o disco, o gerenciador de boot do
+  Windows nem a ordem permanente de boot, mas cria e remove uma entrada de firmware.
+- Kernel, initrd e sistema chegam por HTTP sem autenticação, como no boot PXE da beta.6:
+  use em rede de bancada. O ticket não trafega por esse canal.
 - O passo do Windows (`bcdedit`, partição EFI) é coberto por testes com executor
   falso e pasta temporária. O restante da cadeia (carregador local, boot, ticket,
   inventário e formatação por ordem do servidor) roda em VM UEFI no laboratório do CI.

@@ -137,7 +137,11 @@ public sealed class ProxyDhcpServer : IAsyncDisposable
                 if (discovery && interfaceIndex >= 0 && received.PacketInformation.Interface != interfaceIndex) continue;
                 var request = Parse(buffer.AsSpan(0, received.ReceivedBytes));
                 // Relayed requests (another subnet) and clients outside the bench network are not served.
-                if (request == null || request.Relayed || !Allow()) continue;
+                if (request == null || request.Relayed) continue;
+                // On the DHCP port only a DISCOVER is answered. The client's later REQUEST belongs to the
+                // network's DHCP server: acknowledging it here (without an address) breaks UEFI firmware,
+                // which treats it as the lease answer. The boot-server port answers REQUEST only.
+                if (request.MessageType != (discovery ? 1 : 3) || !Allow()) continue;
                 if (!remote.Address.Equals(IPAddress.Any) && !network.Contains(remote.Address) && !IPAddress.IsLoopback(remote.Address)) continue;
                 var reply = BuildReply(request, bind);
                 var mac = Convert.ToHexString(request.HardwareAddress.AsSpan(0, 6));
