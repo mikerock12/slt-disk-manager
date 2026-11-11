@@ -40,7 +40,16 @@ public sealed partial class Controller
         Ensure(request.Secret is { Length: 64 } && request.Secret.All(Uri.IsHexDigit), 400, "Secret de pareamento deve ter 32 bytes aleatórios hex.");
         Ensure(request.CsrPem is { Length: < 12000 }, 400, "CSR inválido.");
         _ = CertificateRequest.LoadSigningRequestPem(request.CsrPem, HashAlgorithmName.SHA256, CertificateRequestLoadOptions.Default, RSASignaturePadding.Pkcs1);
-        Ensure(Db.All<Enrollment>("enrollment").Count(e => e.Status == "PENDING" && e.ExpiresAtUtc > DateTimeOffset.UtcNow) < 100, 429, "Limite de pareamentos pendentes.");
+        if (request.Ticket != null) return EnrollWithTicket(request);
+        Ensure(Db.All<Enrollment>("enrollment").Count(e => e.Status is "PENDING" or "COMMITTED" && e.ExpiresAtUtc > DateTimeOffset.UtcNow) < 100, 429, "Limite de pareamentos pendentes.");
+        if (request.Commitment != null)
+        {
+            // Short-code pairing: the code only exists after the client reveals its nonce (see Reveal).
+            Ensure(Pairing.IsHex(request.Commitment, 64), 400, "Compromisso de pareamento inválido.");
+            var committed = new Enrollment(Wire.Id(), request.Hostname, request.Mode, request.CsrPem, Wire.Hash(request.Secret), "", DateTimeOffset.UtcNow.AddMinutes(10), "COMMITTED",
+                Commitment: request.Commitment.ToLowerInvariant(), ServerNonce: Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(32)));
+            Db.Put("enrollment", committed.Id, committed); return committed;
+        }
         var e = new Enrollment(Wire.Id(), request.Hostname, request.Mode, request.CsrPem, Wire.Hash(request.Secret),
             RandomNumberGenerator.GetInt32(10000000, 100000000).ToString(), DateTimeOffset.UtcNow.AddMinutes(10), "PENDING");
         Db.Put("enrollment", e.Id, e); Db.Log("bootstrap", "enrollment.request", $"{e.Id} {e.Hostname} {e.Mode}"); return e;
@@ -56,7 +65,14 @@ public sealed partial class Controller
     {
         var e = Db.Get<Enrollment>("enrollment", id) ?? throw new ApiException(404, "Pareamento não encontrado.");
         Ensure(e.Status == "PENDING" && e.ExpiresAtUtc > DateTimeOffset.UtcNow, 409, "Pareamento expirado ou já processado.");
-        Ensure(SafeEquals(e.Code, code), 400, "Código não corresponde ao exibido no computador cliente.");
+        if (!(e.Code.Length == 8 && SafeEquals(e.Code, code.Trim())))
+        {
+            // A wrong code after discovery may mean another machine answered in place of this server.
+            var failures = e.FailedApprovals + 1;
+            Db.Put("enrollment", id, e with { FailedApprovals = failures, Status = failures >= 5 ? "REJECTED" : e.Status });
+            if (failures >= 5) Db.Log("admin", "enrollment.rejected", id + " código incorreto 5 vezes");
+            throw new ApiException(400, failures >= 5 ? "Código incorreto cinco vezes: solicitação rejeitada. Reinicie o pareamento no cliente." : "Código não corresponde ao exibido no computador cliente.");
+        }
         var deviceId = Wire.Id(); var pem = Certificates.Issue(e.CsrPem, deviceId);
         using var cert = X509Certificate2.CreateFromPem(pem); Db.SetCredential(deviceId, cert.Thumbprint);
         Db.Put("device", deviceId, new Device(deviceId, e.Hostname, e.Mode, "TRUSTED", DateTimeOffset.MinValue, null));
@@ -84,7 +100,7 @@ public sealed partial class Controller
         foreach(var disk in inventory.Disks) if(disk.Layout != null) ClonePlanning.ValidateLayout(disk.Layout, disk.SizeBytes);
         var roots=inventory.FileRoots ?? [];
         Ensure(roots.Length<=32 && roots.Select(r=>r.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count()==roots.Length && roots.All(r=>r.Id is {Length:>0 and <=48} && r.Id.All(ch=>char.IsAsciiLetterOrDigit(ch)||ch is '-' or '_') && r.Label is {Length:>0 and <=128}),400,"Escopos de arquivos inválidos.");
-        Db.Put("device", id, d with { Hostname = inventory.Hostname, LastSeenAtUtc = DateTimeOffset.UtcNow, Inventory = inventory });
+        Db.Put("device", id, d with { Hostname = d.OriginDeviceId != null ? d.Hostname : inventory.Hostname, LastSeenAtUtc = DateTimeOffset.UtcNow, Inventory = inventory });
     }
     public Device Device(string id) => Db.Get<Device>("device", id) ?? throw new ApiException(404, "Máquina não encontrada.");
     public void Revoke(string id)
@@ -99,6 +115,8 @@ public sealed partial class Controller
         if(request.Kind is "FILE_LIST" or "FILE_BACKUP" or "FILE_RESTORE") return Files.Plan(request);
         if(request.Kind is "DEPLOY_WINDOWS" or "DEPLOY_LINUX") return PlanDeployment(request);
         if(request.Kind == "CONVERT_GPT") return PlanConversion(request);
+        if(request.Kind == "REBOOT_RESCUE") return PlanRescueBoot(request, false);
+        if(request.Kind == "FORMAT_DISK") return PlanFormat(request);
         if(request.Kind == "RESTORE" && request.CloneOptions == null) request = request with { CloneOptions = new("EXACT_RAW") };
         Ensure(request.Kind is "INVENTORY" or "SMART" or "CAPTURE" or "RESTORE", 400, "Operação não implementada nesta versão.");
         Ensure(request.Consent, 400, "Registre autorização do responsável antes de criar uma tarefa.");
@@ -145,7 +163,8 @@ public sealed partial class Controller
         if(job.Plan.File != null){ Files.Revalidate(job); return; }
         if(job.Plan.Kind is "DEPLOY_WINDOWS" or "DEPLOY_LINUX"){ RevalidateDeployment(job); return; }
         if(job.Plan.Kind == "CONVERT_GPT"){ RevalidateConversion(job); return; }
-        if (job.Plan.Kind == "INVENTORY") return;
+        if(job.Plan.Kind == "FORMAT_DISK"){ RevalidateFormat(job); return; }
+        if (job.Plan.Kind is "INVENTORY" or "REBOOT_RESCUE") return;
         var disk = d.Inventory!.Disks.SingleOrDefault(x => x.Fingerprint == job.Plan.DiskFingerprint);
         Ensure(disk != null && disk.Path == job.Plan.DiskPath && disk.SizeBytes == job.Plan.DiskSizeBytes && disk.LogicalSectorBytes == job.Plan.LogicalSectorBytes, 409, "Disco mudou após planejamento.");
         if (job.Plan.Kind is "CAPTURE" or "RESTORE")
@@ -170,6 +189,7 @@ public sealed partial class Controller
             Directory.CreateDirectory(ImageDir(image.Id)); Db.Put("image", image.Id, image);
         }
         if(job.Plan.Kind=="FILE_BACKUP") Files.Prepare(job);
+        if(job.Plan.Kind=="REBOOT_RESCUE") job = IssueRescueTicket(job);
         job = job with { State = "QUEUED", ApprovedAtUtc = DateTimeOffset.UtcNow }; Db.Put("job", id, job);
         Db.Log("admin", "job.approved", $"{id} fingerprint={job.Plan.DiskFingerprint}"); return job;
     }

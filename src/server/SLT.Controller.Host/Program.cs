@@ -42,10 +42,11 @@ var tokenPath = Path.Combine(directory, "admin.token");
 var token = File.Exists(tokenPath) ? File.ReadAllText(tokenPath).Trim() : Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(32));
 File.WriteAllText(tokenPath, token);
 File.WriteAllText(Path.Combine(directory, "connection.json"), Wire.Serialize(new { url = $"https://127.0.0.1:{port}", token, serverPin = certs.Pin, processId = Environment.ProcessId }));
-File.WriteAllText(Path.Combine(directory, "server-info.txt"), $"Server: https://{bind}:{port}\nSHA256 pin: {certs.Pin}\nAdmin connection: {Path.Combine(directory, "connection.json")}\n");
+File.WriteAllText(Path.Combine(directory, "server-info.txt"), $"Server: https://{bind}:{port}\nSHA256 pin: {certs.Pin}\nAdmin connection: {Path.Combine(directory, "connection.json")}\nOs clientes desta versão encontram o servidor sozinhos na rede; o pin acima só é necessário para clientes antigos.\n");
 if (!OperatingSystem.IsWindows()) foreach (var file in Directory.GetFiles(directory)) File.SetUnixFileMode(file, UnixFileMode.UserRead | UnixFileMode.UserWrite);
 var store = new Store(directory);
-var controller = new Controller(store, certs, builder.Configuration["repository"] ?? Path.Combine(directory, "repository"));
+var repository = Path.GetFullPath(builder.Configuration["repository"] ?? Path.Combine(directory, "repository"));
+var controller = new Controller(store, certs, repository) { ServerUrl = $"https://{bind}:{port}" };
 // Batch clone window in 4 MiB chunks held on the server at most (default 64 = 256 MiB).
 var window = int.Parse(builder.Configuration["stream-window-chunks"] ?? "64");
 if (window is < 1 or > 1024) throw new InvalidOperationException("--stream-window-chunks deve ficar entre 1 e 1024 lotes de 4 MiB.");
@@ -71,6 +72,18 @@ builder.WebHost.ConfigureKestrel(options =>
 var app = builder.Build();
 var bootExecutable = builder.Configuration["network-boot-executable"] ?? Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../network-boot/SLT.NetworkBoot.Service" + (OperatingSystem.IsWindows() ? ".exe" : "")));
 var networkBoot = new NetworkBootManagement(directory, bootExecutable, (action, details) => { lock (controller.Gate) store.Log("local-admin", action, details); });
+controller.RescueBootProvider = networkBoot.RescueSource;
+// LAN discovery: clients find this server without typing its address or the 64-character pin.
+// The reply grants nothing; the pairing code typed in the panel is what establishes trust.
+DiscoveryResponder? discovery = null;
+var discoveryPort = int.Parse(builder.Configuration["discovery-port"] ?? DiscoveryResponder.DefaultPort.ToString());
+if (!string.Equals(builder.Configuration["discovery"], "off", StringComparison.OrdinalIgnoreCase))
+{
+    if (discoveryPort is < 1024 or > 65535 || discoveryPort == port) throw new InvalidOperationException("--discovery-port deve ficar entre 1024 e 65535 e ser diferente da porta HTTPS.");
+    try { discovery = new DiscoveryResponder(bind, port, discoveryPort, certs.Pin, AppVersion.Current, remote => IPAddress.IsLoopback(bind) ? IPAddress.IsLoopback(remote) : IsPrivate(remote) && allowed?.Contains(remote) == true); }
+    catch (System.Net.Sockets.SocketException e) { Console.Error.WriteLine($"Descoberta na rede desativada: porta UDP {discoveryPort} indisponível ({e.SocketErrorCode}). Os clientes ainda conectam informando o endereço."); }
+}
+app.Lifetime.ApplicationStopping.Register(() => discovery?.Dispose());
 app.Lifetime.ApplicationStopping.Register(() => networkBoot.DisposeAsync().AsTask().GetAwaiter().GetResult());
 app.Use(async (ctx, next) =>
 {
@@ -105,19 +118,25 @@ app.Use(async (ctx, next) =>
 app.UseRateLimiter();
 T Locked<T>(Func<T> operation) { lock (controller.Gate) return operation(); }
 string DeviceId(HttpContext ctx) => (string)ctx.Items["deviceId"]!;
-app.MapGet("/health", () => Results.Ok(new { status = "ok", version = "0.1.0", protocol = 1 }));
-app.MapPost("/agent/v1/enroll", (EnrollmentRequest r) => Locked(() => { var e = controller.Enroll(r); return Results.Ok(new { e.Id, e.Code, e.ExpiresAtUtc }); })).RequireRateLimiting("enroll");
+app.MapGet("/health", () => Results.Ok(new { status = "ok", version = "0.1.0", release = AppVersion.Current, protocol = 1, pairing = 2 }));
+app.MapPost("/agent/v1/enroll", (EnrollmentRequest r) => Locked(() => { var e = controller.Enroll(r); return Results.Ok(new { e.Id, e.Code, e.ExpiresAtUtc, e.ServerNonce }); })).RequireRateLimiting("enroll");
+app.MapPost("/agent/v1/enroll/{id}/reveal", (string id, RevealRequest r, HttpContext ctx) => Locked(() => { var e = controller.Reveal(id, ctx.Request.Headers["X-Enrollment-Secret"].ToString(), r.Nonce); return Results.Ok(new { e.Status, e.ExpiresAtUtc }); })).RequireRateLimiting("enroll");
 app.MapGet("/agent/v1/enroll/{id}", (string id, HttpContext ctx) => Locked(() =>
 {
     var e = controller.GetEnrollment(id, ctx.Request.Headers["X-Enrollment-Secret"].ToString());
     return Results.Ok(new { e.Status, e.DeviceId, e.CertificatePem, caPem = e.Status == "APPROVED" ? certs.CaPem : null });
 })).RequireRateLimiting("enroll");
-app.MapGet("/api/v1/enrollments", () => Locked(() => store.All<Enrollment>("enrollment").Select(e => new { e.Id, e.Hostname, e.Mode, e.Code, e.ExpiresAtUtc, status = e.ExpiresAtUtc < DateTimeOffset.UtcNow && e.Status == "PENDING" ? "EXPIRED" : e.Status }).ToArray()));
+// A short-code request never shows its code here: the operator must read it on the client's own screen.
+app.MapGet("/api/v1/enrollments", () => Locked(() => store.All<Enrollment>("enrollment").Where(e => e.Status != "COMMITTED").Select(e => new { e.Id, e.Hostname, e.Mode, Code = e.Commitment != null || e.Status != "PENDING" ? "" : e.Code, shortCode = e.Commitment != null, e.ExpiresAtUtc, status = e.ExpiresAtUtc < DateTimeOffset.UtcNow && e.Status == "PENDING" ? "EXPIRED" : e.Status }).ToArray()));
+app.MapPost("/api/v1/enrollments/{id}/reject", (string id) => Locked(() => { controller.RejectEnrollment(id); return Results.Ok(new { ok = true }); }));
+app.MapGet("/api/v1/server", () => Results.Ok(new { name = Environment.MachineName, url = controller.ServerUrl, pin = certs.Pin, version = AppVersion.Current, discoveryPort = discovery?.Port, repository, stateDirectory = directory }));
 app.MapPost("/api/v1/enrollments/{id}/approve", (string id, CodeRequest r) => Locked(() => { var e = controller.ApproveEnrollment(id, r.Code); return Results.Ok(new { e.Id, e.Status, e.DeviceId }); }));
 app.MapGet("/api/v1/devices", () => Locked(() => store.All<Device>("device")));
 app.MapGet("/api/v1/devices/{id}", (string id) => Locked(() => controller.Device(id)));
 app.MapPost("/api/v1/devices/{id}/revoke", (string id) => Locked(() => { controller.Revoke(id); return Results.Ok(new { ok = true }); }));
 app.MapPost("/agent/v1/inventory", (Inventory r, HttpContext ctx) => Locked(() => { controller.Inventory(DeviceId(ctx), r); return Results.Ok(new { ok = true }); }));
+app.MapPost("/agent/v1/rescue-boot", (HttpContext ctx) => Locked(() => controller.LocalRescueBoot(DeviceId(ctx))));
+app.MapGet("/agent/v1/jobs/{id}/rescue-loader", (string id, HttpContext ctx) => Locked(() => Results.Bytes(controller.RescueLoader(DeviceId(ctx), id), "application/octet-stream")));
 app.MapGet("/agent/v1/jobs/next", (HttpContext ctx) => Locked(() => controller.Next(DeviceId(ctx)) is {} a ? Results.Ok(a) : (IResult)Results.NoContent()));
 app.MapGet("/api/v1/jobs", () => Locked(() => store.All<Job>("job").Select(Provisioning.WithoutSecrets).ToList()));
 app.MapPost("/api/v1/jobs/plan", (PlanRequest r) => Locked(() => controller.Plan(r)));
@@ -153,7 +172,7 @@ app.MapGet("/api/v1/dashboard", () => Locked(() => new
     images = store.All<ImageManifest>("image").Count(i => i.State == "AVAILABLE"), repositoryFreeBytes = controller.FreeBytes()
 }));
 app.Lifetime.ApplicationStopped.Register(store.Dispose);
-Console.WriteLine($"SLT Disk Manager 0.1.0 | TLS SHA256 {certs.Pin}\nConexão do painel: {Path.Combine(directory, "connection.json")}");
+Console.WriteLine($"SLT Disk Manager {AppVersion.Current} | TLS SHA256 {certs.Pin}\nConexão do painel: {Path.Combine(directory, "connection.json")}");
 app.Run();
 }
 catch (Exception startupError)

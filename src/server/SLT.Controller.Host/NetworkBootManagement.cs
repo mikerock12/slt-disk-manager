@@ -16,10 +16,10 @@ public sealed class NetworkBootManagement : IAsyncDisposable
     private Task? eventReader;
     private NetworkBootConfig config = new();
     private Process? process;
-    private string state = "STOPPED";
+    private volatile string state = "STOPPED";
     private string? lastError;
     private DateTimeOffset? started;
-    private BootProfile[] profiles = [];
+    private volatile BootProfile[] profiles = [];
     public NetworkBootManagement(string directory, string executable, Action<string, string> audit)
     {
         root = Path.Combine(directory, "network-boot"); this.executable = Path.GetFullPath(executable); this.audit = audit;
@@ -168,6 +168,17 @@ public sealed class NetworkBootManagement : IAsyncDisposable
             process?.Dispose(); process = null; state = "STOPPED"; started = null; Record("STOPPED", "Listeners encerrados; jobs do Controller preservados."); return Snapshot();
         }
         finally { gate.Release(); }
+    }
+    // Read without the gate: callers hold the Controller lock, and Record() takes that lock while holding the gate.
+    public (RescueBootSource? Source, string Reason) RescueSource()
+    {
+        var current = state; var c = config; var list = profiles;
+        if (current != "RUNNING" || process is not { HasExited: false }) return (null, "Inicie o Boot pela rede (aba Boot pela rede): o modo SLT carrega o sistema a partir do servidor.");
+        var ipxe = list.SingleOrDefault(p => p.Enabled && p.Kind == "IPXE_BOOTSTRAP"); var loader = ipxe?.Artifacts.SingleOrDefault(a => a.Id == "uefi-local");
+        if (ipxe == null || loader == null) return (null, "O perfil iPXE importado não traz o carregador do modo SLT. Importe o pacote netboot desta versão.");
+        var rescue = list.Where(p => p.Enabled && p.Kind == "RESCUE_LINUX").OrderBy(p => p.Id, StringComparer.Ordinal).LastOrDefault();
+        if (rescue == null) return (null, "Habilite um perfil SLT Rescue no Boot pela rede.");
+        return (new($"http://{c.BindIPv4}:{c.HttpPort}", rescue.Id, BootArtifactStore.SafeFile(Store, ipxe.Id + "/" + loader.RelativePath), loader.Sha256.ToLowerInvariant(), loader.SizeBytes), "");
     }
     public async ValueTask DisposeAsync() { await Stop(); gate.Dispose(); }
 }
