@@ -5,7 +5,7 @@
 > **Repositório:** https://github.com/mikerock12/slt-disk-manager  
 > **Branch-base analisada:** `main` — commit `e87fb042648c2d78da8c17579474122d6b2d70bd` (30/10/2026)  
 > **Documento criado em:** 02/11/2026  
-> **Status:** **PROPOSTA — não implementado; sem testes PXE executados.**  
+> **Status em 10/11/2026:** P0–P2 publicados na beta.6, com Rescue por PXE validado em VMs BIOS e UEFI com DHCP externo. Consulte as [evidências e os limites](docs/NETWORK-BOOT-HOMOLOGACAO.md). ProxyDHCP, P3–P5 e hardware físico seguem pendentes.
 > **Regra de prevalência:** antes de codificar, ler o HEAD atual, `AGENTS.md`, `contexto.md`, `docs/STATUS.md`, a especificação técnica e os contratos vigentes. O código do HEAD prevalece sobre caminhos/contratos exemplificativos deste mapa.
 
 ---
