@@ -6,11 +6,13 @@ param(
     [Parameter(Mandatory)][string]$AllowedCidr,
     [Parameter(Mandatory)][string]$InterfaceAlias,
     [ValidateRange(1024,65535)][int]$HttpPort=8088,
+    # Also open UDP 67 and 4011 for the optional ProxyDHCP mode (PXE clients only; no address is ever offered).
+    [switch]$ProxyDhcp,
     [switch]$Remove
 )
 $ErrorActionPreference='Stop'
 # Explicit elevated operator action only. Never invoked automatically by setup/start.
-$names=@('SLTDiskManagerBootHTTP','SLTDiskManagerBootTFTP')
+$names=@('SLTDiskManagerBootHTTP','SLTDiskManagerBootTFTP','SLTDiskManagerBootProxyDHCP','SLTDiskManagerBootProxyPXE')
 if($Remove){foreach($name in $names){Get-NetFirewallRule -Name $name -ErrorAction SilentlyContinue | Remove-NetFirewallRule};return}
 $Executable=[IO.Path]::GetFullPath($Executable)
 if((Split-Path -Leaf $Executable) -ne 'SLT.NetworkBoot.Service.exe' -or -not(Test-Path -LiteralPath $Executable -PathType Leaf)){throw 'Selecione o executável Network Boot instalado.'}
@@ -35,5 +37,10 @@ try {
     New-NetFirewallRule -Name $names[0] -DisplayName 'SLT Network Boot HTTP bancada' -Direction Inbound -Action Allow -Protocol TCP -LocalPort $HttpPort -LocalAddress $Bind -RemoteAddress $AllowedCidr -InterfaceAlias $InterfaceAlias -Profile Private -Program $Executable | Out-Null
     # TFTP uses UDP69 + ephemeral transfer sockets; constrained to this executable/NIC/CIDR.
     New-NetFirewallRule -Name $names[1] -DisplayName 'SLT Network Boot TFTP bancada' -Direction Inbound -Action Allow -Protocol UDP -LocalAddress $Bind -RemoteAddress $AllowedCidr -InterfaceAlias $InterfaceAlias -Profile Private -Program $Executable | Out-Null
+    if($ProxyDhcp){
+        # PXE clients have no address yet: the discovery arrives from 0.0.0.0 as a broadcast, so it cannot be limited by remote address.
+        New-NetFirewallRule -Name $names[2] -DisplayName 'SLT Network Boot ProxyDHCP bancada' -Direction Inbound -Action Allow -Protocol UDP -LocalPort 67 -InterfaceAlias $InterfaceAlias -Profile Private -Program $Executable | Out-Null
+        New-NetFirewallRule -Name $names[3] -DisplayName 'SLT Network Boot ProxyDHCP porta 4011' -Direction Inbound -Action Allow -Protocol UDP -LocalPort 4011 -LocalAddress $Bind -RemoteAddress $AllowedCidr -InterfaceAlias $InterfaceAlias -Profile Private -Program $Executable | Out-Null
+    }
 } catch {foreach($name in $names){Get-NetFirewallRule -Name $name -ErrorAction SilentlyContinue | Remove-NetFirewallRule};throw}
 Write-Host 'Regras privadas criadas. PXE continua desligado até ação explícita no painel. Use -Remove para reverter.'

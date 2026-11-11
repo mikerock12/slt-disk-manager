@@ -20,14 +20,13 @@ try
     void Report(BootEvent e) { if (ready) Console.WriteLine(BootJson.Serialize(e)); }
     await using var tftp = new TftpBootstrapServer(IPAddress.Parse(launch.Config.BindIPv4), IPNetwork.Parse(launch.Config.AllowedCidr), files, launch.Config.MaxConcurrentTransfers, report: Report);
     await using var http = await BootHttpServer.Start(launch, report: Report);
-    Console.WriteLine(BootJson.Serialize(new { state = "RUNNING" })); ready = true; tftp.Start();
+    // Optional and off by default: answers PXE clients with the boot file name. It never hands out addresses.
+    await using var proxy = launch.Config.Mode == "PROXY_DHCP" ? new ProxyDhcpServer(IPAddress.Parse(launch.Config.BindIPv4), IPNetwork.Parse(launch.Config.AllowedCidr), Report) : null;
+    Console.WriteLine(BootJson.Serialize(new { state = "RUNNING" })); ready = true; tftp.Start(); proxy?.Start();
     // Any command/EOF means stop. No arbitrary remote commands or process launch inputs.
     var input = Console.In.ReadLineAsync();
-    if (await Task.WhenAny(input, tftp.Completion) == tftp.Completion)
-    {
-        await tftp.Completion;
-        throw new IOException("Listener TFTP encerrou inesperadamente; HTTP será encerrado também.");
-    }
+    var failed = await Task.WhenAny(input, tftp.Completion, proxy == null ? Task.Delay(Timeout.Infinite) : proxy.Completion);
+    if (failed != input) throw new IOException("Listener TFTP ou ProxyDHCP encerrou inesperadamente; HTTP será encerrado também.");
     await input;
 }
 catch (Exception e)

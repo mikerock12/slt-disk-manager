@@ -72,8 +72,8 @@ jobs:
           python3 rescue/pxe/test-export-rescue-netboot.py
           python3 rescue/pxe/test-netboot-diagnostics.py
           python3 rescue/pxe/test-boot-failure-observer.py
-      - name: Actual PXE BIOS and UEFI, plus SLT mode from a local EFI partition, in isolated network namespace (no ISO/USB)
-        timeout-minutes: 45
+      - name: Actual PXE BIOS and UEFI, SLT mode from a local EFI partition and ProxyDHCP, in isolated network namespace (no ISO/USB)
+        timeout-minutes: 60
         run: |
           sudo env PATH="$PATH" python3 rescue/pxe/test-netboot-vm.py --service-dll src/network-boot/SLT.NetworkBoot.Service/bin/Release/net10.0/SLT.NetworkBoot.Service.dll --rescue-profile artifacts/rescue-netboot --bootstrap-profile artifacts/ipxe-bootstrap --controller-dll src/server/SLT.Controller.Host/bin/Release/net10.0/SLT.Controller.Host.dll --local-system-image artifacts/rescue-iso/live-image-amd64.hybrid.iso --output artifacts/pxe-lab
           sudo chown -R "$(id -u):$(id -g)" artifacts/pxe-lab

@@ -529,13 +529,14 @@ def main():
             service_starts = 0
             service_log = None
 
-            def start_boot_service():
+            def start_boot_service(mode=None):
                 nonlocal service_starts, service_log
                 name = "boot-service" if service_starts == 0 else f"boot-service-restart-{service_starts}"
                 service_starts += 1
                 service_log = args.output / f"{name}.log"
                 process = start(["dotnet", str(args.service_dll), "--lab"], name, stdin=subprocess.PIPE)
-                process.stdin.write((json.dumps(launch) + "\n").encode())
+                payload = launch if mode is None else {**launch, "config": {**config, "mode": mode}}
+                process.stdin.write((json.dumps(payload) + "\n").encode())
                 process.stdin.flush()
                 wait_for(lambda: '"state":"RUNNING"' in service_log.read_text(errors="replace"), "boot service RUNNING", 90)
                 progress(f"SLT boot service RUNNING ({name})")
@@ -911,10 +912,99 @@ def main():
                 service = start_boot_service()
             if connection and slt_source and "uefi" in modes:
                 results["sltMode"] = slt_mode_scenario(args, private, start, request, connection, firmware_files, digest(store / bootstrap["id"] / "uefi-local"))
+            if set(modes) == {"bios", "uefi"}:
+                # ProxyDHCP: the lab DHCP server stops announcing any boot information. Only SLT's
+                # optional ProxyDHCP tells PXE clients what to load, and it must never hand out an address.
+                progress("Starting ProxyDHCP scenario: plain DHCP server without boot options")
+                stop_boot_service(service)
+                dhcp.terminate()
+                dhcp.wait(timeout=10)
+                plain_leases = private / "leases-plain"
+                plain_config = private / "dnsmasq-plain.conf"
+                plain_config.write_text("\n".join([
+                    "port=0", "interface=sltbr0", "bind-interfaces", "except-interface=lo", "dhcp-authoritative",
+                    "dhcp-range=10.77.0.60,10.77.0.90,255.255.255.0,5m", "dhcp-option=option:router", "dhcp-option=option:dns-server",
+                    f"dhcp-leasefile={plain_leases}", "user=root", ""]))
+                assert "dhcp-boot" not in plain_config.read_text() and "pxe" not in plain_config.read_text()
+                dhcp = start(["dnsmasq", "--keep-in-foreground", "--conf-file=" + str(plain_config)], "external-dhcp-plain")
+                time.sleep(0.3)
+                assert dhcp.poll() is None
+
+                def leased(mac):
+                    return plain_leases.exists() and any(mac in line.lower() and " 10.77.0." in line for line in plain_leases.read_text().splitlines())
+
+                def proxy_vm(mode, mac, name):
+                    for stale in (private / "qmp.sock", private / "serial.sock"):
+                        stale.unlink(missing_ok=True)
+                    firmware = []
+                    if mode == "uefi":
+                        code, template = firmware_files()
+                        variables = private / "OVMF_VARS.fd"
+                        shutil.copyfile(template, variables)
+                        firmware = ["-drive", f"if=pflash,format=raw,unit=0,readonly=on,file={code}", "-drive", f"if=pflash,format=raw,unit=1,file={variables}"]
+                    return start(["qemu-system-x86_64", "-no-user-config", "-nodefaults", "-device", "VGA", "-machine", "q35,accel=tcg", "-cpu", "max",
+                                  "-m", "1024", "-smp", "2", "-display", "none", "-no-reboot",
+                                  "-qmp", f"unix:{private / 'qmp.sock'},server=on,wait=off", "-serial", f"unix:{private / 'serial.sock'},server=on,wait=off",
+                                  "-boot", "order=n,menu=off", "-netdev", "tap,id=net0,ifname=slttap0,script=no,downscript=no",
+                                  "-device", f"e1000,netdev=net0,mac={mac}", "-smbios", "type=1,manufacturer=SLT_QEMU_ONLY,product=SLT_PROXYDHCP_LAB", *firmware], name)
+
+                def address_only(mac, name):
+                    """A PXE client gets its address from the network's DHCP server and no SLT boot menu."""
+                    vm = proxy_vm("bios", mac, name)
+                    console = None
+                    try:
+                        wait_for(lambda: (private / "serial.sock").exists(), "ProxyDHCP control VM console")
+                        console = GuestConsole(private / "serial.sock", args.output / f"{name}.serial.log")
+                        wait_for(lambda: leased(mac), f"plain DHCP lease for {mac}", 120)
+                        time.sleep(8)
+                        assert "SLT Network Boot" not in console.pump(), "boot menu reached without SLT boot information"
+                    finally:
+                        if console:
+                            console.close()
+                        vm.terminate()
+                        vm.wait(timeout=15)
+
+                proxy_result = {"externalDhcpBootOptions": False, "menus": []}
+                address_only("52:54:00:77:00:7a", "proxy-before-qemu")
+                proxy_result["dhcpWorkingBeforeProxy"] = True
+                progress("ProxyDHCP: with the service off, the client gets an address from the lab DHCP and no boot menu")
+                service = start_boot_service("PROXY_DHCP")
+                for mode, mac in (("bios", "52:54:00:77:00:7b"), ("uefi", "52:54:00:77:00:7c")):
+                    vm = proxy_vm(mode, mac, f"proxy-{mode}-qemu")
+                    console = None
+                    try:
+                        wait_for(lambda: (private / "serial.sock").exists(), "ProxyDHCP VM console")
+                        console = GuestConsole(private / "serial.sock", args.output / f"proxy-{mode}.serial.log")
+                        console.expect("SLT Network Boot", 240, label=f"{mode} PXE menu through ProxyDHCP")
+                        events = service_log.read_text(errors="replace")
+                        tag = mac.replace(":", "").upper()
+                        assert leased(mac), "client address did not come from the lab DHCP server"
+                        assert f'"event":"PROXY"' in events and tag in events and "nenhum endere" in events
+                        assert not any(mac in line.lower() and " 10.77.0.1 " in line for line in plain_leases.read_text().splitlines())
+                        proxy_result["menus"].append({"firmware": mode, "menuReached": True, "addressFromExternalDhcp": True, "proxyOfferedAddress": False})
+                        progress(f"ProxyDHCP: {mode.upper()} client reached the SLT menu; its address came from the lab DHCP server")
+                    finally:
+                        if console:
+                            console.close()
+                        vm.terminate()
+                        vm.wait(timeout=15)
+                assert dhcp.poll() is None
+                proxy_result["dhcpWorkingDuringProxy"] = True
+                stop_boot_service(service)
+                with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+                    probe.bind(("10.77.0.1", 4011))
+                address_only("52:54:00:77:00:7d", "proxy-after-qemu")
+                assert dhcp.poll() is None
+                proxy_result["dhcpWorkingAfterProxy"] = True
+                progress("ProxyDHCP: after stopping the service the lab DHCP keeps leasing and no boot menu is offered")
+                results["proxyDhcp"] = proxy_result
+                print("PASS proxydhcp: BIOS and UEFI PXE menus with a DHCP server that sends no boot options; SLT offered no address; DHCP unaffected before, during and after", flush=True)
+                service = start_boot_service()
             stop_boot_service(service)
             results["serviceStopped"] = True
             results["serviceStarts"] = service_starts
             results["success"] = True
+            results["proxyDhcpGatePassed"] = len(results.get("proxyDhcp", {}).get("menus", [])) == 2 and bool(results["proxyDhcp"].get("dhcpWorkingAfterProxy"))
             results["sltModeGatePassed"] = bool(results.get("sltMode", {}).get("formatVerified"))
             results["bootAndInventoryGatePassed"] = bool(args.controller_dll) and set(modes) == {"bios", "uefi"} and all(
                 entry.get("csrMtlsInventory") and entry.get("signedInventoryJob") for entry in results["firmware"])
