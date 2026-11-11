@@ -14,6 +14,9 @@ try {
     $goPath=if($go){$go.Source}else{Join-Path $projectRoot '.tools/go/bin/go.exe'}
     Push-Location src/rescue-agent
     try { & $goPath test ./...; if($LASTEXITCODE -ne 0){throw 'Testes Go falharam.'} } finally {Pop-Location}
+    # Service scripts of the installers, in the Windows PowerShell the setup really uses. Validation mode and synthetic folders only.
+    & (Join-Path $env:WINDIR ('System32','WindowsPowerShell','v1.0','powershell.exe' -join [IO.Path]::DirectorySeparatorChar)) -NoProfile -ExecutionPolicy Bypass -File tests/integration/server-setup-tests.ps1
+    if($LASTEXITCODE -ne 0){throw 'Scripts de serviço dos instaladores falharam.'}
     if($Integration) {
         & ./rescue/windows-pe/Test-WinPEKit.ps1 -AgentPath ./artifacts/slt-winpe-agent.exe
         python tests/integration/rescue-e2e.py

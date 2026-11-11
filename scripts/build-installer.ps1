@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([string]$Version='0.1.0-beta.5.1',[string]$PackageDirectory,[string]$Compiler,[ValidateSet('server','client')][string[]]$Edition=@('server','client'))
+param([string]$Version=((Get-Content -LiteralPath (Join-Path (Split-Path -Parent $PSScriptRoot) 'VERSION') -Raw).Trim()),[string]$PackageDirectory,[string]$Compiler,[ValidateSet('server','client')][string[]]$Edition=@('server','client'))
 $ErrorActionPreference='Stop'
 $root=Split-Path -Parent $PSScriptRoot
 if($Version -notmatch '^[0-9A-Za-z.-]+$'){throw 'Versão inválida.'}
@@ -7,8 +7,8 @@ if(!$PackageDirectory){$PackageDirectory=Join-Path $root "artifacts/SLT-Disk-Man
 $PackageDirectory=(Resolve-Path -LiteralPath $PackageDirectory).Path
 # Separate installers: the server/panel for the bench and the Windows client for serviced PCs.
 $required=@{
- server=@('server/SLT.Controller.Host.exe','network-boot/SLT.NetworkBoot.Service.exe','desktop/SLT.Desktop.exe','windows-pe/slt-winpe-agent.exe','server/tools/7-Zip/7z.exe','server/tools/7-Zip/7z.dll','server/tools/7-Zip/License.txt','install-server/Install-Server.ps1','install-server/Configure-NetworkBootFirewall.ps1')
- client=@('client/SLT.WindowsAgent.exe','client/tools/smartmontools/smartctl.exe','client/tools/smartmontools/COPYING.txt','install-agent/Install-Agent.ps1')
+ server=@('server/SLT.Controller.Host.exe','network-boot/SLT.NetworkBoot.Service.exe','desktop/SLT.Desktop.exe','windows-pe/slt-winpe-agent.exe','server/tools/7-Zip/7z.exe','server/tools/7-Zip/7z.dll','server/tools/7-Zip/License.txt','install-server/Install-Server.ps1','install-server/Update-Server.ps1','install-server/Set-ServerRepository.ps1','install-server/ServerSetup.Common.ps1','install-server/Configure-NetworkBootFirewall.ps1','Executar-Instalacao.ps1')
+ client=@('client/SLT.WindowsAgent.exe','client/tools/smartmontools/smartctl.exe','client/tools/smartmontools/COPYING.txt','client/Hardware/Find-EfiSystemPartition.ps1','install-agent/Install-Agent.ps1','install-agent/Update-Agent.ps1','Modo-SLT.cmd','Executar-Instalacao.ps1')
 }
 $names=@{server='Servidor';client='Cliente'}
 foreach($item in @('SHA256SUMS.txt')+($Edition|ForEach-Object {$required[$_]})){

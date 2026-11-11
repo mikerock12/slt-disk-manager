@@ -71,7 +71,11 @@ builder.WebHost.ConfigureKestrel(options =>
 });
 var app = builder.Build();
 var bootExecutable = builder.Configuration["network-boot-executable"] ?? Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../network-boot/SLT.NetworkBoot.Service" + (OperatingSystem.IsWindows() ? ".exe" : "")));
-var networkBoot = new NetworkBootManagement(directory, bootExecutable, (action, details) => { lock (controller.Gate) store.Log("local-admin", action, details); });
+// Boot profiles (kernel, initrd and a root filesystem of hundreds of MiB) follow --repository so
+// they do not fill the system disk. A server that already keeps them in the state folder, and
+// has nothing in the repository yet, keeps using them where they are.
+var bootRoot = builder.Configuration["repository"] != null && (Directory.Exists(Path.Combine(repository, "network-boot")) || !Directory.Exists(Path.Combine(directory, "network-boot", "store")) || !Directory.EnumerateFileSystemEntries(Path.Combine(directory, "network-boot", "store")).Any()) ? repository : directory;
+var networkBoot = new NetworkBootManagement(bootRoot, bootExecutable, (action, details) => { lock (controller.Gate) store.Log("local-admin", action, details); });
 controller.RescueBootProvider = networkBoot.RescueSource;
 // LABORATORY ONLY (rescue/pxe/test-netboot-vm.py): the isolated namespace starts the boot service
 // itself, so the Controller is told where that service is instead of managing it.
@@ -137,7 +141,7 @@ app.MapGet("/agent/v1/enroll/{id}", (string id, HttpContext ctx) => Locked(() =>
 // A short-code request never shows its code here: the operator must read it on the client's own screen.
 app.MapGet("/api/v1/enrollments", () => Locked(() => store.All<Enrollment>("enrollment").Where(e => e.Status != "COMMITTED").Select(e => new { e.Id, e.Hostname, e.Mode, Code = e.Commitment != null || e.Status != "PENDING" ? "" : e.Code, shortCode = e.Commitment != null, e.ExpiresAtUtc, status = e.ExpiresAtUtc < DateTimeOffset.UtcNow && e.Status == "PENDING" ? "EXPIRED" : e.Status }).ToArray()));
 app.MapPost("/api/v1/enrollments/{id}/reject", (string id) => Locked(() => { controller.RejectEnrollment(id); return Results.Ok(new { ok = true }); }));
-app.MapGet("/api/v1/server", () => Results.Ok(new { name = Environment.MachineName, url = controller.ServerUrl, pin = certs.Pin, version = AppVersion.Current, discoveryPort = discovery?.Port, repository, stateDirectory = directory }));
+app.MapGet("/api/v1/server", () => Results.Ok(new { name = Environment.MachineName, url = controller.ServerUrl, pin = certs.Pin, version = AppVersion.Current, discoveryPort = discovery?.Port, repository, stateDirectory = directory, bootStore = Path.Combine(bootRoot, "network-boot") }));
 app.MapPost("/api/v1/enrollments/{id}/approve", (string id, CodeRequest r) => Locked(() => { var e = controller.ApproveEnrollment(id, r.Code); return Results.Ok(new { e.Id, e.Status, e.DeviceId }); }));
 app.MapGet("/api/v1/devices", () => Locked(() => store.All<Device>("device")));
 app.MapGet("/api/v1/devices/{id}", (string id) => Locked(() => controller.Device(id)));

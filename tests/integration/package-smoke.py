@@ -74,6 +74,10 @@ with (state / 'server.log').open('w', encoding='utf-8') as log:
                 time.sleep(.25)
         for path in ['/api/v1/devices', '/api/v1/clones', '/api/v1/file-bundles', '/api/v1/media']:
             assert api(path) == []
+        release = (project / 'VERSION').read_text(encoding='utf-8').strip()
+        identity = api('/api/v1/server')
+        assert identity['version'] == release and api('/health')['release'] == release, identity
+        assert identity['pin'] == connection['serverPin'] and identity['discoveryPort'] in (None, 7444)
         boot = api('/api/v1/network-boot/status')
         assert boot['state'] == 'STOPPED' and boot['profiles'] == [] and boot['startedAtUtc'] is None
         assert (folder / 'network-boot/SLT.NetworkBoot.Service.exe').is_file()

@@ -1,17 +1,43 @@
-#Requires -RunAsAdministrator
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)][string]$PackageDirectory,
-    [Parameter(Mandatory = $true)][string]$Server,
-    [Parameter(Mandatory = $true)][ValidatePattern('^[A-Fa-f0-9]{64}$')][string]$ServerPin,
-    [string]$InstallDirectory = (Join-Path $env:ProgramFiles 'SLT Disk Manager\WindowsAgent'),
+    # Optional: without an address the client looks for the server on the local network and
+    # shows a pairing code of 8 digits to be typed in the server panel.
+    [string]$Server,
+    [ValidatePattern('^([A-Fa-f0-9]{64})?$')][string]$ServerPin,
+    [string]$InstallDirectory,
     [string]$StateDirectory = (Join-Path $env:ProgramData 'SLT\WindowsAgent'),
     [string]$SmartctlPath,
     [string]$FileRootsPath,
-    [switch]$SkipStart
+    [switch]$SkipStart,
+    # Checks the parameters and prints the planned folders; installs nothing. Needs no elevation.
+    [switch]$ValidateOnly
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+
+# The setup program is 32-bit; a 32-bit PowerShell reports "Program Files (x86)" as Program Files.
+if ([Environment]::Is64BitOperatingSystem -and -not [Environment]::Is64BitProcess) {
+    $native = Join-Path $env:WINDIR 'Sysnative\WindowsPowerShell\v1.0\powershell.exe'
+    $forward = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $PSCommandPath)
+    foreach ($entry in $PSBoundParameters.GetEnumerator()) {
+        if ($entry.Value -is [switch]) { if ($entry.Value.IsPresent) { $forward += "-$($entry.Key)" } }
+        else { $forward += @("-$($entry.Key)", [string]$entry.Value) }
+    }
+    & $native @forward
+    exit $LASTEXITCODE
+}
+if (-not $InstallDirectory) {
+    $programFiles = if ($env:ProgramW6432) { $env:ProgramW6432 } else { $env:ProgramFiles }
+    $InstallDirectory = Join-Path $programFiles 'SLT Disk Manager\WindowsAgent'
+}
+if ($ServerPin -and -not $Server) { throw 'ServerPin exige Server.' }
+if ($ValidateOnly) {
+    [pscustomobject]@{ installDirectory = [IO.Path]::GetFullPath($InstallDirectory); stateDirectory = [IO.Path]::GetFullPath($StateDirectory); server = $Server; discovery = (-not $Server); is64BitProcess = [Environment]::Is64BitProcess } | ConvertTo-Json -Compress
+    return
+}
+$identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+if (-not (New-Object Security.Principal.WindowsPrincipal($identity)).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw 'Execute como Administrador.' }
 
 function Assert-SafePath([string]$Value) {
     if ([string]::IsNullOrWhiteSpace($Value) -or $Value.Contains('"') -or $Value.Contains("`r") -or $Value.Contains("`n")) {
@@ -37,7 +63,7 @@ function Assert-NoReparseAncestors([string]$Value) {
 }
 
 if (Get-Service -Name 'SLTWindowsAgent' -ErrorAction SilentlyContinue) {
-    throw 'SLTWindowsAgent ja existe. Desinstale explicitamente o servico antes de instalar nova versao; o estado de pareamento sera preservado.'
+    throw 'SLTWindowsAgent ja existe. Para atualizar os programas use Update-Agent.ps1; o pareamento e preservado.'
 }
 $source = (Resolve-Path -LiteralPath (Assert-SafePath $PackageDirectory)).Path
 $installPath = Assert-SafePath $InstallDirectory
@@ -63,10 +89,12 @@ if ($SmartctlPath) {
     $SmartctlPath = (Resolve-Path -LiteralPath (Assert-SafePath $SmartctlPath)).Path
     if (-not (Test-Path -LiteralPath $SmartctlPath -PathType Leaf)) { throw 'smartctl.exe nao encontrado.' }
 }
-$uri = [Uri]$Server
-$address = $null
-if ($uri.Scheme -ne 'https' -or $uri.UserInfo -or $uri.AbsolutePath -ne '/' -or $uri.Query -or $uri.Fragment -or
-    -not [Net.IPAddress]::TryParse($uri.Host, [ref]$address)) { throw 'Server exige HTTPS com IP literal da LAN.' }
+if ($Server) {
+    $uri = [Uri]$Server
+    $address = $null
+    if ($uri.Scheme -ne 'https' -or $uri.UserInfo -or $uri.AbsolutePath -ne '/' -or $uri.Query -or $uri.Fragment -or
+        -not [Net.IPAddress]::TryParse($uri.Host, [ref]$address)) { throw 'Server exige HTTPS com IP literal da LAN.' }
+}
 # O executavel tambem valida LAN, pin, certificados e caminhos antes de parear.
 
 New-Item -ItemType Directory -Path $installPath -Force | Out-Null
@@ -92,7 +120,11 @@ foreach ($sid in @('S-1-5-18', 'S-1-5-32-544')) {
 }
 Set-Acl -LiteralPath $statePath -AclObject $stateAcl
 $agent = Join-Path $installPath $agentName
-$agentArguments = @('--server', $Server, '--server-pin', $ServerPin, '--state-dir', $statePath)
+# Address and pin are remembered in the private state after pairing; the service needs only the state folder.
+$agentArguments = @('--state-dir', $statePath)
+$pairingArguments = @()
+if ($Server) { $pairingArguments += @('--server', $Server) }
+if ($ServerPin) { $pairingArguments += @('--server-pin', $ServerPin) }
 if ($SmartctlPath) { $agentArguments += @('--smartctl', $SmartctlPath) }
 if ($null -ne $scopeJson) {
     $privateScopes = Join-Path $statePath 'file-roots.json'
@@ -107,8 +139,8 @@ if ($null -ne $scopeJson) {
     $agentArguments += @('--file-roots', $privateScopes)
 }
 
-Write-Host 'Iniciando pareamento local. Confira o codigo no servidor e aprove a maquina correta.'
-& $agent @agentArguments --once
+Write-Host 'Conectando ao servidor. O codigo de 8 digitos aparece abaixo: digite-o no painel do servidor (Conectar computador).'
+& $agent @agentArguments @pairingArguments --once
 if ($LASTEXITCODE -ne 0) { throw 'Pareamento/inventario inicial falhou. Nenhum servico foi criado.' }
 
 $commandParts = @('"' + $agent + '"')
