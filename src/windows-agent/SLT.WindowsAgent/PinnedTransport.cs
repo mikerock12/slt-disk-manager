@@ -38,8 +38,24 @@ public sealed class PinnedTransport : IDisposable, IFileJobTransport
             ServerCertificate = X509CertificateLoader.LoadCertificate(certificate.RawData);
             return true;
         };
-        client = new HttpClient(handler) { BaseAddress = options.Server, Timeout = TimeSpan.FromSeconds(60) };
+        client = new HttpClient(handler) { BaseAddress = options.Server ?? throw new InvalidOperationException("Servidor não definido."), Timeout = TimeSpan.FromSeconds(60) };
         client.DefaultRequestHeaders.Add("User-Agent", "SLT.WindowsAgent/0.1.0");
+    }
+    // Reads the certificate a server presents, without trusting it: the caller must still confirm
+    // the resulting pin through the short pairing code before any credential is accepted.
+    public static async Task<string> ObservePin(Uri server, CancellationToken ct)
+    {
+        string? seen = null;
+        using var handler = new HttpClientHandler { AllowAutoRedirect = false, UseProxy = false, SslProtocols = SslProtocols.Tls12 | SslProtocols.Tls13 };
+        handler.ServerCertificateCustomValidationCallback = (_, certificate, _, _) =>
+        {
+            if (certificate is null) return false;
+            seen = Convert.ToHexStringLower(SHA256.HashData(certificate.RawData));
+            return true;
+        };
+        using var probe = new HttpClient(handler) { BaseAddress = server, Timeout = TimeSpan.FromSeconds(15) };
+        using var response = await probe.GetAsync("/health", ct);
+        return seen ?? throw new HttpRequestException("Servidor não apresentou certificado.");
     }
     public static bool VerifyPin(X509Certificate2 certificate, string expected, DateTimeOffset now)
     {
@@ -49,9 +65,11 @@ public sealed class PinnedTransport : IDisposable, IFileJobTransport
         try { bytes = Convert.FromHexString(expected); } catch (FormatException) { return false; }
         return CryptographicOperations.FixedTimeEquals(SHA256.HashData(certificate.RawData), bytes);
     }
-    public async Task<T> Post<T>(string path, object body, CancellationToken ct)
+    public async Task<T> Post<T>(string path, object body, CancellationToken ct, string? enrollmentSecret = null)
     {
-        using var response = await client.PostAsJsonAsync(path, body, Wire.Json, ct);
+        using var request = new HttpRequestMessage(HttpMethod.Post, path) { Content = JsonContent.Create(body, body.GetType(), options: Wire.Json) };
+        if (enrollmentSecret is not null) request.Headers.Add("X-Enrollment-Secret", enrollmentSecret);
+        using var response = await client.SendAsync(request, ct);
         await EnsureSuccess(response, ct);
         return (await response.Content.ReadFromJsonAsync<T>(Wire.Json, ct)) ?? throw new HttpRequestException("Resposta vazia do servidor.");
     }
@@ -117,8 +135,10 @@ public sealed class PinnedTransport : IDisposable, IFileJobTransport
         if (!Guid.TryParse(plan.Id, out _) || plan.DeviceId != deviceId || !plan.Consent ||
             plan.ExpiresAtUtc <= now || plan.ExpiresAtUtc > now.AddHours(24))
             throw new InvalidOperationException("Plano expirado ou com identidade/autorização inválida.");
-        if (plan.Kind is not ("INVENTORY" or "SMART" or "FILE_LIST" or "FILE_BACKUP" or "FILE_RESTORE"))
+        if (plan.Kind is not ("INVENTORY" or "SMART" or "FILE_LIST" or "FILE_BACKUP" or "FILE_RESTORE" or "REBOOT_RESCUE"))
             throw new InvalidOperationException("Tipo de job não permitido no agente Windows.");
+        if (plan.Kind == "REBOOT_RESCUE") RescueBoot.ValidateOptions(plan.RescueBoot ?? throw new InvalidOperationException("Reinício em modo SLT sem opções assinadas."));
+        else if (plan.RescueBoot is not null) throw new InvalidOperationException("Opções de modo SLT em job de outro tipo.");
         if (plan.Kind.StartsWith("FILE_", StringComparison.Ordinal))
         {
             if (plan.File is null) throw new InvalidOperationException("Job de arquivo sem escopo assinado.");

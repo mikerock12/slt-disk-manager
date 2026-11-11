@@ -16,10 +16,10 @@ public sealed class NetworkBootManagement : IAsyncDisposable
     private Task? eventReader;
     private NetworkBootConfig config = new();
     private Process? process;
-    private string state = "STOPPED";
+    private volatile string state = "STOPPED";
     private string? lastError;
     private DateTimeOffset? started;
-    private BootProfile[] profiles = [];
+    private volatile BootProfile[] profiles = [];
     public NetworkBootManagement(string directory, string executable, Action<string, string> audit)
     {
         root = Path.Combine(directory, "network-boot"); this.executable = Path.GetFullPath(executable); this.audit = audit;
@@ -61,7 +61,7 @@ public sealed class NetworkBootManagement : IAsyncDisposable
             EnsureStopped(); var validation = NetworkTopologyValidator.Validate(value);
             if (!validation.Valid) throw new ApiException(400, string.Join(" ", validation.Errors));
             var temp = ConfigPath + ".tmp"; File.WriteAllText(temp, BootJson.Serialize(value)); File.Move(temp, ConfigPath, true);
-            config = value; lastError = null; Record("CONFIGURED", $"Interface {value.InterfaceId}, {value.BindIPv4}, {value.AllowedCidr}, EXTERNAL_DHCP."); return config;
+            config = value; lastError = null; Record("CONFIGURED", $"Interface {value.InterfaceId}, {value.BindIPv4}, {value.AllowedCidr}, {value.Mode}."); return config;
         }
         finally { gate.Release(); }
     }
@@ -83,6 +83,16 @@ public sealed class NetworkBootManagement : IAsyncDisposable
                 tcp.Bind(new IPEndPoint(IPAddress.Parse(config.BindIPv4), config.HttpPort));
             }
             catch (SocketException e) { errors.Add("Conflito/permissão de portas TFTP69/HTTP: " + e.SocketErrorCode); }
+            if (config.Mode == "PROXY_DHCP")
+            {
+                try
+                {
+                    // Exclusive on purpose: another DHCP or PXE service on this computer must make the start fail.
+                    using var dhcp = new UdpClient(new IPEndPoint(IPAddress.Any, 67));
+                    using var boot = new UdpClient(new IPEndPoint(IPAddress.Parse(config.BindIPv4), 4011));
+                }
+                catch (SocketException e) { errors.Add("ProxyDHCP: portas UDP 67/4011 ocupadas ou sem permissão (" + e.SocketErrorCode + "). Há outro servidor DHCP/PXE neste computador?"); }
+            }
         }
         return new(errors.Count == 0, errors.ToArray(), initial.Warnings);
     }
@@ -130,7 +140,7 @@ public sealed class NetworkBootManagement : IAsyncDisposable
                 var reply = await process.StandardOutput.ReadLineAsync(timeout.Token);
                 using var json = System.Text.Json.JsonDocument.Parse(reply ?? "{}");
                 if (!json.RootElement.TryGetProperty("state", out var response) || response.GetString() != "RUNNING") throw new IOException(json.RootElement.TryGetProperty("error", out var error) ? error.GetString() : "Processo não confirmou os listeners.");
-                state = "RUNNING"; started = DateTimeOffset.UtcNow; Record("STARTED", $"{config.BindIPv4}:69/{config.HttpPort}; rede isolada confirmada localmente.");
+                state = "RUNNING"; started = DateTimeOffset.UtcNow; Record("STARTED", $"{config.BindIPv4}:69/{config.HttpPort}; {config.Mode}; rede isolada confirmada localmente.");
                 var reader = process.StandardOutput;
                 eventReader = Task.Run(async () =>
                 {
@@ -140,7 +150,7 @@ public sealed class NetworkBootManagement : IAsyncDisposable
                         {
                             if (item.Length > 2048) continue;
                             var value = BootJson.Parse<BootEvent>(item);
-                            if (value.Event is "TFTP" or "HTTP" or "HTTP_BEGIN" && value.Message.Length <= 1024) AddEvent(value);
+                            if (value.Event is "TFTP" or "HTTP" or "HTTP_BEGIN" or "PROXY" && value.Message.Length <= 1024) AddEvent(value);
                         }
                     }
                     catch (Exception e) when (e is IOException or ObjectDisposedException or System.Text.Json.JsonException or InvalidDataException) { }
@@ -168,6 +178,17 @@ public sealed class NetworkBootManagement : IAsyncDisposable
             process?.Dispose(); process = null; state = "STOPPED"; started = null; Record("STOPPED", "Listeners encerrados; jobs do Controller preservados."); return Snapshot();
         }
         finally { gate.Release(); }
+    }
+    // Read without the gate: callers hold the Controller lock, and Record() takes that lock while holding the gate.
+    public (RescueBootSource? Source, string Reason) RescueSource()
+    {
+        var current = state; var c = config; var list = profiles;
+        if (current != "RUNNING" || process is not { HasExited: false }) return (null, "Inicie o Boot pela rede (aba Boot pela rede): o modo SLT carrega o sistema a partir do servidor.");
+        var ipxe = list.SingleOrDefault(p => p.Enabled && p.Kind == "IPXE_BOOTSTRAP"); var loader = ipxe?.Artifacts.SingleOrDefault(a => a.Id == "uefi-local");
+        if (ipxe == null || loader == null) return (null, "O perfil iPXE importado não traz o carregador do modo SLT. Importe o pacote netboot desta versão.");
+        var rescue = list.Where(p => p.Enabled && p.Kind == "RESCUE_LINUX").OrderBy(p => p.Id, StringComparer.Ordinal).LastOrDefault();
+        if (rescue == null) return (null, "Habilite um perfil SLT Rescue no Boot pela rede.");
+        return (new($"http://{c.BindIPv4}:{c.HttpPort}", rescue.Id, BootArtifactStore.SafeFile(Store, ipxe.Id + "/" + loader.RelativePath), loader.Sha256.ToLowerInvariant(), loader.SizeBytes), "");
     }
     public async ValueTask DisposeAsync() { await Stop(); gate.Dispose(); }
 }

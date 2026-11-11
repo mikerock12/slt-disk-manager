@@ -1,0 +1,11 @@
+#!ipxe
+echo SLT Disk Manager - iniciando o modo SLT pela rede local
+dhcp || goto failed
+imgfree
+kernel --name vmlinuz http://192.168.50.10:8088/boot/v1/assets/rescue-test-kernel boot=live components nopersistence noeject fetch=http://192.168.50.10:8088/boot/v1/assets/rescue-test-rootfs.squashfs hostname=slt-rescue username=technician initrd=initrd.img console=ttyS0,115200n8 console=tty0 slt.server=https://192.168.50.10:7443 slt.pin={PIN} slt.ticket={TICKET} slt.write=1 || goto failed
+initrd --name initrd.img http://192.168.50.10:8088/boot/v1/assets/rescue-test-initrd || goto failed
+boot || goto failed
+:failed
+echo Falha ao iniciar o modo SLT. Nenhum disco foi modificado. Voltando ao sistema instalado.
+sleep 8
+exit

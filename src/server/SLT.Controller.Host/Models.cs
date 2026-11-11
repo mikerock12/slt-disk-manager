@@ -21,15 +21,27 @@ public record DiskInfo(string Id, string Path, string Model, string Serial, long
 }
 public record Inventory(string DeviceId, string Hostname, string Os, string Mode, string AgentVersion,
     string[] Capabilities, DiskInfo[] Disks, DateTimeOffset CapturedAtUtc, string[] Notes, FileRootInfo[]? FileRoots = null);
-public record Device(string Id, string Hostname, string Mode, string TrustStatus, DateTimeOffset LastSeenAtUtc, Inventory? Inventory);
-public record EnrollmentRequest(string Hostname, string Mode, string CsrPem, string Secret);
+// OriginDeviceId links an "SLT mode" Rescue session to the paired Windows client that requested the reboot.
+public record Device(string Id, string Hostname, string Mode, string TrustStatus, DateTimeOffset LastSeenAtUtc, Inventory? Inventory, string? OriginDeviceId = null, bool UnattendedWrite = false);
+// Commitment selects the short-code pairing used after LAN discovery (docs/ADR/003). Ticket is the
+// single-use credential a paired Windows client receives over mTLS before rebooting into SLT mode.
+public record EnrollmentRequest(string Hostname, string Mode, string CsrPem, string Secret, string? Commitment = null, string? Ticket = null);
 public record Enrollment(string Id, string Hostname, string Mode, string CsrPem, string SecretHash, string Code,
-    DateTimeOffset ExpiresAtUtc, string Status, string? DeviceId = null, string? CertificatePem = null);
+    DateTimeOffset ExpiresAtUtc, string Status, string? DeviceId = null, string? CertificatePem = null,
+    string? Commitment = null, string? ServerNonce = null, int FailedApprovals = 0);
 public record CodeRequest(string Code);
+public record RevealRequest(string Nonce);
+public record RenewRequest(string CsrPem);
+public record RescueBootRequest(bool UnattendedWrite = true);
+// Script and Ticket are secrets until the job ends: admin listings mask them (Provisioning.WithoutSecrets).
+public record RescueBootOptions(string LoaderSha256, long LoaderSizeBytes, string Script, string Ticket, bool UnattendedWrite, int RebootDelaySeconds = 30);
+public record RescueTicket(string Hash, string OriginDeviceId, string Hostname, string JobId, DateTimeOffset ExpiresAtUtc, bool UnattendedWrite, bool Used = false);
+public record RescueBootSource(string HttpBase, string ProfileId, string LoaderPath, string LoaderSha256, long LoaderSizeBytes);
+public record FormatOptions(string TableType, string FileSystem, string Label = "");
 public record ApprovalRequest(string Challenge);
-public record PlanRequest(string Kind, string DeviceId, string DiskFingerprint, string? ImageId, bool Consent, FileRequest? File = null, [property:JsonPropertyName("clone")] CloneOptions? CloneOptions = null, DeploymentOptions? Deployment = null);
+public record PlanRequest(string Kind, string DeviceId, string DiskFingerprint, string? ImageId, bool Consent, FileRequest? File = null, [property:JsonPropertyName("clone")] CloneOptions? CloneOptions = null, DeploymentOptions? Deployment = null, RescueBootRequest? RescueBoot = null, FormatOptions? Format = null);
 public record JobPlan(string Id, string Kind, string DeviceId, string DiskFingerprint, string DiskPath,
-    long DiskSizeBytes, int LogicalSectorBytes, string ImageId, string Challenge, DateTimeOffset ExpiresAtUtc, bool Consent, FileRequest? File = null, [property:JsonPropertyName("clone")] CloneOptions? CloneOptions = null, DeploymentOptions? Deployment = null, string? StreamId = null);
+    long DiskSizeBytes, int LogicalSectorBytes, string ImageId, string Challenge, DateTimeOffset ExpiresAtUtc, bool Consent, FileRequest? File = null, [property:JsonPropertyName("clone")] CloneOptions? CloneOptions = null, DeploymentOptions? Deployment = null, string? StreamId = null, RescueBootOptions? RescueBoot = null, FormatOptions? Format = null);
 public record SignedAssignment(string Payload, string Signature);
 public record Progress(string Phase, long BytesProcessed, long BytesTotal);
 public record JobResult(bool Success, string Message, string Details);

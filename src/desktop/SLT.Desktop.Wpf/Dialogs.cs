@@ -11,7 +11,8 @@ public sealed class PlanApprovalWindow : Window
 
     public PlanApprovalWindow(Job job, Device? device, DiskInfo? disk, ImageManifest? image, FileBundle? bundle = null, FileRootInfo? fileRoot = null, DeploymentMedia? media = null)
     {
-        Title = job.Plan.Kind is "RESTORE" or "DEPLOY_WINDOWS" or "DEPLOY_LINUX" or "CONVERT_GPT" ? "Confirmar sobrescrita do disco de destino" : "Examinar e aprovar tarefa";
+        Title = job.Plan.Kind is "RESTORE" or "DEPLOY_WINDOWS" or "DEPLOY_LINUX" or "CONVERT_GPT" ? "Confirmar sobrescrita do disco de destino" : job.Plan.Kind == "FORMAT_DISK" ? "Confirmar formatação do disco" : "Examinar e aprovar tarefa";
+        Style = (Style)Application.Current.FindResource("AppWindow");
         Width = 790;
         Height = 740;
         MinWidth = 650;
@@ -21,23 +22,32 @@ public sealed class PlanApprovalWindow : Window
         layout.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         var content = new StackPanel();
-        void Text(string text, double size = 14, bool bold = false, Brush? color = null)
+        void Text(string text, double size = 15, bool bold = false, Brush? color = null)
         {
             content.Children.Add(new TextBlock { Text = text, FontSize = size, FontWeight = bold ? FontWeights.SemiBold : FontWeights.Normal,
-                TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 13), Foreground = color ?? Brushes.WhiteSmoke });
+                TextWrapping = TextWrapping.Wrap, LineHeight = size < 17 ? 22 : double.NaN, Margin = new Thickness(0, 0, 0, 13), Foreground = color ?? Brushes.WhiteSmoke });
         }
-        Text($"{job.Plan.Kind} • revisão do plano", 23, true);
-        Text($"Tarefa: {job.Id}\nComputador: {device?.Hostname ?? job.Plan.DeviceId}\nModo: {device?.Mode ?? "não disponível"}");
-        if (job.Plan.File is { } files)
+        Text($"{Display.JobKind(job.Plan.Kind)} • revisão do plano", 23, true);
+        Text($"Tarefa: {job.Id}\nComputador: {device?.Hostname ?? job.Plan.DeviceId}\nModo: {device?.ModeLabel ?? "não disponível"}");
+        if (job.Plan.Kind == "REBOOT_RESCUE")
         {
-            Text(job.Plan.Kind == "FILE_RESTORE" ? "ORIGEM — BACKUP NO SERVIDOR" : "ORIGEM — ARQUIVOS AUTORIZADOS NO CLIENTE", 14, true, Brushes.SandyBrown);
+            Text("O COMPUTADOR DO CLIENTE SERÁ REINICIADO", 16, true, Brushes.SandyBrown);
+            Text("O Windows avisa na tela e reinicia em cerca de 30 segundos. O computador inicia o sistema SLT pela rede, a partir deste servidor, sem pendrive, e volta a aparecer aqui como “modo SLT”. O disco e o Windows instalado não são alterados por este reinício.");
+            Text(job.Plan.RescueBoot?.UnattendedWrite == true
+                ? "Gravação controlada pelo servidor: no modo SLT, clonagens, formatações e instalações aprovadas neste painel são executadas sem nova confirmação no teclado do cliente."
+                : "Somente leitura: no modo SLT este computador só aceitará inventário, diagnóstico e captura de imagem.", 15, false, Brushes.SandyBrown);
+            Text("Requisitos: firmware UEFI com Secure Boot desativado, cabo de rede e o Boot pela rede em execução neste servidor. Se algo falhar, o computador volta ao Windows sozinho.");
+        }
+        else if (job.Plan.File is { } files)
+        {
+            Text(job.Plan.Kind == "FILE_RESTORE" ? "ORIGEM — BACKUP NO SERVIDOR" : "ORIGEM — ARQUIVOS AUTORIZADOS NO CLIENTE", 15, true, Brushes.SandyBrown);
             if (job.Plan.Kind == "FILE_RESTORE") Text($"{bundle?.Name ?? files.Name}\nBundle: {files.BundleId}\n{bundle?.EntryCount.ToString() ?? "—"} entradas • {Display.Bytes(bundle?.TotalBytes ?? 0)}");
             Text($"Raiz autorizada: {fileRoot?.Label ?? files.RootId}\nID da raiz: {files.RootId}");
             if (job.Plan.Kind == "FILE_BACKUP")
             {
                 Text("Caminhos relativos selecionados:\n" + string.Join("\n", files.Paths));
-                Text($"DESTINO — REPOSITÓRIO DO SERVIDOR\nNome: {files.Name}\nBundle: {files.BundleId}", 14, true);
-                Text("Pastas selecionadas incluem conteúdo e diretórios vazios. Não é snapshot VSS: arquivo alterado durante a leitura deve falhar em vez de produzir backup inconsistente.", 14, false, Brushes.SandyBrown);
+                Text($"DESTINO — REPOSITÓRIO DO SERVIDOR\nNome: {files.Name}\nBundle: {files.BundleId}", 15, true);
+                Text("Pastas selecionadas incluem conteúdo e diretórios vazios. Não é snapshot VSS: arquivo alterado durante a leitura deve falhar em vez de produzir backup inconsistente.", 15, false, Brushes.SandyBrown);
             }
             else
             {
@@ -45,48 +55,55 @@ public sealed class PlanApprovalWindow : Window
                 Text("A pasta de destino precisa ser nova. Se já existir, a operação será bloqueada. Não haverá sobrescrita, mesclagem ou execução de conteúdo. O agente valida manifesto e hashes antes de promover a pasta.");
             }
         }
-        else
+        else if (job.Plan.Kind != "REBOOT_RESCUE")
         {
         if (job.Plan.Kind == "CONVERT_GPT" && job.Plan.Deployment is { } conversion)
         {
             Text("CONVERSÃO — MBR PARA GPT/UEFI NO MESMO DISCO", 16, true, Brushes.SandyBrown);
             Text($"Ferramenta MBR2GPT da mídia {media?.Name ?? conversion.MediaId} (edição {conversion.ImageIndex})\nSHA256: {conversion.ToolSha256}");
-            Text("Partições e dados são preservados; a tabela passa a GPT e é criada a partição EFI. Valide o boot UEFI depois. O WinPE confirma localmente.", 14, false, Brushes.SandyBrown);
+            Text("Partições e dados são preservados; a tabela passa a GPT e é criada a partição EFI. Valide o boot UEFI depois. O WinPE confirma localmente.", 15, false, Brushes.SandyBrown);
         }
         else if (job.Plan.Deployment is { } deployment)
         {
             var edition = media?.Images.FirstOrDefault(i => i.Index == deployment.ImageIndex);
-            Text(job.Plan.Kind == "DEPLOY_LINUX" ? "ORIGEM — MÍDIA LINUX NO SERVIDOR" : "ORIGEM — MÍDIA WINDOWS NO SERVIDOR", 14, true, Brushes.SandyBrown);
+            Text(job.Plan.Kind == "DEPLOY_LINUX" ? "ORIGEM — MÍDIA LINUX NO SERVIDOR" : "ORIGEM — MÍDIA WINDOWS NO SERVIDOR", 15, true, Brushes.SandyBrown);
             if (deployment.Account is { } account) Text($"Usuário inicial: {account.UserName} • computador: {account.ComputerName} • idioma {account.Locale}");
             Text($"{media?.Name ?? deployment.MediaId}\nEdição: {edition?.Name ?? deployment.ImageIndex.ToString()} (índice {deployment.ImageIndex})\nFirmware: {deployment.Firmware}\nReiniciar após resultado confirmado: {(deployment.RebootAfterInstall ? "sim" : "não")}");
             Text("DESTINO — TODOS OS DADOS E PARTIÇÕES SERÃO APAGADOS", 16, true, Brushes.SandyBrown);
-            Text("O agente WinPE exige outra confirmação digitada no cliente. Primeiro boot, drivers e OOBE devem ser conferidos localmente.", 14, false, Brushes.SandyBrown);
+            Text("O agente WinPE exige outra confirmação digitada no cliente. Primeiro boot, drivers e OOBE devem ser conferidos localmente.", 15, false, Brushes.SandyBrown);
         }
         else if (job.Plan.Kind == "RESTORE")
         {
-            Text("ORIGEM — IMAGEM VALIDADA", 14, true, Brushes.SandyBrown);
+            Text("ORIGEM — IMAGEM VALIDADA", 15, true, Brushes.SandyBrown);
             Text($"{image?.Name ?? job.Plan.ImageId}\nID: {job.Plan.ImageId}\nCapacidade lógica: {Display.Bytes(image?.LogicalSizeBytes ?? 0)}");
             Text("DESTINO — TODOS OS DADOS SERÃO SOBRESCRITOS", 16, true, Brushes.SandyBrown);
         }
-        else Text(job.Plan.Kind == "CAPTURE" ? "ORIGEM — DISCO A CAPTURAR" : "ALVO DO DIAGNÓSTICO", 14, true, Brushes.SandyBrown);
+        else if (job.Plan.Kind == "FORMAT_DISK" && job.Plan.Format is { } format)
+        {
+            Text("FORMATAR — TODOS OS DADOS E PARTIÇÕES SERÃO APAGADOS", 16, true, Brushes.SandyBrown);
+            Text($"Nova tabela de partições: {format.TableType}\nUma partição ocupando o disco inteiro, em {format.FileSystem}{(format.Label.Length > 0 ? $", rótulo “{format.Label}”" : "")}");
+        }
+        else Text(job.Plan.Kind == "CAPTURE" ? "ORIGEM — DISCO A CAPTURAR" : "ALVO DO DIAGNÓSTICO", 15, true, Brushes.SandyBrown);
         Text(disk is null ? $"{job.Plan.DiskPath}\nFingerprint: {job.Plan.DiskFingerprint}" :
             $"Modelo: {disk.Model}\nSerial: {disk.Serial}\nCaminho: {disk.Path}\nCapacidade: {disk.Size} • Setor: {disk.LogicalSectorBytes} bytes\nEstado: {disk.Flags}\nFingerprint: {disk.Fingerprint}");
-        if (job.Plan.Kind is "RESTORE" or "DEPLOY_WINDOWS" or "DEPLOY_LINUX" && disk is not null)
+        if (job.Plan.Kind is "RESTORE" or "DEPLOY_WINDOWS" or "DEPLOY_LINUX" or "FORMAT_DISK" && disk is not null)
         {
             Text("Partições atuais que serão removidas: " + (disk.Partitions.Length == 0 ? "nenhuma registrada" : string.Join("; ", disk.Partitions.Select(p => $"{p.Name} {p.FileSystem} {p.Size}"))));
-            Text("Faça backup dos dados necessários antes de continuar. Cancelar durante escrita pode deixar o disco incompleto. A inicialização do sistema não é garantida pela verificação dos chunks.", 14, false, Brushes.SandyBrown);
+            Text("Faça backup dos dados necessários antes de continuar. Cancelar durante escrita pode deixar o disco incompleto. A inicialização do sistema não é garantida pela verificação dos chunks.", 15, false, Brushes.SandyBrown);
         }
         if (job.Plan.CloneOptions is { } clone)
-            Text($"Adaptação autorizada: {clone.Strategy}\nPartição a redimensionar: {(clone.ResizePartitionNumber > 0 ? clone.ResizePartitionNumber.ToString() : "nenhuma")}\nTodas as partições devem ser preservadas; adaptação ocorre em cópia de trabalho validada antes da escrita do destino.", 14, false, Brushes.SandyBrown);
+            Text($"Adaptação autorizada: {clone.Strategy}\nPartição a redimensionar: {(clone.ResizePartitionNumber > 0 ? clone.ResizePartitionNumber.ToString() : "nenhuma")}\nTodas as partições devem ser preservadas; adaptação ocorre em cópia de trabalho validada antes da escrita do destino.", 15, false, Brushes.SandyBrown);
         }
         Text($"Aprovação válida até: {job.Plan.ExpiresAtUtc.ToLocalTime():dd/MM/yyyy HH:mm:ss}");
-        Text("Digite exatamente este identificador para aprovar:", 14, true);
+        Text("Digite exatamente este identificador para aprovar:", 15, true);
         Text(job.Plan.Challenge, 19, true, Brushes.SandyBrown);
         _challenge = new TextBox { MinHeight = 36, Margin = new Thickness(0, 0, 0, 14), MaxLength = Math.Max(job.Plan.Challenge.Length + 10, 64) };
         content.Children.Add(_challenge);
         var consent = new CheckBox { Content = job.Plan.Kind switch
             { "RESTORE" or "DEPLOY_WINDOWS" or "DEPLOY_LINUX" => "Conferi o destino e autorizo a perda de todos os seus dados.",
               "CONVERT_GPT" => "Conferi o disco e autorizo converter sua tabela de partições para GPT.",
+              "FORMAT_DISK" => "Conferi o disco e autorizo apagar tudo o que há nele.",
+              "REBOOT_RESCUE" => "Avisei o responsável e autorizo reiniciar este computador agora.",
               "FILE_RESTORE" => "Conferi o cliente e a pasta nova e autorizo a gravação destes arquivos.",
               "FILE_BACKUP" => "Conferi o escopo e autorizo copiar estes arquivos para o servidor.",
               _ => "Conferi a identidade e autorizo a execução deste plano." }, IsChecked = false, Margin = new Thickness(0, 0, 0, 16) };
@@ -97,6 +114,8 @@ public sealed class PlanApprovalWindow : Window
         var cancel = new Button { Content = "Voltar sem executar", Style = (Style)Application.Current.FindResource("SecondaryButton"), IsCancel = true };
         cancel.Click += (_, _) => DialogResult = false;
         var approve = new Button { Content = job.Plan.Kind is "RESTORE" or "DEPLOY_WINDOWS" or "DEPLOY_LINUX" ? "Autorizar sobrescrita" : job.Plan.Kind == "CONVERT_GPT" ? "Autorizar conversão" : "Aprovar e enfileirar", IsEnabled = false, IsDefault = false };
+        if (job.Plan.Kind == "FORMAT_DISK") approve.Content = "Autorizar formatação";
+        if (job.Plan.Kind == "REBOOT_RESCUE") approve.Content = "Reiniciar em modo SLT";
         void Update() => approve.IsEnabled = string.Equals(_challenge.Text, job.Plan.Challenge, StringComparison.Ordinal) && consent.IsChecked == true && DateTimeOffset.UtcNow < job.Plan.ExpiresAtUtc;
         _challenge.TextChanged += (_, _) => Update();
         consent.Checked += (_, _) => Update();
@@ -119,6 +138,7 @@ public sealed class DetailsWindow : Window
     public DetailsWindow(string title, string details)
     {
         Title = title;
+        Style = (Style)Application.Current.FindResource("AppWindow");
         Width = 940;
         Height = 680;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;

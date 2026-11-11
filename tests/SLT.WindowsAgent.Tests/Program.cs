@@ -89,5 +89,6 @@ Check("smartctl arbitrary remote path rejected", () =>
 });
 Check("smartctl unsupported device range rejected", () => Reject(() => InventoryCollector.SmartDevicePath(@"\\.\PhysicalDrive256")));
 FileFeatureTests.Run(Check, Assert, Reject);
+PairingTests.Run(Check, Assert, Reject);
 Console.WriteLine($"WindowsAgent security checks passed: {passed}/{total}");
 return Environment.ExitCode;

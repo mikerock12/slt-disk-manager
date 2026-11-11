@@ -25,8 +25,12 @@ public sealed class InventoryCollector(AgentOptions options, FileRootCatalog? fi
         var caps = new List<string> { "INVENTORY" };
         if (options.SmartctlPath is not null) caps.Add("SMART");
         caps.AddRange(roots.Capabilities);
+        var notes = (collected.Notes ?? []).ToList();
+        // SLT mode (restart into Rescue without USB) is offered only where it can work; otherwise say why.
+        var slt = RescueBoot.Probe();
+        if (slt.Available) caps.Add("REBOOT_RESCUE"); else notes.Add("MODO_SLT: " + slt.Reason);
         return new Inventory(deviceId, Environment.MachineName, collected.Os, "WINDOWS", "0.1.0", caps.ToArray(), disks,
-            DateTimeOffset.UtcNow, collected.Notes ?? [], roots.Inventory);
+            DateTimeOffset.UtcNow, notes.ToArray(), roots.Inventory);
     }
 
     public async Task<JobResult> Smart(JobPlan plan, Inventory inventory, CancellationToken ct)

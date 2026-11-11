@@ -1,52 +1,69 @@
-#Requires -RunAsAdministrator
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [Parameter(Mandatory)][string]$PackageDirectory,
     [Parameter(Mandatory)][string]$Bind,
     [Parameter(Mandatory)][string]$AllowedSubnet,
-    [string]$InstallDirectory="$env:ProgramFiles\SLT Disk Manager Controller",
-    [string]$StateDirectory="$env:ProgramData\SLT Disk Manager\Controller",
-    [ValidateRange(1024,65535)][int]$Port=7443
+    [string]$InstallDirectory,
+    [string]$StateDirectory,
+    # Images, imported media, clone batches and boot profiles. Default: <state>\repository.
+    [string]$RepositoryDirectory,
+    [ValidateRange(1024,65535)][int]$Port=7443,
+    [ValidateRange(1024,65535)][int]$DiscoveryPort=7444,
+    # Checks everything and prints the planned service command line; creates nothing. Needs no elevation.
+    [switch]$ValidateOnly
 )
 $ErrorActionPreference='Stop'
-if(Get-Service SLTDiskManagerController -ErrorAction SilentlyContinue){throw 'Serviço já instalado. Pare-o e preserve backup antes de atualizar.'}
+. (Join-Path $PSScriptRoot 'ServerSetup.Common.ps1')
+if(Invoke-Native64Bit $PSCommandPath $PSBoundParameters){exit $script:Native64ExitCode}
+if(-not $ValidateOnly -and -not (Test-SltAdministrator)){throw 'Execute como Administrador.'}
+
+$programFiles=Get-NativeProgramFiles
+if(-not $InstallDirectory){$InstallDirectory=Join-Path $programFiles 'SLT Disk Manager Controller'}
+if(-not $StateDirectory){$StateDirectory=Join-Path $env:ProgramData 'SLT Disk Manager\Controller'}
+if(-not $ValidateOnly -and (Get-Service $script:SltServiceName -ErrorAction SilentlyContinue)){throw 'Serviço já instalado. Para atualizar os programas use Update-Server.ps1; para mudar a pasta do repositório use Set-ServerRepository.ps1.'}
 $ip=$null
 if(-not [System.Net.IPAddress]::TryParse($Bind,[ref]$ip) -or $ip.AddressFamily -ne 'InterNetwork'){throw 'IPv4 inválido.'}
 if($AllowedSubnet -notmatch '^\d{1,3}(\.\d{1,3}){3}/\d{1,2}$'){throw 'CIDR inválido.'}
+if($DiscoveryPort -eq $Port){throw 'A porta da busca automática deve ser diferente da porta HTTPS.'}
 $InstallDirectory=[IO.Path]::GetFullPath($InstallDirectory)
 $StateDirectory=[IO.Path]::GetFullPath($StateDirectory)
-$programRoot=[IO.Path]::GetFullPath($env:ProgramFiles).TrimEnd('\')+'\'
-if(-not $InstallDirectory.StartsWith($programRoot,[StringComparison]::OrdinalIgnoreCase) -or $InstallDirectory.TrimEnd('\') -eq $programRoot.TrimEnd('\')){throw 'Instale o serviço em uma subpasta dedicada de Program Files.'}
+$programRoot=$programFiles.TrimEnd('\')+'\'
+if(-not $InstallDirectory.StartsWith($programRoot,[StringComparison]::OrdinalIgnoreCase) -or $InstallDirectory.TrimEnd('\') -eq $programRoot.TrimEnd('\')){throw "Instale o serviço em uma subpasta dedicada de $programFiles."}
 $dataRoot=[IO.Path]::GetFullPath($env:ProgramData).TrimEnd('\')+'\'
 if(-not $StateDirectory.StartsWith($dataRoot,[StringComparison]::OrdinalIgnoreCase) -or $StateDirectory.TrimEnd('\') -eq $dataRoot.TrimEnd('\')){throw 'Estado do serviço deve ficar em uma subpasta dedicada de ProgramData.'}
-if((Test-Path -LiteralPath $InstallDirectory) -and (Get-ChildItem -LiteralPath $InstallDirectory -Force | Select-Object -First 1)){throw 'Pasta de programa não está vazia. Preserve a instalação anterior e escolha outra pasta dedicada.'}
+if((Test-Path -LiteralPath $InstallDirectory) -and (Get-ChildItem -LiteralPath $InstallDirectory -Force | Select-Object -First 1)){throw 'Pasta de programa não está vazia. Use Update-Server.ps1 para atualizar uma instalação existente.'}
 $source=Join-Path $PackageDirectory 'SLT.Controller.Host.exe'
 if(-not(Test-Path -LiteralPath $source)){throw 'PackageDirectory deve apontar à pasta server publicada.'}
+$packageRoot=Split-Path -Parent ([IO.Path]::GetFullPath($PackageDirectory))
+$bootSource=Join-Path $packageRoot 'network-boot'
+if(-not(Test-Path -LiteralPath (Join-Path $bootSource 'SLT.NetworkBoot.Service.exe'))){throw 'Pacote incompleto: network-boot ausente.'}
 foreach($path in @($InstallDirectory,$StateDirectory)){
     if($path.Contains('"')){throw 'Caminho inválido.'}
-    $ancestor=$path
-    while($ancestor){
-        if((Test-Path -LiteralPath $ancestor) -and ((Get-Item -LiteralPath $ancestor -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)){throw "Reparse point recusado: $ancestor"}
-        $ancestor=Split-Path -Parent $ancestor
-    }
-    New-Item -ItemType Directory -Path $path -Force | Out-Null
-    $acl=New-Object Security.AccessControl.DirectorySecurity
-    $acl.SetAccessRuleProtection($true,$false)
-    foreach($sid in @('S-1-5-18','S-1-5-32-544')){
-        $identity=New-Object Security.Principal.SecurityIdentifier($sid)
-        $rule=New-Object Security.AccessControl.FileSystemAccessRule($identity,'FullControl','ContainerInherit,ObjectInherit','None','Allow')
-        $acl.AddAccessRule($rule)
-    }
-    Set-Acl -LiteralPath $path -AclObject $acl
+    Assert-NoReparseChain $path
 }
-Copy-Item -Path (Join-Path $PackageDirectory '*') -Destination $InstallDirectory -Recurse -Force
-$bootSource=Join-Path (Split-Path -Parent ([IO.Path]::GetFullPath($PackageDirectory))) 'network-boot'
-if(-not(Test-Path -LiteralPath (Join-Path $bootSource 'SLT.NetworkBoot.Service.exe'))){throw 'Pacote incompleto: network-boot ausente.'}
-Copy-Item -LiteralPath $bootSource -Destination (Join-Path $InstallDirectory 'network-boot') -Recurse
+$repository=$null
+if($RepositoryDirectory){$repository=Resolve-RepositoryDirectory $RepositoryDirectory @($InstallDirectory,$packageRoot)}
+
 $exe=Join-Path $InstallDirectory 'SLT.Controller.Host.exe'
-$bootExe=Join-Path $InstallDirectory 'network-boot/SLT.NetworkBoot.Service.exe'
-$binary='"'+$exe+'" --bind '+$Bind+' --allowed-subnet '+$AllowedSubnet+' --port '+$Port+' --state-dir "'+$StateDirectory+'" --network-boot-executable "'+$bootExe+'"'
-New-Service -Name SLTDiskManagerController -DisplayName 'SLT Disk Manager Controller' -BinaryPathName $binary -StartupType Automatic | Out-Null
+$bootExe=Join-Path $InstallDirectory 'network-boot\SLT.NetworkBoot.Service.exe'
+$tokens=New-Object Collections.Generic.List[string]
+foreach($value in @($exe,'--bind',$Bind,'--allowed-subnet',$AllowedSubnet,'--port',[string]$Port,'--discovery-port',[string]$DiscoveryPort,'--state-dir',$StateDirectory,'--network-boot-executable',$bootExe)){$tokens.Add($value)}
+if($repository){$tokens.Add('--repository');$tokens.Add($repository)}
+$binary=Join-ServiceCommandLine $tokens
+if($ValidateOnly){
+    [pscustomobject]@{installDirectory=$InstallDirectory;stateDirectory=$StateDirectory;repositoryDirectory=$repository;imagePath=$binary;is64BitProcess=[Environment]::Is64BitProcess} | ConvertTo-Json -Compress
+    return
+}
+
+foreach($path in @($InstallDirectory,$StateDirectory)){New-ProtectedDirectory $path}
+if($repository){New-ProtectedDirectory $repository}
+Copy-Item -Path (Join-Path $PackageDirectory '*') -Destination $InstallDirectory -Recurse -Force
+Copy-Item -LiteralPath $bootSource -Destination (Join-Path $InstallDirectory 'network-boot') -Recurse
+New-Service -Name $script:SltServiceName -DisplayName 'SLT Disk Manager Controller' -BinaryPathName $binary -StartupType Automatic | Out-Null
 New-NetFirewallRule -Name SLTDiskManagerControllerLAN -DisplayName 'SLT Disk Manager LAN privada' -Direction Inbound -Action Allow -Protocol TCP -LocalPort $Port -LocalAddress $Bind -RemoteAddress $AllowedSubnet -Profile Private -Program $exe | Out-Null
-Start-Service SLTDiskManagerController
-Write-Host "Serviço iniciado. Abra desktop/SLT.Desktop.exe --connection `"$StateDirectory\connection.json`" como Administrador."
+# Discovery only answers "there is an SLT server at this address"; it carries no credential.
+New-NetFirewallRule -Name SLTDiskManagerDiscovery -DisplayName 'SLT Disk Manager busca do servidor na rede privada' -Direction Inbound -Action Allow -Protocol UDP -LocalPort $DiscoveryPort -RemoteAddress $AllowedSubnet -Profile Private -Program $exe | Out-Null
+Start-Service $script:SltServiceName
+Write-Host "Serviço iniciado em $InstallDirectory."
+if($repository){Write-Host "Repositório (imagens e mídias): $repository"}
+Write-Host "Abra o atalho 'SLT Disk Manager - Painel' (ele pede permissão de administrador)."

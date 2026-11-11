@@ -113,3 +113,15 @@ Todos os discos da suíte são arquivos temporários; o teste de loop só descon
 Referências: [manual GNU ddrescue](https://www.gnu.org/software/ddrescue/manual/ddrescue_manual.html), [opções Partclone](https://partclone.org/usage/partclone.restore.php), [Debian Live build](https://live-team.pages.debian.net/live-manual/html/live-manual/the-basics.en.html).
 
 Os scripts são ferramentas locais candidatas, sem testes de execução física neste ambiente. Não estão disponíveis como jobs remotos nem anunciam sucesso antes de os motores concluírem. Os perfis em `profiles/` documentam critérios e procedimentos manuais Windows/Linux UEFI que ainda precisam de instalação/boot em VM; não são instaladores implementados.
+
+## Beta.7: procurar o servidor e modo SLT
+
+- `sudo slt-start` aceita o endereço vazio: o agente procura o servidor na rede e mostra
+  um código de 8 dígitos para digitar no painel (aba Conectar computador). Informar só o
+  endereço também funciona; endereço e pin mantêm o fluxo anterior.
+- Quando o computador é reiniciado por um cliente Windows em **modo SLT**, o serviço
+  `slt-mode` assume a tela, o agente lê servidor, pin e ticket da linha de comando do
+  kernel e pareia sozinho. Com gravação habilitada, as tarefas aprovadas no painel são
+  executadas sem nova confirmação neste teclado; a tela informa isso.
+- Nova tarefa `FORMAT_DISK` (partição única NTFS, exFAT, FAT32 ou ext4). A ISO passa a
+  incluir `exfatprogs`.

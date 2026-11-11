@@ -46,3 +46,27 @@ GET `/api/v1/images` -> ImageManifest[]. POST `/api/v1/images/{id}/verify` {} ->
 Verificação profunda inicia em background e retorna estado VERIFYING; consultar catálogo até AVAILABLE ou FAILED. Evita bloquear heartbeat durante releitura de imagens grandes. Cada chunk de captura é relido e validado antes do recibo, e cada download é hash-validado antes da transmissão.
 GET `/api/v1/audit` -> [{id, timestampUtc, actor, action, details, previousHash, eventHash}].
 Erros JSON {error} e status HTTP apropriado. Reinício marca trabalhos ativos INTERRUPTED sem reenviar escrita.
+
+## Acréscimos da beta.7
+
+Compatíveis com agentes anteriores: campos novos são opcionais e ignorados por quem não
+os conhece. A versão de protocolo continua 1; `/health` informa `pairing: 2`.
+
+- **Descoberta (UDP 7444).** Pergunta `{"slt":"discover","v":1,"nonce":"<hex>"}` em
+  broadcast; resposta `{"slt":"server","v":1,"nonce","name","url","pin","version"}`. Só
+  origem na sub-rede autorizada é respondida. A resposta não é confiável por si.
+- **Pareamento por código curto.** `POST /agent/v1/enroll` com `commitment`
+  (`SHA-256` do nonce do cliente) devolve `serverNonce` e nenhum código;
+  `POST /agent/v1/enroll/{id}/reveal` com o nonce e `X-Enrollment-Secret` torna o pedido
+  visível ao operador. Código conforme [ADR 003](ADR/003-descoberta-e-pareamento-curto.md).
+  `POST /api/v1/enrollments/{id}/reject` recusa um pedido.
+- **Ticket do modo SLT.** `POST /agent/v1/enroll` com `ticket` (modo `RESCUE`) é aprovado
+  de imediato se o ticket existir, não tiver sido usado e não tiver expirado.
+- **Renovação.** `POST /agent/v1/renew` (mTLS) com `csrPem` devolve o próximo
+  certificado; o atual vale até o novo ser usado pela primeira vez.
+- **Tarefas.** `REBOOT_RESCUE` (cliente Windows; `plan.rescueBoot` com hash do
+  carregador, roteiro e ticket), carregador em `GET /agent/v1/jobs/{id}/rescue-loader`;
+  pedido local em `POST /agent/v1/rescue-boot`. `FORMAT_DISK` (Rescue; `plan.format` com
+  `tableType`, `fileSystem`, `label`).
+- **Administrativo.** `GET /api/v1/server` informa nome, endereço, pin, versão, porta de
+  descoberta e pastas.

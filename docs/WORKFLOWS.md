@@ -1,5 +1,11 @@
 # Clone, arquivos e instalação em paralelo
 
+> Beta.7: para colocar um computador UEFI em condição de clonar, formatar ou instalar
+> Linux sem pendrive, use **Reiniciar em modo SLT…** no painel (veja o QUICKSTART). Em
+> modo SLT a gravação segue após a confirmação digitada no painel. Nos fluxos abaixo,
+> "informar URL/pin" passou a ser opcional: o Rescue procura o servidor e mostra um
+> código de 8 dígitos.
+
 Boot sem pendrive: o módulo opcional Network Boot usa DHCP externo e os perfis
 Rescue/iPXE da release. Inicia desligado e mantém pareamento e confirmações de
 disco. Siga [o guia](NETWORK-BOOT-OPERACAO.md) e confira a

@@ -2,82 +2,275 @@
  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
  xmlns:local="clr-namespace:SLT.Desktop"
- Title="SLT Disk Manager • Bancada LAN" Width="1360" Height="910" MinWidth="1100" MinHeight="740">
- <Grid Margin="22">
-  <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-  <DockPanel Margin="0,0,0,16">
-   <StackPanel><TextBlock Text="SLT DISK MANAGER" FontSize="26" FontWeight="Bold"/><TextBlock Text="Smells Like Tech • Controle local da bancada" Foreground="{StaticResource MutedBrush}" Margin="0,4,0,0"/></StackPanel>
-   <TextBlock x:Name="ConnectionBadge" Text="DESCONECTADO" Foreground="#E88222" FontWeight="Bold" VerticalAlignment="Center" HorizontalAlignment="Right"/>
-  </DockPanel>
-  <Border Grid.Row="1" Background="{StaticResource PanelBrush}" Padding="14" CornerRadius="6" Margin="0,0,0,14">
-   <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="235"/><ColumnDefinition Width="*" MinWidth="140"/><ColumnDefinition Width="*" MinWidth="140"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-    <StackPanel Margin="0,0,12,0"><TextBlock Text="Controlador local HTTPS" Style="{StaticResource Caption}"/><TextBox x:Name="ServerUrl" Text="https://localhost:7443"/></StackPanel>
-    <StackPanel Grid.Column="1" Margin="0,0,12,0"><TextBlock Text="Token administrativo" Style="{StaticResource Caption}"/><PasswordBox x:Name="AdminToken"/></StackPanel>
-    <StackPanel Grid.Column="2" Margin="0,0,12,0"><TextBlock Text="Pin SHA-256 do certificado" Style="{StaticResource Caption}"/><TextBox x:Name="ServerPin"/></StackPanel>
-    <Button Grid.Column="3" Content="Abrir conexão…" Style="{StaticResource SecondaryButton}" VerticalAlignment="Bottom" Click="OpenConnection_Click"/>
-    <Button x:Name="ConnectButton" Grid.Column="4" Content="Conectar" VerticalAlignment="Bottom" Click="Connect_Click"/>
+ Style="{StaticResource AppWindow}"
+ Title="SLT Disk Manager • Servidor da bancada" Width="1400" Height="920" MinWidth="1200" MinHeight="720">
+ <Grid Margin="20,16,20,16">
+  <Grid.RowDefinitions>
+   <RowDefinition Height="Auto"/>
+   <RowDefinition Height="Auto"/>
+   <RowDefinition Height="Auto"/>
+   <RowDefinition Height="Auto"/>
+   <RowDefinition Height="*"/>
+   <RowDefinition Height="Auto"/>
+  </Grid.RowDefinitions>
+
+  <!-- Header: product, server identity, live counters, connection state -->
+  <Grid Margin="0,0,0,14">
+   <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+   <StackPanel VerticalAlignment="Center">
+    <TextBlock Text="SLT DISK MANAGER" FontSize="24" FontWeight="Bold"/>
+    <TextBlock x:Name="ServerSummary" Text="Smells Like Tech • servidor da bancada" Foreground="{StaticResource MutedBrush}" Margin="0,3,0,0"/>
+   </StackPanel>
+   <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
+    <Border Style="{StaticResource Card}" Padding="14,7" Margin="0,0,8,0" MinWidth="96" ToolTip="Computadores online / total conectado"><StackPanel><TextBlock Text="Online" Style="{StaticResource Caption}" Margin="0,0,0,1"/><TextBlock x:Name="DeviceCount" Text="—" FontSize="20" FontWeight="SemiBold"/></StackPanel></Border>
+    <Border Style="{StaticResource Card}" Padding="14,7" Margin="0,0,8,0" MinWidth="84" ToolTip="Tarefas na fila ou em andamento"><StackPanel><TextBlock Text="Tarefas" Style="{StaticResource Caption}" Margin="0,0,0,1"/><TextBlock x:Name="JobCount" Text="—" FontSize="20" FontWeight="SemiBold"/></StackPanel></Border>
+    <Border Style="{StaticResource Card}" Padding="14,7" Margin="0,0,8,0" MinWidth="84" ToolTip="Imagens de disco disponíveis no servidor"><StackPanel><TextBlock Text="Imagens" Style="{StaticResource Caption}" Margin="0,0,0,1"/><TextBlock x:Name="ImageCount" Text="—" FontSize="20" FontWeight="SemiBold"/></StackPanel></Border>
+    <Border Style="{StaticResource Card}" Padding="14,7" MinWidth="110" ToolTip="Espaço livre na pasta do repositório (imagens e mídias)"><StackPanel><TextBlock Text="Espaço livre" Style="{StaticResource Caption}" Margin="0,0,0,1"/><TextBlock x:Name="FreeSpace" Text="—" FontSize="20" FontWeight="SemiBold"/></StackPanel></Border>
+   </StackPanel>
+   <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+    <Border x:Name="ConnectionPill" Background="{StaticResource WarningPanelBrush}" CornerRadius="14" Padding="14,6" Margin="0,0,12,0" VerticalAlignment="Center">
+     <TextBlock x:Name="ConnectionBadge" Text="DESCONECTADO" Foreground="{StaticResource AccentTextBrush}" FontWeight="Bold" FontSize="13.5"/>
+    </Border>
+    <Button x:Name="RefreshButton" Content="Atualizar" Style="{StaticResource SecondaryButton}" Click="Refresh_Click" IsEnabled="False"/>
+    <Button x:Name="ConnectionToggle" Content="Conexão…" Style="{StaticResource SecondaryButton}" Margin="0" Click="ConnectionToggle_Click" ToolTip="Mostrar ou ocultar endereço, token e pin do servidor"/>
+   </StackPanel>
+  </Grid>
+
+  <!-- Shown when the connection file cannot be read: the usual cause is opening the panel without elevation. -->
+  <Border x:Name="PermissionPanel" Grid.Row="1" Background="{StaticResource WarningPanelBrush}" BorderBrush="{StaticResource AccentBrush}" BorderThickness="1" CornerRadius="8" Padding="18,14" Margin="0,0,0,14" Visibility="Collapsed">
+   <Grid>
+    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+    <StackPanel>
+     <TextBlock x:Name="PermissionTitle" Text="Abra o painel como administrador" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource AccentTextBrush}"/>
+     <TextBlock x:Name="PermissionText" TextWrapping="Wrap" Margin="0,6,0,0" LineHeight="22"/>
+    </StackPanel>
+    <Button x:Name="ElevateButton" Grid.Column="1" Content="Reabrir como administrador" VerticalAlignment="Center" Margin="16,0,0,0" Click="Elevate_Click"/>
    </Grid>
   </Border>
-  <Grid Grid.Row="2" Margin="0,0,0,14"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/><ColumnDefinition/><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-   <Border Background="{StaticResource PanelBrush}" Padding="16" Margin="0,0,12,0" CornerRadius="6"><StackPanel><TextBlock Text="COMPUTADORES / ONLINE" Style="{StaticResource Caption}"/><TextBlock x:Name="DeviceCount" Text="— / —" FontSize="24" FontWeight="SemiBold"/></StackPanel></Border>
-   <Border Grid.Column="1" Background="{StaticResource PanelBrush}" Padding="16" Margin="0,0,12,0" CornerRadius="6"><StackPanel><TextBlock Text="TAREFAS ATIVAS" Style="{StaticResource Caption}"/><TextBlock x:Name="JobCount" Text="—" FontSize="24" FontWeight="SemiBold"/></StackPanel></Border>
-   <Border Grid.Column="2" Background="{StaticResource PanelBrush}" Padding="16" Margin="0,0,12,0" CornerRadius="6"><StackPanel><TextBlock Text="IMAGENS" Style="{StaticResource Caption}"/><TextBlock x:Name="ImageCount" Text="—" FontSize="24" FontWeight="SemiBold"/></StackPanel></Border>
-   <Border Grid.Column="3" Background="{StaticResource PanelBrush}" Padding="16" Margin="0,0,12,0" CornerRadius="6"><StackPanel><TextBlock Text="REPOSITÓRIO LIVRE" Style="{StaticResource Caption}"/><TextBlock x:Name="FreeSpace" Text="—" FontSize="24" FontWeight="SemiBold"/></StackPanel></Border>
-   <Button x:Name="RefreshButton" Grid.Column="4" Content="Atualizar" VerticalAlignment="Center" Click="Refresh_Click" IsEnabled="False"/>
-  </Grid>
-  <TabControl x:Name="Workspace" Grid.Row="3" IsEnabled="False">
+
+  <!-- Manual connection, hidden once connected -->
+  <Border x:Name="ConnectionPanel" Grid.Row="2" Style="{StaticResource Card}" Margin="0,0,0,14">
+   <Grid>
+    <Grid.ColumnDefinitions><ColumnDefinition Width="250"/><ColumnDefinition Width="*" MinWidth="140"/><ColumnDefinition Width="*" MinWidth="140"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+    <StackPanel Margin="0,0,12,0"><TextBlock Text="Endereço local do servidor" Style="{StaticResource Caption}"/><TextBox x:Name="ServerUrl" Text="https://localhost:7443"/></StackPanel>
+    <StackPanel Grid.Column="1" Margin="0,0,12,0"><TextBlock Text="Token administrativo" Style="{StaticResource Caption}"/><PasswordBox x:Name="AdminToken"/></StackPanel>
+    <StackPanel Grid.Column="2" Margin="0,0,12,0"><TextBlock Text="Pin SHA-256 do certificado" Style="{StaticResource Caption}"/><TextBox x:Name="ServerPin"/></StackPanel>
+    <Button Grid.Column="3" Content="Abrir connection.json…" Style="{StaticResource SecondaryButton}" VerticalAlignment="Bottom" Click="OpenConnection_Click"/>
+    <Button x:Name="ConnectButton" Grid.Column="4" Content="Conectar" VerticalAlignment="Bottom" Margin="0" Click="Connect_Click"/>
+   </Grid>
+  </Border>
+
+  <!-- A computer is asking to connect: visible from every page -->
+  <Border x:Name="PairingBanner" Grid.Row="3" Background="#1F3A2C" BorderBrush="{StaticResource OkBrush}" BorderThickness="1" CornerRadius="8" Padding="18,12" Margin="0,0,0,14" Visibility="Collapsed">
+   <Grid>
+    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+    <StackPanel VerticalAlignment="Center">
+     <TextBlock x:Name="PairingBannerTitle" Text="Um computador quer conectar" FontSize="18" FontWeight="SemiBold"/>
+     <TextBlock x:Name="PairingBannerText" Text="Digite o código de 8 dígitos mostrado na tela dele." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,3,0,0"/>
+    </StackPanel>
+    <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+     <TextBox x:Name="BannerCode" Width="170" MaxLength="9" FontSize="22" FontFamily="Consolas" FontWeight="SemiBold" TextAlignment="Center" Margin="0,0,10,0" ToolTip="Código de 8 dígitos mostrado no computador cliente" KeyDown="BannerCode_KeyDown"/>
+     <Button Content="Conectar este computador" Click="BannerApprove_Click"/>
+     <Button Content="Ver solicitações" Style="{StaticResource SecondaryButton}" Margin="0" Click="BannerOpen_Click"/>
+    </StackPanel>
+   </Grid>
+  </Border>
+
+  <TabControl x:Name="Workspace" Grid.Row="4" IsEnabled="False" TabStripPlacement="Left">
    <TabItem Header="Computadores">
-    <Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="1.1*"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-     <DockPanel Margin="0,0,0,10"><TextBlock Text="Computadores pareados" FontWeight="SemiBold" FontSize="18"/><TextBox x:Name="DeviceSearch" Width="235" HorizontalAlignment="Right" ToolTip="Pesquisar nome, sistema ou ID" TextChanged="DeviceSearch_TextChanged"/></DockPanel>
-     <DataGrid x:Name="DevicesGrid" Grid.Row="1" SelectionChanged="DevicesGrid_SelectionChanged"><DataGrid.Columns><DataGridTextColumn Header="Computador" Binding="{Binding Hostname}" Width="*" MinWidth="140"/><DataGridTextColumn Header="Estado" Binding="{Binding Status}" Width="180"/><DataGridTextColumn Header="Sistema" Binding="{Binding OperatingSystem}" Width="2*"/><DataGridTextColumn Header="Último contato" Binding="{Binding LastSeen}" Width="135"/><DataGridTextColumn Header="ID" Binding="{Binding Id}" Width="250"/></DataGrid.Columns></DataGrid>
-     <DockPanel Grid.Row="2" Margin="0,12,0,10"><TextBlock Text="Discos físicos • selecione para consultar partições" FontWeight="SemiBold"/><TextBlock x:Name="SelectedDeviceInfo" Foreground="{StaticResource MutedBrush}" HorizontalAlignment="Right"/></DockPanel>
-     <Grid Grid.Row="3"><Grid.ColumnDefinitions><ColumnDefinition Width="2*"/><ColumnDefinition Width="*" MinWidth="140"/></Grid.ColumnDefinitions>
-      <DataGrid x:Name="DisksGrid" SelectionChanged="DisksGrid_SelectionChanged" Margin="0,0,12,0"><DataGrid.Columns><DataGridTextColumn Header="Modelo" Binding="{Binding Model}" Width="*" MinWidth="140"/><DataGridTextColumn Header="Serial" Binding="{Binding Serial}" Width="135"/><DataGridTextColumn Header="Capacidade" Binding="{Binding Size}" Width="100"/><DataGridTextColumn Header="Saúde informada" Binding="{Binding Health}" Width="120"/><DataGridTextColumn Header="Estado" Binding="{Binding Flags}" Width="165"/><DataGridTextColumn Header="Caminho" Binding="{Binding Path}" Width="130"/></DataGrid.Columns></DataGrid>
-      <DataGrid x:Name="PartitionsGrid" Grid.Column="1"><DataGrid.Columns><DataGridTextColumn Header="Partição" Binding="{Binding Name}" Width="*" MinWidth="140"/><DataGridTextColumn Header="Sistema" Binding="{Binding FileSystem}" Width="80"/><DataGridTextColumn Header="Tamanho" Binding="{Binding Size}" Width="95"/><DataGridTextColumn Header="Montagem" Binding="{Binding MountPoint}" Width="90"/></DataGrid.Columns></DataGrid>
+    <Grid>
+     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="1.1*" MinHeight="150"/><RowDefinition Height="Auto"/><RowDefinition Height="*" MinHeight="130"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+     <DockPanel Margin="0,0,0,12">
+      <TextBox x:Name="DeviceSearch" DockPanel.Dock="Right" Width="260" ToolTip="Pesquisar por nome, sistema ou ID" TextChanged="DeviceSearch_TextChanged"/>
+      <TextBlock Text="Pesquisar" DockPanel.Dock="Right" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="0,0,10,0"/>
+      <TextBlock Text="Computadores conectados" Style="{StaticResource PageTitle}" Margin="0" VerticalAlignment="Center"/>
+     </DockPanel>
+     <DataGrid x:Name="DevicesGrid" Grid.Row="1" SelectionChanged="DevicesGrid_SelectionChanged">
+      <DataGrid.Columns>
+       <DataGridTextColumn Header="Computador" Binding="{Binding Hostname}" Width="1.4*" MinWidth="250"/>
+       <DataGridTextColumn Header="Estado" Binding="{Binding Status}" Width="130"/>
+       <DataGridTextColumn Header="Modo" Binding="{Binding ModeLabel}" Width="170"/>
+       <DataGridTextColumn Header="Sistema" Binding="{Binding OperatingSystem}" Width="2*" MinWidth="230"/>
+       <DataGridTextColumn Header="Último contato" Binding="{Binding LastSeen}" Width="150"/>
+      </DataGrid.Columns>
+     </DataGrid>
+     <DockPanel Grid.Row="2" Margin="0,16,0,10">
+      <TextBlock x:Name="SelectedDeviceInfo" DockPanel.Dock="Right" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
+      <TextBlock Text="Discos do computador selecionado" Style="{StaticResource SectionTitle}" Margin="0"/>
+     </DockPanel>
+     <Grid Grid.Row="3">
+      <Grid.ColumnDefinitions><ColumnDefinition Width="1.9*"/><ColumnDefinition Width="*" MinWidth="260"/></Grid.ColumnDefinitions>
+      <DataGrid x:Name="DisksGrid" SelectionChanged="DisksGrid_SelectionChanged" Margin="0,0,12,0">
+       <DataGrid.Columns>
+        <DataGridTextColumn Header="Modelo" Binding="{Binding Model}" Width="*" MinWidth="150"/>
+        <DataGridTextColumn Header="Serial" Binding="{Binding Serial}" Width="150"/>
+        <DataGridTextColumn Header="Capacidade" Binding="{Binding Size}" Width="110"/>
+        <DataGridTextColumn Header="Saúde" Binding="{Binding Health}" Width="100"/>
+        <DataGridTextColumn Header="Situação" Binding="{Binding Flags}" Width="175"/>
+       </DataGrid.Columns>
+      </DataGrid>
+      <DataGrid x:Name="PartitionsGrid" Grid.Column="1">
+       <DataGrid.Columns>
+        <DataGridTextColumn Header="Partição" Binding="{Binding Name}" Width="*" MinWidth="110"/>
+        <DataGridTextColumn Header="Sistema" Binding="{Binding FileSystem}" Width="85"/>
+        <DataGridTextColumn Header="Tamanho" Binding="{Binding Size}" Width="105"/>
+       </DataGrid.Columns>
+      </DataGrid>
      </Grid>
-     <StackPanel Grid.Row="4" Margin="0,14,0,0"><TextBlock x:Name="InventoryNotes" TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,10"/><WrapPanel><Button Content="Atualizar inventário" Tag="INVENTORY" Click="QuickJob_Click"/><Button Content="Consultar SMART" Tag="SMART" Click="QuickJob_Click"/><Button Content="Revogar agente…" Style="{StaticResource SecondaryButton}" Click="Revoke_Click"/><TextBlock Text="Captura e restauração disponíveis na aba Operações. Boot Rescue é assistido por USB." VerticalAlignment="Center" Foreground="{StaticResource MutedBrush}"/></WrapPanel></StackPanel>
+     <StackPanel Grid.Row="4" Margin="0,14,0,0">
+      <TextBlock x:Name="InventoryNotes" TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,12" MaxHeight="66" TextTrimming="CharacterEllipsis"/>
+      <WrapPanel>
+       <Button x:Name="SltModeButton" Content="Reiniciar em modo SLT…" Click="SltMode_Click" Margin="0,0,10,6" ToolTip="Reinicia o cliente Windows selecionado no sistema SLT, sem pendrive, para clonar, formatar ou instalar"/>
+       <Button x:Name="FormatButton" Content="Formatar disco…" Style="{StaticResource DangerButton}" Click="Format_Click" Margin="0,0,10,6" ToolTip="Apaga o disco selecionado de um computador em modo SLT/Rescue e cria uma partição nova"/>
+       <Button Content="Atualizar inventário" Style="{StaticResource SecondaryButton}" Tag="INVENTORY" Click="QuickJob_Click" Margin="0,0,10,6"/>
+       <Button Content="Consultar SMART" Style="{StaticResource SecondaryButton}" Tag="SMART" Click="QuickJob_Click" Margin="0,0,10,6"/>
+       <Button Content="Desconectar computador…" Style="{StaticResource SecondaryButton}" Click="Revoke_Click" Margin="0,0,10,6" ToolTip="Revoga o certificado deste computador no servidor"/>
+      </WrapPanel>
+      <TextBlock x:Name="DeviceActionHint" TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="0,6,0,0"/>
+     </StackPanel>
     </Grid>
    </TabItem>
-   <TabItem Header="Pareamento">
-    <Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-     <TextBlock Text="Confira a máquina e o código mostrado no console local do agente antes de autorizar." TextWrapping="Wrap" Margin="0,0,0,14" Foreground="{StaticResource MutedBrush}"/>
-     <DataGrid x:Name="EnrollmentsGrid" Grid.Row="1"><DataGrid.Columns><DataGridTextColumn Header="Computador" Binding="{Binding Hostname}" Width="*" MinWidth="140"/><DataGridTextColumn Header="Modo" Binding="{Binding Mode}" Width="110"/><DataGridTextColumn Header="Código exibido pelo servidor" Binding="{Binding Code}" Width="220"/><DataGridTextColumn Header="Expira em" Binding="{Binding Expires}" Width="170"/><DataGridTextColumn Header="Estado" Binding="{Binding Status}" Width="140"/></DataGrid.Columns></DataGrid>
-     <WrapPanel Grid.Row="2" Margin="0,16,0,0"><TextBox x:Name="EnrollmentCode" Width="210" MaxLength="8" ToolTip="Digite o código conferido no computador cliente" Margin="0,0,12,0"/><Button Content="Aprovar máquina selecionada" Click="ApproveEnrollment_Click"/></WrapPanel>
+
+   <TabItem Header="Conectar computador">
+    <Grid>
+     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*" MinHeight="150"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+     <StackPanel>
+      <TextBlock Text="Conectar um computador ao servidor" Style="{StaticResource PageTitle}"/>
+      <TextBlock Style="{StaticResource PageHint}" Text="1. No computador do cliente, abra “SLT Disk Manager - Cliente” (ou o SLT Rescue). Ele encontra este servidor sozinho na rede.&#x0a;2. O cliente mostra um código de 8 dígitos na tela.&#x0a;3. Selecione o computador abaixo, digite o código e clique em Conectar. O código confirma que o cliente está falando com este servidor."/>
+     </StackPanel>
+     <Border Grid.Row="1" Style="{StaticResource Card}" Margin="0,0,0,14">
+      <TextBlock x:Name="ServerIdentity" Text="Conecte ao servidor para ver o endereço que os clientes usam." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" LineHeight="22"/>
+     </Border>
+     <DataGrid x:Name="EnrollmentsGrid" Grid.Row="2">
+      <DataGrid.Columns>
+       <DataGridTextColumn Header="Computador" Binding="{Binding Hostname}" Width="*" MinWidth="180"/>
+       <DataGridTextColumn Header="Tipo" Binding="{Binding ModeLabel}" Width="190"/>
+       <DataGridTextColumn Header="Código" Binding="{Binding CodeLabel}" Width="220"/>
+       <DataGridTextColumn Header="Válido até" Binding="{Binding Expires}" Width="150"/>
+       <DataGridTextColumn Header="Situação" Binding="{Binding StatusLabel}" Width="190"/>
+      </DataGrid.Columns>
+     </DataGrid>
+     <WrapPanel Grid.Row="3" Margin="0,16,0,0">
+      <TextBlock Text="Código mostrado no cliente" VerticalAlignment="Center" Margin="0,0,12,0"/>
+      <TextBox x:Name="EnrollmentCode" Width="190" MaxLength="9" FontSize="22" FontFamily="Consolas" FontWeight="SemiBold" TextAlignment="Center" ToolTip="Digite os 8 dígitos mostrados no computador cliente" Margin="0,0,12,0"/>
+      <Button Content="Conectar computador selecionado" Click="ApproveEnrollment_Click"/>
+      <Button Content="Recusar solicitação" Style="{StaticResource SecondaryButton}" Click="RejectEnrollment_Click"/>
+     </WrapPanel>
+     <Expander Grid.Row="4" Header="Clientes de versões anteriores (endereço e pin de 64 caracteres)" Foreground="{StaticResource MutedBrush}" Margin="0,18,0,0">
+      <StackPanel Margin="0,10,0,0">
+       <TextBlock Text="Só é necessário para clientes anteriores à beta.7 ou redes que bloqueiam a busca automática. Informe no cliente o endereço e o pin abaixo." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,8"/>
+       <DockPanel>
+        <Button DockPanel.Dock="Right" Content="Copiar pin" Style="{StaticResource SecondaryButton}" Margin="10,0,0,0" Click="CopyPin_Click"/>
+        <TextBox x:Name="LegacyPin" IsReadOnly="True" FontFamily="Consolas" FontSize="13.5"/>
+       </DockPanel>
+      </StackPanel>
+     </Expander>
     </Grid>
    </TabItem>
-   <TabItem Header="Operações">
-    <ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel MaxWidth="950" HorizontalAlignment="Left">
-     <TextBlock Text="Planejar uma tarefa" FontSize="22" FontWeight="SemiBold" Margin="0,0,0,8"/>
-     <TextBlock Text="Selecione um computador e um disco na aba Computadores. O servidor valida capacidades, consentimento, identidade e compatibilidade antes de criar o plano." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,20"/>
-     <Border Background="#13181F" Padding="16" Margin="0,0,0,18"><StackPanel><TextBlock Text="COMPUTADOR E DISCO SELECIONADOS" Style="{StaticResource Caption}"/><TextBlock x:Name="OperationTarget" Text="Nenhum disco selecionado" TextWrapping="Wrap" FontSize="17"/><TextBlock x:Name="OperationFingerprint" TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontFamily="Consolas" FontSize="12" Margin="0,8,0,0"/></StackPanel></Border>
-     <TextBlock Text="Tipo de tarefa" Style="{StaticResource Caption}"/><ComboBox x:Name="OperationKind" SelectedIndex="0" Width="350" HorizontalAlignment="Left" Margin="0,0,0,15" Padding="8"><ComboBoxItem Content="INVENTORY — Atualizar inventário" Tag="INVENTORY"/><ComboBoxItem Content="SMART — Consultar saúde" Tag="SMART"/><ComboBoxItem Content="CAPTURE — Capturar imagem RAW" Tag="CAPTURE"/><ComboBoxItem Content="RESTORE — Sobrescrever disco com imagem" Tag="RESTORE"/></ComboBox>
-     <TextBlock Text="Imagem de origem (somente para RESTORE)" Style="{StaticResource Caption}"/><ComboBox x:Name="SourceImage" DisplayMemberPath="Label" MinWidth="600" MaxWidth="850" HorizontalAlignment="Left" Padding="8" Margin="0,0,0,18"/>
-     <Border BorderBrush="#E88222" BorderThickness="1" Padding="16" Margin="0,0,0,18"><StackPanel><TextBlock Text="RESTAURAÇÃO APAGA O CONTEÚDO DO DESTINO" FontWeight="Bold" Foreground="#F0A55F"/><TextBlock Text="Captura e restauração exigem Rescue, disco desmontado e identidade confirmada. Para clonar A → B, capture A, verifique a imagem e restaure em B. O clone mantém o layout bruto; boot em outro hardware exige validação. Restauração em bloco físico também exige confirmação local no Rescue." TextWrapping="Wrap" Margin="0,8,0,0"/></StackPanel></Border>
-     <CheckBox x:Name="OperationConsent" Content="Tenho autorização do responsável para acessar os dados e executar esta tarefa." Margin="0,0,0,16"/>
-     <Button Content="Gerar pré-verificação e plano" HorizontalAlignment="Left" Click="CreatePlan_Click"/>
-     <TextBlock Text="Para instalar Windows (cliente WinPE) ou Xubuntu/Ubuntu (cliente SLT Rescue em UEFI), use a aba Instalar sistema. A aba Boot pela rede controla a distribuição de boot Rescue. Consulte a validação de cada perfil; hardware e Secure Boot exigem homologação própria. ddrescue continua um fluxo local assistido." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="0,24,0,0"/>
-    </StackPanel></ScrollViewer>
-   </TabItem>
+
    <TabItem Header="Clonagem"><local:ClonePanel x:Name="Cloning"/></TabItem>
+   <TabItem Header="Instalar sistema"><local:DeploymentPanel x:Name="Deployment"/></TabItem>
+
+   <TabItem Header="Disco e imagem">
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+     <StackPanel MaxWidth="980" HorizontalAlignment="Left">
+      <TextBlock Text="Diagnóstico, captura e restauração de imagem" Style="{StaticResource PageTitle}"/>
+      <TextBlock Style="{StaticResource PageHint}" Text="Selecione o computador e o disco na página Computadores. O servidor confere capacidade, identidade e compatibilidade antes de criar o plano. Para formatar um disco, use o botão “Formatar disco…” na página Computadores."/>
+      <Border Style="{StaticResource Card}" Margin="0,0,0,18">
+       <StackPanel>
+        <TextBlock Text="Computador e disco selecionados" Style="{StaticResource Caption}"/>
+        <TextBlock x:Name="OperationTarget" Text="Nenhum disco selecionado" TextWrapping="Wrap" FontSize="17"/>
+        <TextBlock x:Name="OperationFingerprint" TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontFamily="Consolas" FontSize="13" Margin="0,8,0,0"/>
+       </StackPanel>
+      </Border>
+      <TextBlock Text="O que fazer" Style="{StaticResource Caption}"/>
+      <ComboBox x:Name="OperationKind" SelectedIndex="0" Width="460" HorizontalAlignment="Left" Margin="0,0,0,16">
+       <ComboBoxItem Content="Atualizar inventário" Tag="INVENTORY"/>
+       <ComboBoxItem Content="Consultar saúde do disco (SMART)" Tag="SMART"/>
+       <ComboBoxItem Content="Capturar imagem completa do disco" Tag="CAPTURE"/>
+       <ComboBoxItem Content="Restaurar imagem — apaga o disco de destino" Tag="RESTORE"/>
+      </ComboBox>
+      <TextBlock Text="Imagem de origem (somente para restaurar)" Style="{StaticResource Caption}"/>
+      <ComboBox x:Name="SourceImage" DisplayMemberPath="Label" MinWidth="600" MaxWidth="900" HorizontalAlignment="Left" Margin="0,0,0,18"/>
+      <Border Background="{StaticResource WarningPanelBrush}" BorderBrush="{StaticResource AccentBrush}" BorderThickness="1" CornerRadius="8" Padding="16" Margin="0,0,0,18">
+       <StackPanel>
+        <TextBlock Text="RESTAURAR APAGA TODO O CONTEÚDO DO DESTINO" FontWeight="Bold" Foreground="{StaticResource AccentTextBrush}"/>
+        <TextBlock Text="Captura e restauração exigem o computador em modo SLT/Rescue, com o disco desmontado e a identidade conferida. Para copiar um disco para outro, prefira a página Clonagem." TextWrapping="Wrap" Margin="0,8,0,0" LineHeight="22"/>
+       </StackPanel>
+      </Border>
+      <CheckBox x:Name="OperationConsent" Content="Tenho autorização do responsável para acessar os dados e executar esta tarefa." Margin="0,0,0,16"/>
+      <Button Content="Conferir e criar o plano…" HorizontalAlignment="Left" Click="CreatePlan_Click"/>
+     </StackPanel>
+    </ScrollViewer>
+   </TabItem>
+
    <TabItem Header="Arquivos"><local:FilesPanel x:Name="Files"/></TabItem>
-    <TabItem Header="Instalar sistema"><local:DeploymentPanel x:Name="Deployment"/></TabItem>
    <TabItem Header="Boot pela rede"><local:NetworkBootPanel x:Name="NetworkBoot"/></TabItem>
+
    <TabItem Header="Imagens">
-    <Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions><TextBlock Text="Catálogo RAW • AVAILABLE indica integridade dos chunks; a inicialização do sistema exige teste próprio." Margin="0,0,0,14" TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}"/>
-     <DataGrid x:Name="ImagesGrid" Grid.Row="1"><DataGrid.Columns><DataGridTextColumn Header="Nome" Binding="{Binding Name}" Width="*" MinWidth="140"/><DataGridTextColumn Header="Estado" Binding="{Binding State}" Width="130"/><DataGridTextColumn Header="Tamanho lógico" Binding="{Binding Size}" Width="140"/><DataGridTextColumn Header="Setor lógico" Binding="{Binding LogicalSectorBytes}" Width="110"/><DataGridTextColumn Header="Criada em" Binding="{Binding Created}" Width="160"/><DataGridTextColumn Header="ID" Binding="{Binding Id}" Width="270"/></DataGrid.Columns></DataGrid>
-     <WrapPanel Grid.Row="2" Margin="0,14,0,0"><Button Content="Verificar todos os hashes" Click="VerifyImage_Click"/><Button Content="Ver manifesto" Style="{StaticResource SecondaryButton}" Click="ImageDetails_Click"/></WrapPanel>
+    <Grid>
+     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+     <StackPanel>
+      <TextBlock Text="Imagens de disco guardadas no servidor" Style="{StaticResource PageTitle}"/>
+      <TextBlock Style="{StaticResource PageHint}" Text="“AVAILABLE” indica que todos os blocos conferem com os hashes. A inicialização do sistema restaurado precisa de teste próprio."/>
+     </StackPanel>
+     <DataGrid x:Name="ImagesGrid" Grid.Row="1">
+      <DataGrid.Columns>
+       <DataGridTextColumn Header="Nome" Binding="{Binding Name}" Width="*" MinWidth="200"/>
+       <DataGridTextColumn Header="Situação" Binding="{Binding State}" Width="140"/>
+       <DataGridTextColumn Header="Tamanho" Binding="{Binding Size}" Width="130"/>
+       <DataGridTextColumn Header="Setor" Binding="{Binding LogicalSectorBytes}" Width="80"/>
+       <DataGridTextColumn Header="Criada em" Binding="{Binding Created}" Width="170"/>
+      </DataGrid.Columns>
+     </DataGrid>
+     <WrapPanel Grid.Row="2" Margin="0,14,0,0">
+      <Button Content="Verificar todos os hashes" Click="VerifyImage_Click"/>
+      <Button Content="Ver detalhes" Style="{StaticResource SecondaryButton}" Click="ImageDetails_Click"/>
+     </WrapPanel>
     </Grid>
    </TabItem>
-   <TabItem Header="Tarefas e logs">
-    <Grid><Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-     <DataGrid x:Name="JobsGrid"><DataGrid.Columns><DataGridTextColumn Header="Criada em" Binding="{Binding Created}" Width="140"/><DataGridTextColumn Header="Operação" Binding="{Binding Kind}" Width="110"/><DataGridTextColumn Header="Disco" Binding="{Binding DiskPath}" Width="145"/><DataGridTextColumn Header="Estado" Binding="{Binding State}" Width="165"/><DataGridTextColumn Header="Progresso real" Binding="{Binding ProgressText}" Width="*" MinWidth="140"/><DataGridTextColumn Header="ID" Binding="{Binding Id}" Width="250"/></DataGrid.Columns></DataGrid>
-     <WrapPanel Grid.Row="1" Margin="0,14,0,0"><Button Content="Examinar / aprovar plano…" Click="ApproveJob_Click"/><Button Content="Cancelar tarefa…" Style="{StaticResource SecondaryButton}" Click="CancelJob_Click"/><Button Content="Ver plano e resultado" Style="{StaticResource SecondaryButton}" Click="JobDetails_Click"/><Button Content="Exportar relatório JSON…" Style="{StaticResource SecondaryButton}" Click="ExportJob_Click"/></WrapPanel>
+
+   <TabItem Header="Tarefas">
+    <Grid>
+     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+     <TextBlock Text="Tarefas planejadas, em andamento e concluídas" Style="{StaticResource PageTitle}" Margin="0,0,0,12"/>
+     <DataGrid x:Name="JobsGrid" Grid.Row="1">
+      <DataGrid.Columns>
+       <DataGridTextColumn Header="Criada em" Binding="{Binding Created}" Width="150"/>
+       <DataGridTextColumn Header="Tarefa" Binding="{Binding KindLabel}" Width="210"/>
+       <DataGridTextColumn Header="Disco / alvo" Binding="{Binding DiskPath}" Width="170"/>
+       <DataGridTextColumn Header="Situação" Binding="{Binding StateLabel}" Width="190"/>
+       <DataGridTextColumn Header="Andamento" Binding="{Binding ProgressText}" Width="*" MinWidth="180"/>
+      </DataGrid.Columns>
+     </DataGrid>
+     <WrapPanel Grid.Row="2" Margin="0,14,0,0">
+      <Button Content="Conferir e aprovar…" Click="ApproveJob_Click"/>
+      <Button Content="Cancelar tarefa…" Style="{StaticResource SecondaryButton}" Click="CancelJob_Click"/>
+      <Button Content="Ver plano e resultado" Style="{StaticResource SecondaryButton}" Click="JobDetails_Click"/>
+      <Button Content="Exportar relatório…" Style="{StaticResource SecondaryButton}" Click="ExportJob_Click"/>
+     </WrapPanel>
     </Grid>
    </TabItem>
+
    <TabItem Header="Auditoria">
-    <Grid><Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions><DataGrid x:Name="AuditGrid"><DataGrid.Columns><DataGridTextColumn Header="Data local" Binding="{Binding When}" Width="175"/><DataGridTextColumn Header="Ator" Binding="{Binding Actor}" Width="150"/><DataGridTextColumn Header="Ação" Binding="{Binding Action}" Width="200"/><DataGridTextColumn Header="Detalhes" Binding="{Binding Details}" Width="*" MinWidth="140"/><DataGridTextColumn Header="Hash do evento" Binding="{Binding EventHash}" Width="200"/></DataGrid.Columns></DataGrid><Button Grid.Row="1" Content="Exportar auditoria JSON…" HorizontalAlignment="Left" Margin="0,14,0,0" Click="ExportAudit_Click"/></Grid>
+    <Grid>
+     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+     <TextBlock Text="Registro de auditoria" Style="{StaticResource PageTitle}" Margin="0,0,0,12"/>
+     <DataGrid x:Name="AuditGrid" Grid.Row="1">
+      <DataGrid.Columns>
+       <DataGridTextColumn Header="Data" Binding="{Binding When}" Width="170"/>
+       <DataGridTextColumn Header="Quem" Binding="{Binding Actor}" Width="150"/>
+       <DataGridTextColumn Header="Ação" Binding="{Binding Action}" Width="220"/>
+       <DataGridTextColumn Header="Detalhes" Binding="{Binding Details}" Width="*" MinWidth="200"/>
+      </DataGrid.Columns>
+     </DataGrid>
+     <Button Grid.Row="2" Content="Exportar auditoria…" Style="{StaticResource SecondaryButton}" HorizontalAlignment="Left" Margin="0,14,0,0" Click="ExportAudit_Click"/>
+    </Grid>
    </TabItem>
   </TabControl>
-  <Border Grid.Row="4" Background="#20252D" Padding="12,9" Margin="0,12,0,0" CornerRadius="4"><TextBlock x:Name="StatusLine" Text="Abra o connection.json do servidor ou informe URL, token e pin. O painel funciona no computador servidor." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}"/></Border>
+
+  <Border Grid.Row="5" Style="{StaticResource Card}" Padding="14,9" Margin="0,12,0,0">
+   <TextBlock x:Name="StatusLine" Text="Abra o painel pelo atalho “SLT Disk Manager - Painel” ou informe a conexão do servidor." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}"/>
+  </Border>
  </Grid>
 </Window>

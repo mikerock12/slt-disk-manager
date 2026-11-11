@@ -10,6 +10,7 @@ on:
       - 'src/network-boot/**'
       - 'scripts/build-ipxe-bootstrap.sh'
       - 'scripts/approve-netboot-profiles.py'
+      - 'src/server/**'
   push:
     branches: [main]
     paths:
@@ -28,7 +29,7 @@ concurrency:
 jobs:
   build-and-boot:
     runs-on: ubuntu-latest
-    timeout-minutes: 100
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -62,7 +63,7 @@ jobs:
       - name: Install isolated VM test tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends qemu-system-x86 ovmf dnsmasq iproute2 xorriso build-essential liblzma-dev git tesseract-ocr
+          sudo apt-get install -y --no-install-recommends qemu-system-x86 ovmf dnsmasq iproute2 xorriso build-essential liblzma-dev git tesseract-ocr mtools dosfstools fdisk util-linux openssl
       - name: Export Rescue netboot and build pinned iPXE bootstrap
         run: |
           version=$(tr -d '\r\n' < VERSION)
@@ -71,8 +72,8 @@ jobs:
           python3 rescue/pxe/test-export-rescue-netboot.py
           python3 rescue/pxe/test-netboot-diagnostics.py
           python3 rescue/pxe/test-boot-failure-observer.py
-      - name: Actual PXE BIOS and UEFI in isolated network namespace (no ISO/USB)
-        timeout-minutes: 30
+      - name: Actual PXE BIOS and UEFI, SLT mode from a local EFI partition and ProxyDHCP, in isolated network namespace (no ISO/USB)
+        timeout-minutes: 60
         run: |
           sudo env PATH="$PATH" python3 rescue/pxe/test-netboot-vm.py --service-dll src/network-boot/SLT.NetworkBoot.Service/bin/Release/net10.0/SLT.NetworkBoot.Service.dll --rescue-profile artifacts/rescue-netboot --bootstrap-profile artifacts/ipxe-bootstrap --controller-dll src/server/SLT.Controller.Host/bin/Release/net10.0/SLT.Controller.Host.dll --local-system-image artifacts/rescue-iso/live-image-amd64.hybrid.iso --output artifacts/pxe-lab
           sudo chown -R "$(id -u):$(id -g)" artifacts/pxe-lab

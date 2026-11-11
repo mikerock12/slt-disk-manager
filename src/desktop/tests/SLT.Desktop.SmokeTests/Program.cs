@@ -20,6 +20,70 @@ internal static class Program
             var main = new MainWindow();
             Check(main.FindName("Cloning") is ClonePanel && main.FindName("Files") is FilesPanel, "XAML: abas de clonagem e arquivos constroem sem erro");
             Check(Children<TabItem>(main).Count() >= 8, "XAML: navegação principal preservada");
+            Check(main.Background is SolidColorBrush { Color: { R: < 40, G: < 40, B: < 40 } } && main.FontSize >= 15 && ((TabControl)main.FindName("Workspace")).TabStripPlacement == Dock.Left, "Janela aplica o tema escuro, fonte de 15 px e menu lateral");
+            var approvalStyle = new PlanApprovalWindow(new Job("j", new JobPlan("j", "INVENTORY", "d", "", "", 0, 512, "", "AUTORIZAR", DateTimeOffset.UtcNow.AddMinutes(5), true), "AWAITING_APPROVAL", DateTimeOffset.UtcNow, null, null, null), null, null, null);
+            Check(approvalStyle.Background is SolidColorBrush { Color: { R: < 40 } }, "Janelas de confirmação usam o mesmo tema");
+            var missing = MainWindow.ExplainConnectionProblem(Path.Combine(Path.GetTempPath(), "slt-inexistente-" + Guid.NewGuid().ToString("N"), "connection.json"));
+            Check(missing is { CanElevate: false } && missing.Value.Title.Contains("não está em execução"), "Conexão inexistente explica que o servidor não está em execução");
+            var denied = Path.Combine(Path.GetTempPath(), "slt-desktop-acl-" + Guid.NewGuid().ToString("N") + ".json");
+            File.WriteAllText(denied, "{}");
+            try
+            {
+                var info = new FileInfo(denied); var acl = info.GetAccessControl();
+                var me = System.Security.Principal.WindowsIdentity.GetCurrent().User!;
+                acl.AddAccessRule(new System.Security.AccessControl.FileSystemAccessRule(me, System.Security.AccessControl.FileSystemRights.ReadData, System.Security.AccessControl.AccessControlType.Deny));
+                info.SetAccessControl(acl);
+                var problem = MainWindow.ExplainConnectionProblem(denied);
+                Check(problem is not null && (problem.Value.Title.Contains("administrador") || problem.Value.Title.Contains("permissão")) && problem.Value.Text.Contains(denied), "Conexão sem permissão de leitura explica o motivo e aponta o arquivo");
+                Check(problem!.Value.CanElevate == !MainWindow.IsElevated(), "Botão de reabrir como administrador só aparece quando o painel não está elevado");
+                acl.RemoveAccessRule(new System.Security.AccessControl.FileSystemAccessRule(me, System.Security.AccessControl.FileSystemRights.ReadData, System.Security.AccessControl.AccessControlType.Deny));
+                info.SetAccessControl(acl);
+                Check(MainWindow.ExplainConnectionProblem(denied) is null, "Conexão legível não gera aviso");
+            }
+            finally { try { File.Delete(denied); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { } }
+            Check(MainWindow.NormalizeCode(" 0711 1918 ") == "07111918" && MainWindow.NormalizeCode("0711-19") == "071119", "Código de pareamento aceita espaços e é reduzido aos dígitos");
+            var nowUi = DateTimeOffset.UtcNow;
+            DiskInfo UiDisk(string serial, bool system) => new("d-" + serial, "/dev/" + serial, "Synthetic SSD", serial, 256L * 1024 * 1024 * 1024, 512, 512, "fp-" + serial, system, false, system, "TEST", [new("p1", "/dev/p1", 100L * 1024 * 1024, "vfat", ""), new("p2", "/dev/p2", 200L * 1024 * 1024 * 1024, "ntfs", "")]);
+            Device Ui(string id, string name, string mode, string[] caps, string[] notes, string? origin = null, bool write = false) => new(id, name, mode, "TRUSTED", nowUi,
+                new Inventory(id, name, mode == "WINDOWS" ? "Windows 10 Pro 22H2" : "SLT Rescue (Linux)", mode, "0.1.0", caps, [UiDisk("A" + id, mode == "WINDOWS"), UiDisk("B" + id, false)], nowUi, notes), origin, write);
+            var uiWindows = Ui("11111111-aaaa", "PC-BALCAO", "WINDOWS", ["INVENTORY", "SMART", "REBOOT_RESCUE"], []);
+            var uiLegacy = Ui("22222222-bbbb", "PC-ANTIGO", "WINDOWS", ["INVENTORY"], ["MODO_SLT: este computador inicia em BIOS/Legacy; use o pendrive SLT Rescue ou o boot pela rede (PXE)."]);
+            var uiSlt = Ui("33333333-cccc", "NOTE-CLIENTE (modo SLT)", "RESCUE", ["INVENTORY", "SMART", "CAPTURE", "RESTORE", "CLONE_STREAM", "FORMAT_DISK"], [], "11111111-aaaa", true);
+            var uiPending = new Enrollment("e1", "NOTE-MARIA", "WINDOWS", "", nowUi.AddMinutes(9), "PENDING", true);
+            var uiOld = new Enrollment("e2", "PC-RECEPCAO", "RESCUE", "48213370", nowUi.AddMinutes(4), "PENDING", false);
+            main.ShowFixture([uiWindows, uiLegacy, uiSlt], [uiPending, uiOld, new Enrollment("e3", "PC-BALCAO", "WINDOWS", "", nowUi.AddMinutes(-30), "APPROVED", true)]);
+            var banner = (Border)main.FindName("PairingBanner");
+            Check(banner.Visibility == Visibility.Visible && ((TextBlock)main.FindName("PairingBannerTitle")).Text.Contains("PC-RECEPCAO") && ((TextBlock)main.FindName("PairingBannerText")).Text.Contains("mais 1"), "Pedido de conexão aparece em destaque em qualquer página, o mais próximo de expirar primeiro");
+            Check(uiPending.CodeLabel == "mostrado na tela do cliente" && uiOld.CodeLabel == "48213370" && uiPending.StatusLabel == "Aguardando código", "Código curto nunca é exibido no painel; o operador lê na tela do cliente");
+            var devicesGrid = (DataGrid)main.FindName("DevicesGrid"); var disksGrid = (DataGrid)main.FindName("DisksGrid");
+            var sltButton = (Button)main.FindName("SltModeButton"); var formatButton = (Button)main.FindName("FormatButton"); var hint = (TextBlock)main.FindName("DeviceActionHint");
+            Check(!sltButton.IsEnabled && !formatButton.IsEnabled && hint.Text.Contains("Selecione um computador"), "Sem seleção, modo SLT e formatação ficam bloqueados com orientação");
+            devicesGrid.SelectedItem = uiWindows;
+            Check(sltButton.IsEnabled && !formatButton.IsEnabled && uiWindows.ModeLabel == "Windows (cliente)", "Cliente Windows com REBOOT_RESCUE oferece reinício em modo SLT e não oferece formatação");
+            devicesGrid.SelectedItem = uiLegacy;
+            Check(!sltButton.IsEnabled && hint.Text.Contains("BIOS/Legacy") && !((TextBlock)main.FindName("InventoryNotes")).Text.Contains("MODO_SLT"), "Cliente sem modo SLT mostra o motivo informado pelo próprio cliente");
+            devicesGrid.SelectedItem = uiSlt;
+            Check(!sltButton.IsEnabled && !formatButton.IsEnabled && uiSlt.ModeLabel == "Modo SLT" && hint.Text.Contains("Selecione um disco"), "Sessão em modo SLT pede a escolha do disco antes de formatar");
+            disksGrid.SelectedItem = uiSlt.Inventory!.Disks[1];
+            Check(formatButton.IsEnabled && hint.Text.Contains("sem nova confirmação no teclado"), "Modo SLT com gravação avisa que o painel é a confirmação");
+            disksGrid.SelectedItem = uiSlt.Inventory.Disks[1] with { IsReadOnly = true };
+            Check(formatButton.IsEnabled, "Seleção fora da lista não altera o estado do botão");
+            Check(FormatDialog.Validate(new("GPT", "NTFS", "DADOS"), 256L << 30, 512) is null && FormatDialog.Validate(new("MBR", "NTFS", ""), 3L << 40, 512) is not null && FormatDialog.Validate(new("GPT", "FAT32", ""), 3L << 40, 512) is not null && FormatDialog.Validate(new("GPT", "FAT32", "ABCDEFGHIJKL"), 1L << 30, 512) is not null && FormatDialog.Validate(new("GPT", "NTFS", "meu disco"), 1L << 30, 512) is not null, "Formatação valida rótulo, MBR acima de 2 TiB e FAT32 grande antes de pedir o plano");
+            var formatDialog = new FormatDialog(uiSlt, uiSlt.Inventory.Disks[1]);
+            Check(formatDialog.Options == new FormatOptions("GPT", "NTFS", "") && string.Join("\n", Children<TextBlock>(formatDialog).Select(t => t.Text)).Contains("será apagado"), "Diálogo de formatação parte de GPT/NTFS e avisa que apaga o disco");
+            var sltDialog = new SltModeDialog("PC-BALCAO");
+            Check(sltDialog.AllowWrite && string.Join("\n", Children<TextBlock>(sltDialog).Select(t => t.Text)).Contains("sem pendrive"), "Diálogo do modo SLT explica o reinício e a gravação controlada pelo servidor");
+            var rebootPlan = new JobPlan("r", "REBOOT_RESCUE", uiWindows.Id, "", "", 0, 512, "", "REINICIAR PC-BALCAO MODO SLT", nowUi.AddMinutes(15), true, RescueBoot: new("a", 1, "", "", true));
+            var rebootApproval = new PlanApprovalWindow(new Job("r", rebootPlan, "AWAITING_APPROVAL", nowUi, null, null, null), uiWindows, null, null);
+            var rebootText = string.Join("\n", Children<TextBlock>(rebootApproval).Select(t => t.Text));
+            Check(rebootText.Contains("SERÁ REINICIADO") && rebootText.Contains("Secure Boot") && !rebootText.Contains("Fingerprint") && !Children<Button>(rebootApproval).Single(b => Equals(b.Content, "Reiniciar em modo SLT")).IsEnabled, "Aprovação do modo SLT explica o reinício, os requisitos e exige a confirmação digitada");
+            var formatPlan = new JobPlan("f", "FORMAT_DISK", uiSlt.Id, "fp", "/dev/sdb", 256L << 30, 512, "", "FORMATAR NOTE-CLIENTE fp", nowUi.AddMinutes(15), true, Format: new("GPT", "EXFAT", "EXTERNO"));
+            var formatApproval = new PlanApprovalWindow(new Job("f", formatPlan, "AWAITING_APPROVAL", nowUi, null, null, null), uiSlt, uiSlt.Inventory.Disks[1], null);
+            var formatText = string.Join("\n", Children<TextBlock>(formatApproval).Select(t => t.Text));
+            Check(formatText.Contains("TODOS OS DADOS E PARTIÇÕES SERÃO APAGADOS") && formatText.Contains("EXFAT") && formatText.Contains("EXTERNO") && formatText.Contains("Partições atuais que serão removidas") && !Children<Button>(formatApproval).Single(b => Equals(b.Content, "Autorizar formatação")).IsEnabled, "Aprovação de formatação mostra sistema de arquivos, partições que somem e exige a confirmação digitada");
+            var planJson = JsonSerializer.Serialize(formatPlan, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+            Check(planJson.Contains("\"format\":{\"tableType\":\"GPT\",\"fileSystem\":\"EXFAT\",\"label\":\"EXTERNO\"}"), "DTO de formatação preserva o contrato camelCase");
+            Check(Display.JobKind("REBOOT_RESCUE") == "Reiniciar em modo SLT" && Display.JobState("AWAITING_APPROVAL") == "Aguardando aprovação" && Display.JobKind("FUTURO") == "FUTURO", "Tarefas e estados aparecem em português, sem esconder tipos desconhecidos");
             var now = DateTimeOffset.UtcNow;
             var json = new JsonSerializerOptions(JsonSerializerDefaults.Web);
             var networkBoot = (NetworkBootPanel)main.FindName("NetworkBoot");
@@ -185,6 +249,16 @@ internal static class Program
                     "FIT", "fixture-capture", null, "fixture-image", "IMAGE_READY", now, preview);
                 clonePanel.UpdateData([renderSource, renderTarget], [session], []);
                 ((DataGrid)clonePanel.FindName("Sessions")).SelectedItem = session;
+                devicesGrid.SelectedItem = uiSlt; disksGrid.SelectedItem = uiSlt.Inventory.Disks[1];
+                ((TextBlock)main.FindName("ServerSummary")).Text = "Servidor BANCADA • 192.168.1.23:7443 • versão QA";
+                ((TextBlock)main.FindName("ServerIdentity")).Text = "Este servidor: BANCADA — https://192.168.1.23:7443\nBusca automática ligada (UDP 7444): os clientes desta versão encontram o servidor sozinhos.";
+                ((Border)main.FindName("ConnectionPanel")).Visibility = Visibility.Collapsed;
+                tabs.SelectedItem = Children<TabItem>(main).Single(t => Equals(t.Header, "Computadores"));
+                Render((FrameworkElement)main.Content, 1380, 860, Path.Combine(output, "desktop-computadores-fixture.png"));
+                tabs.SelectedItem = Children<TabItem>(main).Single(t => Equals(t.Header, "Conectar computador"));
+                Render((FrameworkElement)main.Content, 1380, 860, Path.Combine(output, "desktop-conectar-fixture.png"));
+                Render((FrameworkElement)formatDialog.Content, 640, 520, Path.Combine(output, "desktop-formatar-fixture.png"));
+                Render((FrameworkElement)rebootApproval.Content, 760, 700, Path.Combine(output, "desktop-aprovacao-modo-slt-fixture.png"));
                 tabs.SelectedItem = Children<TabItem>(main).Single(t => Equals(t.Header, "Clonagem"));
                 Render((FrameworkElement)main.Content, 1316, 840, Path.Combine(output, "desktop-clonagem-fixture.png"));
                 ((ScrollViewer)clonePanel.Content).ScrollToEnd();
@@ -262,7 +336,7 @@ internal static class Program
     }
     private static void Render(FrameworkElement element, int width, int height, string path)
     {
-        if (element is Panel panel) panel.Background = new SolidColorBrush(Color.FromRgb(21, 25, 31));
+        if (element is Panel panel) panel.Background = new SolidColorBrush(Color.FromRgb(16, 19, 23));
         element.Measure(new Size(width, height)); element.Arrange(new Rect(0, 0, width, height)); element.UpdateLayout();
         var bitmap = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32); bitmap.Render(element);
         var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap));

@@ -58,7 +58,7 @@ public partial class NetworkBootPanel : UserControl
                 BindIPv4.Text = status.Config.BindIPv4;
                 AllowedCidr.Text = status.Config.AllowedCidr;
                 HttpPort.Text = status.Config.HttpPort.ToString();
-                Mode.SelectedIndex = 0;
+                Mode.SelectedIndex = status.Config.Mode == "PROXY_DHCP" ? 1 : 0;
             }
             if (configChanged) ResetValidation();
             ServiceStatus.Text = status.State switch
@@ -84,7 +84,15 @@ public partial class NetworkBootPanel : UserControl
         ValidationResult.Text = "Salve e valide a configuração antes de iniciar.";
     }
     private void ConfigurationChanged(object sender, TextChangedEventArgs e) => MarkDirty();
-    private void Mode_SelectionChanged(object sender, SelectionChangedEventArgs e) => MarkDirty();
+    private string SelectedMode => (Mode.SelectedItem as ComboBoxItem)?.Tag as string ?? "EXTERNAL_DHCP";
+    private void Mode_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (DhcpInstructions is not null)
+            DhcpInstructions.Text = SelectedMode == "PROXY_DHCP"
+                ? "ProxyDHCP: não é preciso configurar o roteador. O SLT responde somente a computadores que pedem boot pela rede (PXE), informando o arquivo de boot; ele nunca distribui endereços IP. Use apenas em rede de bancada sem outro servidor PXE, e libere as portas UDP 67 e 4011 no firewall (Configure-NetworkBootFirewall.ps1 -ProxyDhcp)."
+                : "O DHCP existente continua fornecendo IP. Configure next-server e bootfile BIOS/UEFI no equipamento de rede seguindo o guia operacional; o SLT não altera o roteador nem distribui concessões de IP.";
+        MarkDirty();
+    }
     private void MarkDirty()
     {
         if (_updating || StartButton is null) return;
@@ -138,7 +146,7 @@ public partial class NetworkBootPanel : UserControl
         if (!nic.Eligible) throw new InvalidOperationException("Interface indisponível: " + nic.Reason);
         if (!int.TryParse(HttpPort.Text.Trim(), out var port) || port is < 1024 or > 65535)
             throw new InvalidOperationException("Informe uma porta HTTP de 1024 a 65535.");
-        var config = new NetworkBootConfig(1, nic.Id, BindIPv4.Text.Trim(), AllowedCidr.Text.Trim(), "EXTERNAL_DHCP", port, _status?.Config.MaxConcurrentTransfers ?? 8);
+        var config = new NetworkBootConfig(1, nic.Id, BindIPv4.Text.Trim(), AllowedCidr.Text.Trim(), SelectedMode, port, _status?.Config.MaxConcurrentTransfers ?? 8);
         await Client.PutAsync<JsonElement>("/api/v1/network-boot/config", config);
         _dirty = false;
         ResetValidation();

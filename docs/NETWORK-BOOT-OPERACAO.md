@@ -71,3 +71,46 @@ Origem de terceiros: [iPXE](https://ipxe.org/howto/chainloading), build fixado p
 commit em `scripts/build-ipxe-bootstrap.sh`, código-fonte/licença no pacote.
 [Debian live-boot](https://manpages.debian.org/trixie/live-boot-doc/live-boot.7.en.html)
 fornece o parâmetro fetch. ISO USB anterior e seus fluxos continuam disponíveis.
+
+## Beta.7: modo SLT, ProxyDHCP e pasta dos perfis
+
+### Modo SLT (reiniciar um cliente Windows sem pendrive)
+
+O modo SLT usa este mesmo serviço para entregar kernel, initrd e sistema. Não depende de
+opções no DHCP: o cliente Windows grava na própria partição EFI um carregador
+(`ipxe-local.efi`, parte do perfil `ipxe-bootstrap` desta versão) e um roteiro com o
+endereço do servidor. Para usar:
+
+1. Importe os dois perfis do pacote `SLT-Netboot` **desta versão** e deixe o boot pela
+   rede em execução (passos 2 a 7 acima; o passo 5 do DHCP externo não é necessário
+   para o modo SLT).
+2. No painel, selecione o cliente Windows e clique em **Reiniciar em modo SLT…**.
+
+Se o serviço estiver parado ou o perfil iPXE importado for de uma versão anterior, o
+painel recusa o pedido e diz o motivo. Requisitos e limites em
+[ADR 004](ADR/004-modo-slt-e-proxydhcp.md): UEFI com Secure Boot desativado, cabo de
+rede, sem suporte a BIOS/Legacy.
+
+### ProxyDHCP (opcional)
+
+Para redes cujo roteador não permite configurar `next-server` e arquivo de boot. Em
+"Modo de DHCP" escolha **ProxyDHCP**, salve e valide. O SLT passa a responder, nas
+portas UDP 67 e 4011, somente a computadores que pedem boot pela rede, informando o
+arquivo de boot. Ele **nunca distribui endereços IP**: o roteador continua fazendo isso.
+
+- Libere as portas no firewall, uma vez, como Administrador:
+  `install-server/Configure-NetworkBootFirewall.ps1 ... -ProxyDhcp` (os demais
+  parâmetros são os do passo 6). `-Remove` apaga também essas regras.
+- O início falha se outro programa neste computador já usa a porta UDP 67.
+- Não use em uma rede que já tenha outro servidor PXE: os dois responderiam.
+- Pedidos encaminhados por relay (outra sub-rede) são ignorados.
+- No cliente, escolha o boot pela rede (F12 ou equivalente). O menu aparece como no
+  modo DHCP externo; o padrão após 15 s é sair para o firmware.
+
+### Onde ficam os perfis
+
+Com a pasta do repositório definida (`--repository`, instalador ou
+`Set-ServerRepository.ps1`), os perfis de boot passam a ficar em
+`<repositório>\network-boot`, fora do disco do sistema. Um servidor que já tinha perfis
+na pasta de estado continua a usá-los lá até que o repositório receba os seus;
+`Set-ServerRepository.ps1 -MoveExisting` leva tudo junto, conferindo o SHA256.

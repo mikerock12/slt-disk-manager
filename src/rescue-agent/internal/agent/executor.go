@@ -30,6 +30,14 @@ type Options struct {
 	ScratchDir         string
 	Input              io.Reader
 	Output             io.Writer
+	// PinTyped: a person typed the 64-character pin. Otherwise the pin was discovered on the LAN
+	// and only the short-code pairing (or an SLT-mode ticket) may complete the enrollment.
+	PinTyped bool
+	// Ticket is the single-use SLT-mode credential a paired Windows client received over mTLS.
+	Ticket string
+	// ConfirmAtServer: SLT mode. The typed confirmation in the server panel is the human
+	// confirmation; this keyboard is not asked again.
+	ConfirmAtServer bool
 }
 
 type Runner struct {
@@ -63,6 +71,12 @@ func (r *Runner) inventory(ctx context.Context) error {
 	if r.Options.AllowPhysicalWrite && r.Options.FixtureDir == "" && linuxDeployToolsAvailable() {
 		v.Capabilities = append(v.Capabilities, "DEPLOY_LINUX")
 	}
+	if (r.Options.AllowPhysicalWrite && r.Options.FixtureDir == "" || r.Options.AllowFileWrite && r.Options.FixtureDir != "") && formatToolsAvailable() {
+		v.Capabilities = append(v.Capabilities, "FORMAT_DISK")
+	}
+	if r.Options.ConfirmAtServer {
+		v.Notes = append(v.Notes, "MODO SLT: gravações autorizadas no painel do servidor são executadas sem nova confirmação no teclado deste computador.")
+	}
 	_, err = r.Client.JSON(ctx, "POST", "/agent/v1/inventory", v, nil)
 	return err
 }
@@ -75,7 +89,7 @@ func (r *Runner) execute(ctx context.Context, p Plan) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	d, err := ValidateDisk(p, disks, p.Kind == "RESTORE" || p.Kind == "DEPLOY_LINUX")
+	d, err := ValidateDisk(p, disks, p.Kind == "RESTORE" || p.Kind == "DEPLOY_LINUX" || p.Kind == "FORMAT_DISK")
 	if err != nil {
 		return "", err
 	}
@@ -105,6 +119,8 @@ func (r *Runner) execute(ctx context.Context, p Plan) (string, error) {
 		return "Imagem raw capturada e validada no repositório", r.capture(ctx, p, d)
 	case "DEPLOY_LINUX":
 		return r.deployLinux(ctx, p, d)
+	case "FORMAT_DISK":
+		return r.formatDisk(ctx, p, d)
 	case "RESTORE":
 		if p.StreamID != "" {
 			err := r.receiveStream(ctx, p, d)
@@ -163,7 +179,10 @@ func (r *Runner) openDisk(ctx context.Context, p Plan, d Disk, write bool) (*os.
 			return nil, errors.New("destino não é dispositivo de bloco")
 		}
 	}
-	if write && !fixture {
+	if write && !fixture && r.Options.ConfirmAtServer {
+		// SLT mode: the operator already typed this exact challenge in the server panel.
+		fmt.Fprintf(r.Options.Output, "\nMODO SLT: gravando no disco %s | %s | serial %s | %d bytes.\nAutorizado no painel do servidor com a confirmação %q.\n", d.Path, d.Model, d.Serial, d.SizeBytes, p.Challenge)
+	} else if write && !fixture {
 		if err := r.report(ctx, p, "AWAITING_LOCAL_CONFIRMATION", 0, d.SizeBytes); err != nil {
 			return nil, err
 		}
@@ -467,7 +486,17 @@ func Run(ctx context.Context, options Options) error {
 	if err != nil {
 		return err
 	}
-	deviceID, certificate, err := Enroll(ctx, bootstrap, options.StateDir, options.Output)
+	deviceID, certificate, err := enrollWith(ctx, bootstrap, options.StateDir, options.Output, "RESCUE", options.PinTyped, options.Ticket)
+	// SLT mode starts by itself right after boot, possibly before DHCP finishes: a connection
+	// failure (no HTTP answer at all) is retried for about three minutes. A refusal is final.
+	for attempt := 0; err != nil && options.Ticket != "" && attempt < 36 && !strings.Contains(err.Error(), "HTTP "); attempt++ {
+		fmt.Fprintln(options.Output, "Aguardando a rede e o servidor:", err)
+		if err = pause(ctx, 5*time.Second); err != nil {
+			return err
+		}
+		bootstrap.HTTP.CloseIdleConnections()
+		deviceID, certificate, err = enrollWith(ctx, bootstrap, options.StateDir, options.Output, "RESCUE", options.PinTyped, options.Ticket)
+	}
 	if err != nil {
 		return err
 	}

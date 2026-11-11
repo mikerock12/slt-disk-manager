@@ -23,3 +23,10 @@ O instalador copia o pacote para Program Files, restringe ACLs, roda uma sessão
 O agente utiliza somente conexões de saída; nenhuma regra de firewall de entrada é criada no cliente. O token administrativo do servidor nunca é necessário no cliente. `-SmartctlPath` habilita SMART com uma instalação local legítima de smartmontools. Nenhuma ferramenta de terceiros é redistribuída neste pacote.
 
 `Uninstall-Agent.ps1` para o serviço e remove seu registro, preservando binários e credenciais para evitar apagar evidências. Revogue a identidade no servidor antes de descartar o estado. Para atualizar: desinstale o serviço, publique/copie uma versão compatível e reinstale usando o mesmo `-StateDirectory`; certificados válidos serão reutilizados. Instaladores MSI/assinatura Authenticode e homologação de hardware ainda são etapas de release separadas.
+
+## Beta.7
+
+`Install-Agent.ps1` não exige mais `-Server` e `-ServerPin`: sem eles o cliente procura
+o servidor e mostra o código de 8 dígitos durante a instalação. `Update-Agent.ps1`
+troca os programas de um serviço já instalado, preserva a conexão com o servidor e
+corrige instalações antigas em `Program Files (x86)`. Os dois aceitam `-ValidateOnly`.

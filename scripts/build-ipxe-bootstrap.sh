@@ -25,6 +25,15 @@ IPXE
 make -C "$work/src" -j2 bin/undionly.kpxe bin-x86_64-efi/ipxe.efi EMBED="$out/slt-chain.ipxe"
 cp "$work/src/bin/undionly.kpxe" "$out/undionly.kpxe"
 cp "$work/src/bin-x86_64-efi/ipxe.efi" "$out/ipxe.efi"
+# SLT mode: started from the client's own EFI System Partition (\EFI\SLT), this loader only
+# runs the script a paired Windows client wrote next to it; anything else returns to the firmware.
+cat > "$out/slt-local.ipxe" <<'IPXE'
+#!ipxe
+chain file:autoexec.ipxe || exit
+IPXE
+make -C "$work/src" -j2 bin-x86_64-efi/ipxe.efi EMBED="$out/slt-local.ipxe"
+cp "$work/src/bin-x86_64-efi/ipxe.efi" "$out/ipxe-local.efi"
+cmp -s "$out/ipxe.efi" "$out/ipxe-local.efi" && { echo 'Local loader was not rebuilt with its own script.' >&2; exit 1; }
 cp "$work/COPYING" "$out/COPYING"
 python3 - "$out" "$revision" "$root/VERSION" <<'PY'
 import hashlib,json,re,sys
@@ -33,10 +42,10 @@ p=Path(sys.argv[1]); revision=sys.argv[2]
 app_version=Path(sys.argv[3]).read_text().strip()
 profile_version=re.sub('[^a-z0-9]+','-',app_version.lower()).strip('-')
 artifacts=[]
-for id,name in [('bios','undionly.kpxe'),('uefi','ipxe.efi')]:
+for id,name in [('bios','undionly.kpxe'),('uefi','ipxe.efi'),('uefi-local','ipxe-local.efi')]:
     f=p/name
     artifacts.append(dict(id=id,relativePath=name,sizeBytes=f.stat().st_size,sha256=hashlib.sha256(f.read_bytes()).hexdigest(),source='https://github.com/ipxe/ipxe/commit/'+revision))
 manifest=dict(schemaVersion=1,id='ipxe-'+profile_version+'-'+revision[:12],displayName='iPXE SLT chainload BIOS/UEFI '+app_version,kind='IPXE_BOOTSTRAP',architecture='X64',firmwareSupport=['BIOS','UEFI'],secureBootStatus='UNSUPPORTED',validationStatus='NETWORK_BOOT_DEV',version=revision,artifacts=artifacts)
 (p/'netboot-manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
-(p/'SLT-BUILD.txt').write_text('iPXE https://ipxe.org\nPinned upstream '+revision+'\nSLT package '+app_version+'\nLocal build: config/local/console.h enables CONSOLE_SERIAL only for PLATFORM_pcbios; native EFI console retained.\nEMBED=slt-chain.ipxe (included); make bin/undionly.kpxe bin-x86_64-efi/ipxe.efi\nNo Secure Boot signature/homologation. Source tar and license included.\n')
+(p/'SLT-BUILD.txt').write_text('iPXE https://ipxe.org\nPinned upstream '+revision+'\nSLT package '+app_version+'\nLocal build: config/local/console.h enables CONSOLE_SERIAL only for PLATFORM_pcbios; native EFI console retained.\nEMBED=slt-chain.ipxe (included); make bin/undionly.kpxe bin-x86_64-efi/ipxe.efi\nipxe-local.efi: same tree, EMBED=slt-local.ipxe (included), for the SLT mode started from a client EFI partition.\nNo Secure Boot signature/homologation. Source tar and license included.\n')
 PY

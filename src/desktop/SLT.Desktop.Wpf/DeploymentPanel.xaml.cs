@@ -123,7 +123,7 @@ public partial class DeploymentPanel : UserControl
             MessageBox.Show(Window.GetWindow(this), $"Usuário: {account!.UserName}\nSenha temporária: {password}\n\nAnote agora: ela não será exibida de novo nem fica registrada no log.", "Senha temporária do cliente", MessageBoxButton.OK, MessageBoxImage.Information);
         if (_refresh is not null) await _refresh();
         if (_review is not null) await _review(job);
-        Status.Text = $"Plano {job.Id} criado. Acompanhe Tarefas e logs. A confirmação local no cliente continua obrigatória.";
+        Status.Text = $"Plano {job.Id} criado. Acompanhe a página Tarefas. No WinPE e no Rescue iniciado por pendrive o cliente pede a confirmação no próprio teclado; em modo SLT a aprovação aqui basta.";
     });
     private async void Convert_Click(object sender, RoutedEventArgs e) => await RunAsync(async () =>
     {

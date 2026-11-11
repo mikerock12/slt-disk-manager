@@ -27,7 +27,7 @@ public static class NetworkTopologyValidator
     {
         var errors = new List<string>();
         if (c.SchemaVersion != 1) errors.Add("Versão de configuração inválida.");
-        if (c.Mode != "EXTERNAL_DHCP") errors.Add("Somente EXTERNAL_DHCP disponível; ProxyDHCP ainda não validado.");
+        if (c.Mode is not ("EXTERNAL_DHCP" or "PROXY_DHCP")) errors.Add("Modo de DHCP desconhecido: use EXTERNAL_DHCP ou PROXY_DHCP.");
         if (c.HttpPort is < 1024 or > 65535 || c.HttpPort == 7443) errors.Add("HTTP boot deve usar porta 1024–65535 diferente da API 7443.");
         if (c.MaxConcurrentTransfers is < 1 or > 32) errors.Add("Limite de transferências deve ser 1–32.");
         if (!IPAddress.TryParse(c.BindIPv4, out var ip) || !(BootJson.Private(ip) || laboratory && IPAddress.IsLoopback(ip))) errors.Add("Bind deve ser IPv4 RFC1918 explícito.");
@@ -46,6 +46,9 @@ public static class NetworkTopologyValidator
             else if (IPNetwork.TryParse(c.AllowedCidr, out var requested) && IPNetwork.Parse(selected.Cidr) is var actual &&
                      (requested.PrefixLength < actual.PrefixLength || !actual.Contains(requested.BaseAddress))) errors.Add("CIDR autorizado deve ficar dentro da sub-rede da Ethernet selecionada.");
         }
-        return new(errors.Count == 0, errors.ToArray(), ["DHCP externo deve fornecer IP, next-server e bootfile por arquitetura; SLT não altera o roteador.", "Secure Boot e hardware físico não homologados. HTTP/TFTP pré-boot exigem rede de bancada isolada."]);
+        var dhcp = c.Mode == "PROXY_DHCP"
+            ? "ProxyDHCP: o SLT responde só a clientes PXE com o arquivo de boot (UDP 67 e 4011) e nunca oferece endereço IP; o DHCP da rede continua entregando os endereços. Não use junto de outro servidor PXE na mesma rede."
+            : "DHCP externo deve fornecer IP, next-server e bootfile por arquitetura; SLT não altera o roteador.";
+        return new(errors.Count == 0, errors.ToArray(), [dhcp, "Secure Boot e hardware físico não homologados. HTTP/TFTP pré-boot exigem rede de bancada isolada."]);
     }
 }

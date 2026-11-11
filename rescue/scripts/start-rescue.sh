@@ -38,22 +38,27 @@ slt_start_main() {
   printf '\nSLT Rescue — conectar este cliente ao servidor da bancada\n'
   printf 'Este assistente não monta discos nem inicia captura ou restauração.\n'
   slt_prepare_network || return $?
-  printf 'Endereço HTTPS do servidor (ex.: https://192.168.1.10:7443): '
+  printf 'Endereço HTTPS do servidor — deixe vazio para PROCURAR o servidor na rede (ex.: https://192.168.1.10:7443): '
   IFS= read -r server || return 2
-  # The agent additionally resolves every address and enforces LAN-only dialing.
-  [[ ${#server} -le 300 && "$server" =~ ^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?/?$ ]] || {
-    echo 'Endereço inválido. Use HTTPS, host/IP e porta, sem credenciais, caminho ou espaços.' >&2; return 2;
-  }
-  printf 'Pin SHA-256 conferido na tela do servidor (64 caracteres hexadecimais): '
-  IFS= read -r pin || return 2
-  pin="${pin//:/}"
-  [[ "$pin" =~ ^[A-Fa-f0-9]{64}$ ]] || { echo 'Pin inválido; copie os 64 caracteres exibidos pelo servidor.' >&2; return 2; }
+  pin=''
+  if [[ -n "$server" ]]; then
+    # The agent additionally resolves every address and enforces LAN-only dialing.
+    [[ ${#server} -le 300 && "$server" =~ ^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?/?$ ]] || {
+      echo 'Endereço inválido. Use HTTPS, host/IP e porta, sem credenciais, caminho ou espaços.' >&2; return 2;
+    }
+    printf 'Pin SHA-256 do servidor (64 caracteres) — deixe vazio para confirmar pelo código de pareamento: '
+    IFS= read -r pin || return 2
+    pin="${pin//:/}"
+    [[ -z "$pin" || "$pin" =~ ^[A-Fa-f0-9]{64}$ ]] || { echo 'Pin inválido; copie os 64 caracteres exibidos pelo servidor ou deixe vazio.' >&2; return 2; }
+  fi
   printf '\n1 — Inventário, diagnóstico e captura autorizada (padrão; sem gravação física)\n'
   printf '2 — Permitir restauração física, somente com plano e confirmações\n'
   printf 'Modo [1]: '
   IFS= read -r mode || return 2
   mode="${mode:-1}"
-  arguments=(--server "$server" --server-pin "$pin")
+  arguments=()
+  [[ -z "$server" ]] || arguments+=(--server "$server")
+  [[ -z "$pin" ]] || arguments+=(--server-pin "$pin")
   case "$mode" in
     1) ;;
     2)
@@ -79,7 +84,7 @@ slt_start_main() {
       ;;
     *) echo 'Escolha 1 ou 2.' >&2; return 2;;
   esac
-  printf '\nConectando. Confira o código no painel e aprove o pareamento deste cliente.\n'
+  printf '\nConectando. O código de pareamento aparece abaixo: digite-o no painel do servidor (aba Conectar computador).\n'
   printf 'As tarefas dependem de plano assinado, autorização no servidor e verificações locais.\n'
   printf 'Ctrl+C encerra o agente. Esta sessão Live não preserva identidade após desligar.\n'
   slt_agent_exec "${arguments[@]}"

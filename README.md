@@ -1,37 +1,47 @@
 # SLT Disk Manager
 
-Network Boot (beta.6): módulo separado e desligado por padrão, com painel, DHCP
-externo, TFTP read-only e menu iPXE para SLT Rescue x64. Use uma rede de bancada
-isolada e os perfis do pacote netboot da mesma release. Evidências e limitações
-por BIOS/UEFI em [homologação](docs/NETWORK-BOOT-HOMOLOGACAO.md); configuração e
-reversão em [operação](docs/NETWORK-BOOT-OPERACAO.md). ProxyDHCP, Secure Boot,
-WinPE PXE e instalação Windows sem scratch permanecem fora desta entrega.
-
 Cliente e servidor para bancada de manutenção na LAN, com painel WPF em português,
 agente Windows e agente Rescue Linux. Marca: **Smells Like Tech Informática**.
 
 **Versão 0.1.0 beta de laboratório. O produto completo descrito na especificação
 ainda não está homologado.** Inventário e diagnóstico são os fluxos indicados para
-o primeiro teste em computadores de clientes. Não use a restauração física em
-dados reais antes de homologar o ciclo em VMs e discos descartáveis.
+o primeiro teste em computadores de clientes. Não use gravação de disco em dados
+reais antes de homologar o ciclo em VMs e discos descartáveis.
+
+## Novidades da beta.7
+
+- **Conectar sem digitar endereço nem pin.** O cliente encontra o servidor na rede e
+  mostra um código de 8 dígitos; o operador digita esse código no painel.
+- **Modo SLT.** Um cliente Windows já conectado reinicia no sistema SLT sem pendrive
+  (UEFI com Secure Boot desativado) e passa a ser controlado pelo servidor: clonar,
+  formatar, capturar, restaurar, instalar Ubuntu/Xubuntu.
+- **Formatar disco** pelo painel (NTFS, exFAT, FAT32 ou ext4; GPT ou MBR).
+- **Painel redesenhado**: letras maiores, mais contraste e menu lateral.
+- **Instalador**: atalhos na área de trabalho, pasta do repositório escolhida na
+  instalação, atualização do serviço já instalado e scripts de manutenção.
+- **ProxyDHCP opcional** para o boot pela rede sem configurar o roteador.
+
+Decisões e limites em [ADR 003](docs/ADR/003-descoberta-e-pareamento-curto.md) e
+[ADR 004](docs/ADR/004-modo-slt-e-proxydhcp.md). O que continua pendente está em
+[PENDENCIAS](docs/PENDENCIAS.md).
 
 ## Começar
 
-Baixe os [instaladores do servidor e do cliente, o pacote portátil e a ISO SLT Rescue da beta.5.1](https://github.com/mikerock12/slt-disk-manager/releases/tag/v0.1.0-beta.5.1).
-Consulte [a entrega, as evidências de laboratório e os hashes](docs/ENTREGA-2026-10-29-beta5.md).
+Baixe os instaladores, o pacote portátil, a ISO SLT Rescue e o pacote SLT-Netboot em
+[Releases](https://github.com/mikerock12/slt-disk-manager/releases). Siga
+[o guia de bancada](docs/QUICKSTART.md).
 
 São dois instaladores: **SLT-Disk-Manager-Servidor-Setup** para o computador da bancada
 (servidor, painel, 7-Zip, agentes Rescue/WinPE) e **SLT-Disk-Manager-Cliente-Setup** para os
-PCs atendidos (cliente Windows e smartctl). **Fixe o IP do servidor** antes de instalar
-(reserva de DHCP no roteador ou IP manual), como explica [o guia de bancada](docs/QUICKSTART.md).
-O pacote portátil Windows x64 contém servidor, painel e cliente com runtime .NET incluído.
-Após extrair:
+PCs atendidos (cliente Windows e smartctl). **Fixe o IP do servidor** antes de instalar.
 
-1. No servidor, execute `Servidor.cmd` e informe IP/sub-rede da bancada.
-2. Nos clientes autorizados, execute `Cliente.cmd`, informe URL e pin SHA256 do servidor.
-3. No painel, confira o código exibido fisicamente no cliente e aprove o pareamento.
-4. Consulte máquinas, discos, partições, tarefas e relatórios. Para imagem offline,
-   use Linux Rescue conforme [as instruções](rescue/README.md).
+1. No servidor, instale e abra **SLT Disk Manager - Painel** (com o serviço) ou
+   **Servidor e painel** (portátil).
+2. No computador atendido, abra **SLT Disk Manager - Cliente**: ele procura o servidor e
+   mostra um código de 8 dígitos.
+3. No painel, digite o código mostrado no cliente.
+4. Consulte computadores, discos e partições. Para mexer no disco, use **Reiniciar em
+   modo SLT…**, o boot pela rede ou o pendrive SLT Rescue.
 
 O programa funciona sem cloud na operação da bancada. GitHub e Google Drive são
 usados apenas no desenvolvimento/backup solicitado pelo proprietário.
@@ -41,6 +51,10 @@ usados apenas no desenvolvimento/backup solicitado pelo proprietário.
 - ASP.NET Core/.NET 10, SQLite local em WAL, painel WPF separado.
 - Escuta em IP privado explícito, allowlist CIDR, administração somente loopback.
 - Pin SHA256, CSR, certificados individuais, mTLS e revogação imediata.
+- Descoberta do servidor na LAN e pareamento por código de 8 dígitos ligado ao
+  certificado visto pelo cliente; renovação automática do certificado do cliente.
+- Reinício de cliente Windows em modo SLT com ticket de uso único, formatação de
+  disco tipada e ProxyDHCP opcional, validados em VMs no laboratório do CI.
 - Inventário Windows/Rescue e SMART pelo smartctl 7.5 que acompanha o cliente.
 - Plano com consentimento, confirmação contextual, assinatura RSA, validade e ledger anti-replay.
 - Captura/restauração RAW offline em chunks de 4 MiB, SHA256, recibos persistidos,
@@ -76,13 +90,13 @@ e Windows clonado iniciando na área de trabalho.
 
 ## Limites atuais
 
-Veja [a matriz completa](docs/STATUS.md). Não há instalador MSI/assinatura de código,
-ISO Rescue já homologada em hardware, boot remoto automático, PXE nem RBAC multiusuário.
-O particionamento só é oferecido pelos perfis de instalação (Windows no WinPE, Linux no
-Rescue), com confirmação no painel e no teclado do destino.
-Há scripts locais de aquisição ddrescue/Partclone e orientações de implantação;
-eles não equivalem à implementação centralizada desses módulos. O protocolo v1
-usa HTTPS JSON com polling em vez de gRPC (ADR em docs).
+Veja [a matriz completa](docs/STATUS.md) e [as pendências](docs/PENDENCIAS.md). Não há
+homologação em hardware físico, instalador MSI, assinatura de código nem contas com
+permissões por função. O modo SLT exige UEFI sem Secure Boot e não atende BIOS/Legacy.
+Instalar Windows ainda exige o cliente WinPE em pendrive. Fora dos perfis de instalação
+e da formatação em partição única não há particionador livre. Os scripts locais de
+ddrescue/Partclone não equivalem à implementação centralizada desses módulos. O
+protocolo v1 usa HTTPS JSON com polling em vez de gRPC (ADR em docs).
 
 ## Desenvolvimento
 

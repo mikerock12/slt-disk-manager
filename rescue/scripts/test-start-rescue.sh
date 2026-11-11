@@ -6,12 +6,14 @@ root_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 source "$root_dir/start-rescue.sh"
 slt_require_root() { return 0; }
 slt_agent_available() { return 0; }
-slt_agent_exec() { captured=("$@"); }
+slt_agent_exec() { captured=("$@"); invoked=1; }
 slt_prepare_network() { return 0; }
 declare -a captured=()
+invoked=0
 pin='0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
 run_case() {
   captured=()
+  invoked=0
   slt_start_main <<< "$1" > /dev/null
 }
 run_case $'https://192.168.10.5:7443\n'"$pin"$'\n\n'
@@ -39,3 +41,24 @@ printf 'PASS: unencrypted URL never invokes agent\n'
 if run_case $'https://192.168.10.5:7443\ninvalid\n1\n' 2>/dev/null; then exit 1; fi
 [[ ${#captured[@]} -eq 0 ]]
 printf 'PASS: malformed pin never invokes agent\n'
+run_case $'
+
+'
+[[ $invoked -eq 1 && ${#captured[@]} -eq 0 ]]
+printf 'PASS: empty address starts the agent in LAN discovery mode, without write capability
+'
+run_case $'https://192.168.10.5:7443
+
+
+'
+[[ $invoked -eq 1 && ${#captured[@]} -eq 2 && "${captured[0]}" == --server && "${captured[1]}" == https://192.168.10.5:7443 ]]
+printf 'PASS: address without pin is confirmed later by the pairing code
+'
+run_case $'
+2
+PERMITIR GRAVACAO
+
+'
+[[ $invoked -eq 1 && ${#captured[@]} -eq 1 && "${captured[0]}" == --allow-physical-write ]]
+printf 'PASS: discovery mode still needs the exact typed confirmation for physical capability
+'

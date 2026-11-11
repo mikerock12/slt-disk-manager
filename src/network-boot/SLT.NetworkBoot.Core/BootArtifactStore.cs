@@ -33,7 +33,9 @@ public static partial class BootArtifactStore
         if (p.SchemaVersion != 1 || !BootJson.ValidId(p.Id) || p.DisplayName == null || p.DisplayName.Length is < 1 or > 100 || p.DisplayName.Any(char.IsControl) ||
             p.Version == null || p.Version.Length > 64 || p.Architecture != "X64" || p.FirmwareSupport == null || p.FirmwareSupport.Length != 2 || !p.FirmwareSupport.Contains("BIOS") || !p.FirmwareSupport.Contains("UEFI")) throw new InvalidDataException("Metadados de perfil inválidos.");
         string[] required = p.Kind switch { "RESCUE_LINUX" => ["kernel", "initrd", "rootfs"], "IPXE_BOOTSTRAP" => ["bios", "uefi"], _ => throw new InvalidDataException("Tipo de perfil ainda não suportado.") };
-        if (p.Artifacts == null || p.Artifacts.Any(a => a is null) || p.Artifacts.Length != required.Length || !required.All(id => p.Artifacts.Count(a => a.Id == id) == 1)) throw new InvalidDataException("Artefatos obrigatórios ausentes/duplicados.");
+        // "uefi-local" is the optional loader a paired Windows client places on its own EFI partition (SLT mode).
+        string[] optional = p.Kind == "IPXE_BOOTSTRAP" ? ["uefi-local"] : [];
+        if (p.Artifacts == null || p.Artifacts.Any(a => a is null) || !required.All(id => p.Artifacts.Count(a => a.Id == id) == 1) || p.Artifacts.Any(a => !required.Contains(a.Id) && !optional.Contains(a.Id)) || p.Artifacts.Length > required.Length + optional.Length) throw new InvalidDataException("Artefatos obrigatórios ausentes/duplicados.");
         foreach (var a in p.Artifacts)
             if (!BootJson.ValidId(a.Id) || a.SizeBytes is < 1 or > 8L * 1024 * 1024 * 1024 || a.Sha256 == null || !HashPattern().IsMatch(a.Sha256) || a.Source == null || a.Source.Length > 512 || p.Kind == "IPXE_BOOTSTRAP" && a.SizeBytes > 2 * 1024 * 1024) throw new InvalidDataException("Tamanho/hash/origem de artefato inválido.");
         if (p.Artifacts.Select(a => a.RelativePath).Distinct(StringComparer.OrdinalIgnoreCase).Count() != p.Artifacts.Length) throw new InvalidDataException("Paths duplicados.");
