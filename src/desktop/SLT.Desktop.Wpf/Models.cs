@@ -19,26 +19,37 @@ public sealed record DiskInfo(string Id, string Path, string Model, string Seria
 public sealed record Inventory(string DeviceId, string Hostname, string Os, string Mode, string AgentVersion,
     string[] Capabilities, DiskInfo[] Disks, DateTimeOffset CapturedAtUtc, string[] Notes, FileRootInfo[]? FileRoots = null);
 public sealed record Device(string Id, string Hostname, string Mode, string TrustStatus,
-    DateTimeOffset LastSeenAtUtc, Inventory? Inventory)
+    DateTimeOffset LastSeenAtUtc, Inventory? Inventory, string? OriginDeviceId = null, bool UnattendedWrite = false)
 {
-    public string Status => TrustStatus == "REVOKED" ? "REVOGADO" : DateTimeOffset.UtcNow - LastSeenAtUtc < TimeSpan.FromSeconds(45) ? $"ONLINE / {Mode}" : "OFFLINE";
-    public string LastSeen => LastSeenAtUtc.ToLocalTime().ToString("dd/MM HH:mm:ss");
+    public string Status => TrustStatus == "REVOKED" ? "Desconectado" : DateTimeOffset.UtcNow - LastSeenAtUtc < TimeSpan.FromSeconds(45) ? "Online" : "Offline";
+    public string ModeLabel => Display.Mode(Mode, OriginDeviceId is not null);
+    public string LastSeen => LastSeenAtUtc == DateTimeOffset.MinValue ? "—" : LastSeenAtUtc.ToLocalTime().ToString("dd/MM HH:mm:ss");
     public string OperatingSystem => Inventory?.Os ?? "Aguardando inventário";
-    public string Label => $"{Hostname} • {Mode} • {Status}";
+    public string Label => $"{Hostname} • {ModeLabel} • {Status}";
 }
 public sealed record Enrollment(string Id, string Hostname, string Mode, string Code,
-    DateTimeOffset ExpiresAtUtc, string Status)
+    DateTimeOffset ExpiresAtUtc, string Status, bool ShortCode = false)
 {
-    public string Expires => ExpiresAtUtc.ToLocalTime().ToString("dd/MM HH:mm:ss");
+    public string Expires => ExpiresAtUtc.ToLocalTime().ToString("dd/MM HH:mm");
+    public string ModeLabel => Display.Mode(Mode, false);
+    // After LAN discovery the code exists only on the client's screen: reading it there is the check.
+    public string CodeLabel => Status != "PENDING" ? "—" : ShortCode || Code.Length == 0 ? "mostrado na tela do cliente" : Code;
+    public string StatusLabel => Status switch { "PENDING" => "Aguardando código", "APPROVED" => "Conectado", "EXPIRED" => "Expirado", "REJECTED" => "Recusado", _ => Status };
 }
+public sealed record ServerInfo(string Name, string Url, string Pin, string Version, int? DiscoveryPort, string Repository);
+public sealed record RescueBootOptions(string LoaderSha256, long LoaderSizeBytes, string Script, string Ticket, bool UnattendedWrite, int RebootDelaySeconds = 30);
+public sealed record FormatOptions(string TableType, string FileSystem, string Label = "");
 public sealed record JobPlan(string Id, string Kind, string DeviceId, string DiskFingerprint, string DiskPath,
     long DiskSizeBytes, int LogicalSectorBytes, string ImageId, string Challenge, DateTimeOffset ExpiresAtUtc, bool Consent,
-    [property: JsonPropertyName("clone")] CloneOptions? CloneOptions = null, FileRequest? File = null, DeploymentOptions? Deployment = null);
+    [property: JsonPropertyName("clone")] CloneOptions? CloneOptions = null, FileRequest? File = null, DeploymentOptions? Deployment = null,
+    RescueBootOptions? RescueBoot = null, FormatOptions? Format = null);
 public sealed record Job(string Id, JobPlan Plan, string State, DateTimeOffset CreatedAtUtc,
     DateTimeOffset? ApprovedAtUtc, JsonElement? Progress, JsonElement? Result, string? TemporaryPassword = null)
 {
     public string Kind => Plan.Kind;
-    public string DiskPath => Plan.File is { } files
+    public string KindLabel => Display.JobKind(Plan.Kind);
+    public string StateLabel => Display.JobState(State);
+    public string DiskPath => Plan.Kind == "REBOOT_RESCUE" ? "computador inteiro" : Plan.File is { } files
         ? $"{files.RootId}/{files.RelativePath}{(Plan.Kind == "FILE_BACKUP" ? $" • {files.Paths.Length} caminhos" : "")}" : Plan.DiskPath;
     public string Created => CreatedAtUtc.ToLocalTime().ToString("dd/MM HH:mm:ss");
     public string ProgressText => Progress is { ValueKind: JsonValueKind.Object } p
@@ -62,6 +73,25 @@ public sealed record AuditEvent(long Id, DateTimeOffset TimestampUtc, string Act
 }
 public static class Display
 {
+    public static string Mode(string mode, bool sltSession) => mode switch
+    {
+        "WINDOWS" => "Windows (cliente)",
+        "RESCUE" => sltSession ? "Modo SLT" : "SLT Rescue",
+        "WINPE" => "WinPE (instalação)",
+        _ => mode
+    };
+    public static string JobKind(string kind) => kind switch
+    {
+        "INVENTORY" => "Inventário", "SMART" => "Saúde do disco (SMART)", "CAPTURE" => "Capturar imagem", "RESTORE" => "Restaurar imagem",
+        "FILE_LIST" => "Listar arquivos", "FILE_BACKUP" => "Copiar arquivos", "FILE_RESTORE" => "Enviar arquivos",
+        "DEPLOY_WINDOWS" => "Instalar Windows", "DEPLOY_LINUX" => "Instalar Linux", "CONVERT_GPT" => "Converter MBR → GPT",
+        "REBOOT_RESCUE" => "Reiniciar em modo SLT", "FORMAT_DISK" => "Formatar disco", _ => kind
+    };
+    public static string JobState(string state) => state switch
+    {
+        "AWAITING_APPROVAL" => "Aguardando aprovação", "QUEUED" => "Na fila", "RUNNING" => "Em andamento", "CANCELLING" => "Cancelando",
+        "CANCELLED" => "Cancelada", "COMPLETED" => "Concluída", "FAILED" => "Falhou", "INTERRUPTED" => "Interrompida", _ => state
+    };
     public static string Bytes(long value)
     {
         var units = new[] { "B", "KiB", "MiB", "GiB", "TiB" };

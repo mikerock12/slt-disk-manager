@@ -3,7 +3,7 @@
  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
  <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"><StackPanel MaxWidth="1120">
   <DockPanel Margin="0,0,0,8"><TextBlock Text="Servidor de boot pela rede" FontSize="23" FontWeight="SemiBold"/><Button x:Name="RefreshButton" Content="Atualizar estado" HorizontalAlignment="Right" Style="{StaticResource SecondaryButton}" Click="Refresh_Click"/></DockPanel>
-  <TextBlock Text="Inicie o SLT Rescue pela Ethernet da bancada. O serviço fica desligado até uma ação local explícita. Inicializar pela rede não autoriza gravações: pareamento, plano assinado e confirmação local continuam obrigatórios." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,16"/>
+  <TextBlock Text="Inicie o SLT Rescue pela Ethernet da bancada. O serviço fica desligado até uma ação local explícita. Inicializar pela rede não autoriza gravações: pareamento e plano assinado continuam obrigatórios. O modo SLT (reinício de um cliente Windows sem pendrive) também carrega o sistema por este serviço: mantenha-o em execução para usá-lo." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,16"/>
   <Border Background="{StaticResource PanelBrush}" Padding="16" Margin="0,0,0,16"><StackPanel>
    <TextBlock x:Name="ServiceStatus" Text="ESTADO NÃO CONSULTADO" FontSize="18" FontWeight="SemiBold"/>
    <TextBlock x:Name="ServiceDetails" Text="Conecte ao Controller e consulte o estado. Nenhum serviço é iniciado ao abrir esta aba." TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="0,6,0,0"/>
