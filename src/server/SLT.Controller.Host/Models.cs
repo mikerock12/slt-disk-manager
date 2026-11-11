@@ -31,6 +31,7 @@ public record Enrollment(string Id, string Hostname, string Mode, string CsrPem,
     string? Commitment = null, string? ServerNonce = null, int FailedApprovals = 0);
 public record CodeRequest(string Code);
 public record RevealRequest(string Nonce);
+public record RenewRequest(string CsrPem);
 public record RescueBootRequest(bool UnattendedWrite = true);
 // Script and Ticket are secrets until the job ends: admin listings mask them (Provisioning.WithoutSecrets).
 public record RescueBootOptions(string LoaderSha256, long LoaderSizeBytes, string Script, string Ticket, bool UnattendedWrite, int RebootDelaySeconds = 30);

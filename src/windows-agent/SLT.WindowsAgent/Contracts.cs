@@ -22,6 +22,8 @@ public sealed record Inventory(string DeviceId, string Hostname, string Os, stri
 public sealed record EnrollmentRequest(string Hostname, string Mode, string CsrPem, string Secret, string? Commitment = null);
 public sealed record EnrollmentCreated(string Id, string? Code, DateTimeOffset ExpiresAtUtc, string? ServerNonce = null);
 public sealed record EnrollmentReveal(string Nonce);
+public sealed record RenewRequest(string CsrPem);
+public sealed record RenewResponse(string CertificatePem, string? CaPem);
 public sealed record EnrollmentStatus(string Status, string? DeviceId, string? CertificatePem, string? CaPem);
 public sealed record EnrollmentPending(string Id, string Secret, string Code, DateTimeOffset ExpiresAtUtc, string? ServerUrl = null, string? ServerPin = null);
 public sealed record Identity(string DeviceId);

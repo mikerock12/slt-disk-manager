@@ -70,6 +70,20 @@ internal static class PairingTests
             var approved = controller.ApproveEnrollment(pending.Id, expected);
             check(approved.Status == "APPROVED" && approved.DeviceId != null, "matching short code approves the client");
 
+            // Renewal: the paired client gets its next certificate without a new code; the current one keeps working until the new one is used.
+            using (var current = X509Certificate2.CreateFromPem(approved.CertificatePem!))
+            using (var nextKey = RSA.Create(2048))
+            {
+                var nextCsr = new CertificateRequest("CN=Renewal", nextKey, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1).CreateSigningRequestPem();
+                using var renewed = X509Certificate2.CreateFromPem(controller.Renew(approved.DeviceId!, nextCsr));
+                check(renewed.GetNameInfo(X509NameType.SimpleName, false) == approved.DeviceId && renewed.Thumbprint != current.Thumbprint, "renewal issues a new certificate for the same device");
+                check(controller.Authenticate(current) == approved.DeviceId, "current certificate stays valid until the renewed one is used");
+                using var discarded = X509Certificate2.CreateFromPem(controller.Renew(approved.DeviceId!, nextCsr));
+                Reject(() => controller.Authenticate(renewed), "a renewal that was replaced by a newer one never becomes valid");
+                check(controller.Authenticate(discarded) == approved.DeviceId, "first use of the renewed certificate authenticates the device");
+                Reject(() => controller.Authenticate(current), "after the switch the previous certificate is no longer accepted");
+                Reject(() => controller.Renew(Wire.Id(), nextCsr), "renewal requires an existing device");
+            }
             var blockedSecret = Secret(); var blockedNonce = Secret();
             var blocked = controller.Enroll(new("pc-errado", "WINDOWS", csr, blockedSecret, Pairing.Commit(blockedNonce))); controller.Reveal(blocked.Id, blockedSecret, blockedNonce);
             for (var i = 0; i < 4; i++) try { controller.ApproveEnrollment(blocked.Id, "12345678"); } catch (ApiException) { }

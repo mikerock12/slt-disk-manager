@@ -82,7 +82,7 @@ public sealed partial class Controller
     public string Authenticate(X509Certificate2? cert)
     {
         Ensure(cert != null && Certificates.ValidateClient(cert), 401, "Certificado cliente válido obrigatório.");
-        var id = Db.Identify(cert!.Thumbprint) ?? throw new ApiException(401, "Certificado não cadastrado.");
+        var id = Db.Identify(cert!.Thumbprint) ?? Db.PromotePendingCredential(cert.Thumbprint) ?? throw new ApiException(401, "Certificado não cadastrado.");
         Ensure(Db.Get<Device>("device", id)?.TrustStatus == "TRUSTED", 403, "Agente revogado."); return id;
     }
     public void Inventory(string id, Inventory inventory)

@@ -147,6 +147,7 @@ app.MapGet("/api/v1/devices", () => Locked(() => store.All<Device>("device")));
 app.MapGet("/api/v1/devices/{id}", (string id) => Locked(() => controller.Device(id)));
 app.MapPost("/api/v1/devices/{id}/revoke", (string id) => Locked(() => { controller.Revoke(id); return Results.Ok(new { ok = true }); }));
 app.MapPost("/agent/v1/inventory", (Inventory r, HttpContext ctx) => Locked(() => { controller.Inventory(DeviceId(ctx), r); return Results.Ok(new { ok = true }); }));
+app.MapPost("/agent/v1/renew", (RenewRequest r, HttpContext ctx) => Locked(() => Results.Ok(new { certificatePem = controller.Renew(DeviceId(ctx), r.CsrPem), caPem = certs.CaPem })));
 app.MapPost("/agent/v1/rescue-boot", (HttpContext ctx) => Locked(() => controller.LocalRescueBoot(DeviceId(ctx))));
 app.MapGet("/agent/v1/jobs/{id}/rescue-loader", (string id, HttpContext ctx) => Locked(() => Results.Bytes(controller.RescueLoader(DeviceId(ctx), id), "application/octet-stream")));
 app.MapGet("/agent/v1/jobs/next", (HttpContext ctx) => Locked(() => controller.Next(DeviceId(ctx)) is {} a ? Results.Ok(a) : (IResult)Results.NoContent()));

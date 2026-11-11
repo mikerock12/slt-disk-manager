@@ -114,6 +114,24 @@ internal static class PairingTests
         });
 
         string Workspace() => Path.Combine(Environment.CurrentDirectory, ".build", "agent-tests", Guid.NewGuid().ToString("N"));
+        check("interrupted certificate renewal is completed on the next start", () =>
+        {
+            var state = new SecureState(Path.Combine(Workspace(), "state"));
+            state.WriteText("client-key.pem", "old-key"); state.WriteText("client-cert.pem", "old-cert");
+            // Stopped before the certificate arrived: the unused key is discarded, the identity is untouched.
+            state.WriteText("client-key.next.pem", "orphan-key");
+            Enrollment.CompleteRenewal(state);
+            assert(File.ReadAllText(state.FilePath("client-key.pem")) == "old-key" && !File.Exists(state.FilePath("client-key.next.pem")));
+            // Stopped after both files were written: both are applied.
+            state.WriteText("client-key.next.pem", "new-key"); state.WriteText("client-cert.next.pem", "new-cert");
+            Enrollment.CompleteRenewal(state);
+            assert(File.ReadAllText(state.FilePath("client-key.pem")) == "new-key" && File.ReadAllText(state.FilePath("client-cert.pem")) == "new-cert");
+            // Stopped between the two replacements (key already in place): the certificate follows.
+            state.WriteText("client-key.pem", "newer-key"); state.WriteText("client-cert.next.pem", "newer-cert");
+            Enrollment.CompleteRenewal(state);
+            assert(File.ReadAllText(state.FilePath("client-cert.pem")) == "newer-cert" && !File.Exists(state.FilePath("client-cert.next.pem")));
+            assert(Enrollment.RenewBefore == TimeSpan.FromDays(10));
+        });
         check("staging writes loader and script, then selects the entry for the next boot only", () =>
         {
             var root = Workspace(); var esp = Path.Combine(root, "esp") + Path.DirectorySeparatorChar; Directory.CreateDirectory(esp);

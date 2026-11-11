@@ -65,3 +65,10 @@ Referências dos motores: [sfdisk](https://man7.org/linux/man-pages/man8/sfdisk.
 - Os fixtures não contêm Windows licenciado nem uma instalação Linux inicializável; sucesso de hash/filesystem não deve ser apresentado como teste de boot.
 - Certificado próprio por boot/instalação; a identidade Windows não é reutilizada automaticamente no Rescue.
 - Build cruzado não comprova compatibilidade do firmware, Secure Boot ou controlador físico. O script de mídia exige build/teste Linux separado.
+
+## Beta.7
+
+`--server` e `--server-pin` são opcionais: sem endereço o agente usa a descoberta na
+rede (`--discovery-port`, `--discovery-address`) e o pareamento por código curto.
+`--slt-mode` lê `slt.server`, `slt.pin`, `slt.ticket` e `slt.write` de `/proc/cmdline`.
+Veja `docs/ADR/003-descoberta-e-pareamento-curto.md` e `docs/ADR/004-modo-slt-e-proxydhcp.md`.

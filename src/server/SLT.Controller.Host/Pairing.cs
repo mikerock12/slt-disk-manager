@@ -109,6 +109,16 @@ public sealed partial class Controller
         e = e with { Status = "PENDING", Code = Pairing.Code(Certificates.Pin, e.CsrPem, nonce, e.ServerNonce!) };
         Db.Put("enrollment", id, e); Db.Log("bootstrap", "enrollment.request", $"{e.Id} {e.Hostname} {e.Mode} short-code"); return e;
     }
+    // Certificates last 30 days. A paired client asks for the next one over its current mTLS
+    // session; no new pairing code is needed and the device identity does not change.
+    public string Renew(string deviceId, string csrPem)
+    {
+        Ensure(csrPem is { Length: > 0 and < 12000 }, 400, "CSR inválido.");
+        var device = Device(deviceId); Ensure(device.TrustStatus == "TRUSTED", 403, "Agente revogado.");
+        var pem = Certificates.Issue(csrPem, deviceId);
+        using var cert = X509Certificate2.CreateFromPem(pem); Db.SetPendingCredential(deviceId, cert.Thumbprint);
+        Db.Log(deviceId, "credential.renewed", $"validade {cert.NotAfter.ToUniversalTime():yyyy-MM-dd}"); return pem;
+    }
     public void RejectEnrollment(string id)
     {
         var e = Db.Get<Enrollment>("enrollment", id) ?? throw new ApiException(404, "Pareamento não encontrado.");

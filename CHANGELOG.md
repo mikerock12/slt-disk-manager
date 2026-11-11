@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.1.0-beta.7 — 2026-11-11 — conexão por código, modo SLT, formatação e instalador
+
+- **Conexão sem endereço nem pin de 64 caracteres:** o servidor responde a uma busca na
+  rede (UDP 7444) e o cliente mostra um código de 8 dígitos, derivado do certificado que
+  ele viu, do CSR que o servidor recebeu e de nonces comprometidos. O operador digita o
+  código no painel; o painel não o exibe. Cinco erros rejeitam o pedido. Clientes que
+  informam endereço e pin seguem no fluxo anterior.
+- **Renovação automática** do certificado do cliente Windows, dez dias antes de vencer.
+- **Modo SLT:** tarefa `REBOOT_RESCUE` reinicia um cliente Windows UEFI (Secure Boot
+  desativado) no SLT Rescue carregado do servidor, com carregador conferido por hash,
+  roteiro validado linha a linha e ticket de uso único. A sessão pareia sozinha e, com
+  gravação habilitada, executa o que for aprovado no painel sem nova confirmação no
+  teclado do cliente. Pedido pelo painel ou pelo próprio cliente.
+- **Formatar disco** (`FORMAT_DISK`): partição única NTFS, exFAT, FAT32 ou ext4 em GPT ou
+  MBR, com os mesmos portões de uma restauração.
+- **ProxyDHCP opcional** no boot pela rede: responde só a clientes PXE BIOS/UEFI x64 com
+  o arquivo de boot e nunca oferece endereço.
+- **Painel:** tema com mais contraste, fonte de 15 px, menu lateral, pedido de conexão em
+  destaque, botões de modo SLT e formatação com o motivo quando indisponíveis, tarefas e
+  estados em português. Conexão ilegível explica o motivo e oferece reabrir como
+  administrador.
+- **Instalador:** atalhos na área de trabalho e no Menu Iniciar; atalho do painel do
+  serviço com elevação; pasta do repositório na instalação; `Update-Server.ps1` e
+  `Update-Agent.ps1` atualizam serviços instalados e corrigem a pasta
+  `Program Files (x86)`; `Set-ServerRepository.ps1` muda o repositório movendo o conteúdo
+  com conferência SHA256; scripts se reexecutam no PowerShell de 64 bits; erros ficam
+  visíveis na janela. Perfis de boot passam a acompanhar o repositório. O portátil abre
+  o painel do serviço quando ele existe.
+- Laboratório do CI: PXE BIOS/UEFI, modo SLT a partir da partição EFI com formatação de
+  disco sintético por ordem do servidor e ProxyDHCP com DHCP sem opções de boot. Sem
+  homologação em hardware físico; o passo `bcdedit` do Windows é coberto por testes com
+  executor falso.
+
 ## 0.1.0-beta.6 — 2026-11-04 — Network Boot de laboratório
 
 - Novo processo isolado opt-in com TFTP bootstrap read-only, HTTP por ID/CIDR,

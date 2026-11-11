@@ -19,7 +19,8 @@ public sealed class AgentWorker(AgentOptions options, ILogger<AgentWorker> logge
                 try { await ExecuteCore(current, stoppingToken); return; }
                 catch (ServerMovedException moved)
                 {
-                    logger.LogWarning("Servidor mudou de endereço para {Server}; o certificado é o mesmo. Reconectando.", moved.Address);
+                    if (moved.Address != current.Server) logger.LogWarning("Servidor mudou de endereço para {Server}; o certificado é o mesmo. Reconectando.", moved.Address);
+                    else logger.LogInformation("Reconectando com o certificado renovado.");
                     current = current with { Server = moved.Address };
                 }
             }
@@ -57,6 +58,7 @@ public sealed class AgentWorker(AgentOptions options, ILogger<AgentWorker> logge
         using var transport = new PinnedTransport(resolved, certificate);
         ServerLocator.Save(state, resolved, "");
         logger.LogInformation("Agente pareado {DeviceId}; servidor {Server}.", identity.DeviceId, resolved.Server);
+        var nextRenewalCheck = DateTimeOffset.MinValue;
         var interactive = Environment.UserInteractive && !Console.IsInputRedirected && !resolved.Once;
         if (interactive) Console.WriteLine("\n  Conectado. Deixe esta janela aberta.\n  Tecla R : reiniciar este computador em modo SLT Disk Manager\n  Ctrl+C  : encerrar o cliente\n");
         Inventory? cachedInventory = null;
@@ -70,6 +72,13 @@ public sealed class AgentWorker(AgentOptions options, ILogger<AgentWorker> logge
                     cachedInventory = await collector.Collect(identity.DeviceId, stoppingToken);
                 await transport.Post<object>("/agent/v1/inventory", cachedInventory, stoppingToken);
                 failures = 0;
+                if (DateTimeOffset.UtcNow >= nextRenewalCheck)
+                {
+                    nextRenewalCheck = DateTimeOffset.UtcNow.AddHours(6);
+                    // Reconnect with the new certificate: its first use is what retires the previous one.
+                    if (await Enrollment.RenewIfNeeded(state, transport, identity.DeviceId, certificate, message => logger.LogInformation("{Renewal}", message), stoppingToken))
+                        throw new ServerMovedException(resolved.Server!);
+                }
                 var assignment = await transport.Get<SignedAssignment>("/agent/v1/jobs/next", stoppingToken);
                 if (assignment is not null) await Execute(assignment, transport, collector, roots, state, identity.DeviceId, stoppingToken);
                 if (resolved.Once) { lifetime.StopApplication(); return; }

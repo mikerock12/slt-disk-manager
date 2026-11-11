@@ -925,7 +925,8 @@ def main():
                     "port=0", "interface=sltbr0", "bind-interfaces", "except-interface=lo", "dhcp-authoritative",
                     "dhcp-range=10.77.0.60,10.77.0.90,255.255.255.0,5m", "dhcp-option=option:router", "dhcp-option=option:dns-server",
                     f"dhcp-leasefile={plain_leases}", "user=root", ""]))
-                assert "dhcp-boot" not in plain_config.read_text() and "pxe" not in plain_config.read_text()
+                # No boot directive of any kind (the private folder name itself contains "pxe").
+                assert not any(line.split("=")[0] in ("dhcp-boot", "dhcp-match", "pxe-service", "pxe-prompt", "enable-tftp", "dhcp-option-force") for line in plain_config.read_text().splitlines())
                 dhcp = start(["dnsmasq", "--keep-in-foreground", "--conf-file=" + str(plain_config)], "external-dhcp-plain")
                 time.sleep(0.3)
                 assert dhcp.poll() is None

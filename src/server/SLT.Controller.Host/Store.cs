@@ -14,6 +14,8 @@ public sealed class Store : IDisposable
         Execute("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA synchronous=FULL; " +
             "CREATE TABLE IF NOT EXISTS documents(kind TEXT NOT NULL,id TEXT NOT NULL,json TEXT NOT NULL,PRIMARY KEY(kind,id));" +
             "CREATE TABLE IF NOT EXISTS credentials(device_id TEXT PRIMARY KEY,thumbprint TEXT NOT NULL UNIQUE);" +
+            // A renewed certificate waits here until the client first uses it; the current one stays valid meanwhile.
+            "CREATE TABLE IF NOT EXISTS pending_credentials(thumbprint TEXT PRIMARY KEY,device_id TEXT NOT NULL);" +
             "CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY AUTOINCREMENT,json TEXT NOT NULL);" +
             "CREATE TABLE IF NOT EXISTS transfer_chunks(transfer_id TEXT NOT NULL,file_id TEXT NOT NULL,sequence INTEGER NOT NULL,offset_bytes INTEGER NOT NULL,size_bytes INTEGER NOT NULL,sha256 TEXT NOT NULL,PRIMARY KEY(transfer_id,file_id,sequence)); PRAGMA user_version=2;");
     }
@@ -40,6 +42,27 @@ public sealed class Store : IDisposable
     {
         using var c = connection.CreateCommand(); c.CommandText = "INSERT INTO credentials VALUES($id,$thumb)";
         c.Parameters.AddWithValue("$id", deviceId); c.Parameters.AddWithValue("$thumb", thumbprint); c.ExecuteNonQuery();
+    }
+    public void SetPendingCredential(string deviceId, string thumbprint)
+    {
+        using var clear = connection.CreateCommand(); clear.CommandText = "DELETE FROM pending_credentials WHERE device_id=$id";
+        clear.Parameters.AddWithValue("$id", deviceId); clear.ExecuteNonQuery();
+        using var c = connection.CreateCommand(); c.CommandText = "INSERT INTO pending_credentials VALUES($thumb,$id)";
+        c.Parameters.AddWithValue("$thumb", thumbprint); c.Parameters.AddWithValue("$id", deviceId); c.ExecuteNonQuery();
+    }
+    // First use of a renewed certificate: it becomes the only credential of the device.
+    public string? PromotePendingCredential(string thumbprint)
+    {
+        using var find = connection.CreateCommand(); find.CommandText = "SELECT device_id FROM pending_credentials WHERE thumbprint=$thumb";
+        find.Parameters.AddWithValue("$thumb", thumbprint);
+        if (find.ExecuteScalar() is not string deviceId) return null;
+        using var transaction = connection.BeginTransaction();
+        foreach (var sql in new[] { "DELETE FROM pending_credentials WHERE device_id=$id", "DELETE FROM credentials WHERE device_id=$id", "INSERT INTO credentials VALUES($id,$thumb)" })
+        {
+            using var c = connection.CreateCommand(); c.Transaction = transaction; c.CommandText = sql;
+            c.Parameters.AddWithValue("$id", deviceId); c.Parameters.AddWithValue("$thumb", thumbprint); c.ExecuteNonQuery();
+        }
+        transaction.Commit(); return deviceId;
     }
     public List<FileBundle> FileCatalog()
     {

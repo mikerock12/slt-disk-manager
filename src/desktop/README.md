@@ -63,3 +63,13 @@ A aba **Boot pela rede** consulta o estado real do serviço isolado pelo Control
 4. Consulte estado, erro de bind e eventos. **Parar distribuição de boot** encerra os listeners de boot; os jobs autenticados do Controller têm ciclo independente. Para reconfigurar ou importar um perfil, pare primeiro.
 
 O Rescue continua exigindo pin TLS e pareamento CSR/mTLS no console. Boot pela rede não cria planos de disco nem autoriza escrita. WinPE PXE, instalação Windows sem scratch, Secure Boot e hardware físico não herdam homologação dos perfis Rescue e devem ter sua própria evidência. O painel mostra os estados retornados pelo servidor, sem converter `NETWORK_BOOT_DEV` em suporte homologado.
+
+## Beta.7
+
+Tema e navegação novos (menu lateral, fonte de 15 px). A página **Conectar computador**
+recebe o código de 8 dígitos mostrado no cliente; o painel não exibe esse código. Na
+página **Computadores**, **Reiniciar em modo SLT…** e **Formatar disco…** aparecem
+habilitados conforme as capacidades do computador selecionado, com o motivo quando não
+estão. Aberto sem permissão para ler `connection.json`, o painel explica e oferece
+reabrir como administrador. Renderizações sintéticas:
+`dotnet run --project src/desktop/tests/SLT.Desktop.SmokeTests -- --render <pasta>`.

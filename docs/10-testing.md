@@ -36,3 +36,23 @@ Ainda não executados: UI visual completa (lançamento pela ferramenta de UI
 travou), boot de ISO, VMs UEFI/Windows/Linux, queda de energia durante escrita,
 matriz física SATA/NVMe/RAID/Secure Boot e primeiro boot após clone/deployment.
 Não confundir sucesso nos fixtures com homologação desses cenários.
+
+## Beta.7
+
+- `tests/SLT.Controller.Tests`: descoberta, código curto (vetor comum às três
+  implementações), ticket do modo SLT, renovação de certificado e `FORMAT_DISK`.
+- `tests/SLT.WindowsAgent.Tests`: descoberta, validação do roteiro de boot, preparação
+  da partição EFI com executor de comandos falso e pasta temporária. O arquivo
+  `tests/fixtures/slt-mode-boot.ipxe` é o roteiro que o servidor gera e o cliente valida.
+- `tests/integration/windows-agent-e2e.ps1`: servidor e cliente reais em loopback,
+  incluindo descoberta e código curto sem endereço nem pin.
+- `tests/integration/server-setup-tests.ps1`: scripts de serviço em modo de validação,
+  a partir do PowerShell de 32 e de 64 bits, e migração de repositório em pastas
+  sintéticas. Não lê nem altera serviços reais.
+- `tests/integration/installer-smoke.ps1`: atalhos, alvo, argumentos e bit de elevação.
+  Recusa rodar em um computador que tenha o SLT instalado.
+- Go: `TestAdaptiveLinuxFormatDiskOnSyntheticFiles` usa sfdisk/mkfs reais em arquivos.
+- `rescue/pxe/test-netboot-vm.py`: além do PXE BIOS/UEFI, o cenário **modo SLT** (VM
+  UEFI iniciando pela partição EFI, pareamento por ticket, formatação de disco sintético
+  por ordem do servidor) e o cenário **ProxyDHCP** (DHCP sem opções de boot).
+- O Controller aceita `--lab-rescue-source <arquivo>` apenas para esse laboratório.
