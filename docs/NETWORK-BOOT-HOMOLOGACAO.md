@@ -1,6 +1,10 @@
 # Network Boot — evidências por fase
 
-Checkpoint 2026-11-05, implementação P0–P2 em validação. Não é aceite P3–P5.
+P0–P2 validados em VMs na release beta.6. O laboratório completo passou no
+[PR 13](https://github.com/mikerock12/slt-disk-manager/actions/runs/42043355355)
+e no [merge 7592dc6](https://github.com/mikerock12/slt-disk-manager/actions/runs/42442085283).
+O pacote Network Boot da release inclui o recibo do laboratório e os fingerprints
+aprovados para o catálogo do instalador.
 
 | Componente/cenário | Evidência atual | Limite |
 |---|---|---|
@@ -9,14 +13,13 @@ Checkpoint 2026-11-05, implementação P0–P2 em validação. Não é aceite P3
 | UI salvar/validar/consentimento/start/stop | Desktop 45/45; renders sintéticos | Não é screenshot de firmware |
 | Export ISO → kernel/initrd/SquashFS | Exportador 10/10 e ISO beta.5.1 real extraída | Exportar não prova boot |
 | Login serial após senha | Prova interativa QEMU local com technician/live, identidade e sudo; regressões8/8 | Corrige o harness; não substitui os gates PXE completos |
-| PXE BIOS sem ISO/USB | CI41960628537 passou boot, login, CSR/mTLS/INVENTORY, duas falhas de rede e fallback Linux local; hashes intactos | Ainda aguarda o gate UEFI |
-| PXE UEFI sem ISO/USB | CI41964719717 passou boot, login, CSR/mTLS e INVENTORY depois de parar HTTP/TFTP | Negativo antes do kernel reprovou por perda no serial; gate completo será repetido com observação VGA independente |
-| CSR/mTLS/INVENTORY por PXE | CI41964719717 aprovou os positivos BIOS/UEFI, RAW readonly e hashes intactos | Não é aceite dos negativos restantes nem hardware |
+| PXE BIOS e UEFI sem ISO/USB | CI42442085283 aprovou menu, boot e login em SeaBIOS e OVMF | VMs com DHCP externo e Secure Boot desabilitado |
+| CSR/mTLS/INVENTORY por PXE | CI42442085283 aprovou o pareamento e o inventário assinado em BIOS e UEFI | Disco sintético RAW somente leitura, com SHA256 preservado |
 | API administrativa Network Boot via HTTPS real | Integração local11/11 | Token, consentimento, config inválida, traversal, auditoria e ausência de jobs; nenhum listener boot iniciado |
 | ProxyDHCP | Bloqueado | Somente DHCP externo implementado |
-| Falha antes do kernel e durante fetch, retorno Linux local após parar PXE | BIOS passou no CI41964719717; UEFI ainda aguarda os negativos completos | Fallback usa fixture Linux live em disco RAW readonly; não comprova Windows instalado |
-| Parar HTTP/TFTP após boot preserva agente e Controller | CI41964719717 aprovou um novo INVENTORY assinado com processo encerrado e portas liberadas em BIOS/UEFI | Será repetido no snapshot final; disco sintético readonly |
-| Mensagem explícita de falha na tela do firmware | Observador estrito 17/17; replay de três pares reais VGA com confiança média 88,24% | Serial completo ou dois quadros com frase completa; reset/UiApp/trace/incompleto não contam. Aguardando nova execução completa |
+| Falha antes do kernel e durante fetch, retorno Linux local após parar PXE | CI42442085283 aprovou em BIOS e UEFI | Fallback usa fixture Linux live em disco RAW somente leitura |
+| Parar HTTP/TFTP após boot preserva agente e Controller | CI42442085283 aprovou novo INVENTORY assinado com processo encerrado e portas liberadas em BIOS e UEFI | Disco sintético somente leitura |
+| Mensagem explícita de falha na tela do firmware | CI42442085283 aprovou a observação VGA; observador estrito 17/17 em testes locais | Dois quadros com frase completa, separados por ao menos 0,3 s, com confiança média de ao menos 80 |
 | WinPE PXE/Windows sem scratch | P3/P4 pendentes | Fluxo USB legado preservado |
 | Secure Boot/hardware físico | Não homologados | Não generalizar VM a NICs/PCs reais |
 
