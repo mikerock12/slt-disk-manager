@@ -9,5 +9,6 @@
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.0" />
     <None Update="Hardware/Collect-Inventory.ps1" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Hardware/Find-EfiSystemPartition.ps1" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

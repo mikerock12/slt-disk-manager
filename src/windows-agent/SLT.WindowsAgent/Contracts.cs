@@ -19,15 +19,17 @@ public sealed record DiskInfo(string Id, string Path, string Model, string Seria
     bool Mounted, string Health, PartitionInfo[] Partitions);
 public sealed record Inventory(string DeviceId, string Hostname, string Os, string Mode, string AgentVersion,
     string[] Capabilities, DiskInfo[] Disks, DateTimeOffset CapturedAtUtc, string[] Notes, FileRootInfo[]? FileRoots = null);
-public sealed record EnrollmentRequest(string Hostname, string Mode, string CsrPem, string Secret);
-public sealed record EnrollmentCreated(string Id, string Code, DateTimeOffset ExpiresAtUtc);
+public sealed record EnrollmentRequest(string Hostname, string Mode, string CsrPem, string Secret, string? Commitment = null);
+public sealed record EnrollmentCreated(string Id, string? Code, DateTimeOffset ExpiresAtUtc, string? ServerNonce = null);
+public sealed record EnrollmentReveal(string Nonce);
 public sealed record EnrollmentStatus(string Status, string? DeviceId, string? CertificatePem, string? CaPem);
-public sealed record EnrollmentPending(string Id, string Secret, string Code, DateTimeOffset ExpiresAtUtc);
+public sealed record EnrollmentPending(string Id, string Secret, string Code, DateTimeOffset ExpiresAtUtc, string? ServerUrl = null, string? ServerPin = null);
 public sealed record Identity(string DeviceId);
 public sealed record SignedAssignment(string Payload, string Signature);
 public sealed record JobPlan(string Id, string Kind, string DeviceId, string DiskFingerprint, string DiskPath,
     long DiskSizeBytes, int LogicalSectorBytes, string ImageId, string Challenge, DateTimeOffset ExpiresAtUtc, bool Consent,
-    FileRequest? File = null);
+    FileRequest? File = null, RescueBootOptions? RescueBoot = null);
+public sealed record RescueBootOptions(string LoaderSha256, long LoaderSizeBytes, string Script, string Ticket, bool UnattendedWrite, int RebootDelaySeconds = 30);
 public sealed record JobResult(bool Success, string Message, string Details);
 public sealed record JobProgress(string Phase, long BytesProcessed, long BytesTotal);
 public sealed record ProgressResponse(bool CancelRequested);

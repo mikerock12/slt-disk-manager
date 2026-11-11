@@ -2,28 +2,41 @@ using System.Net;
 
 namespace SLT.WindowsAgent;
 
-public sealed record AgentOptions(Uri Server, string ServerPin, string StateDirectory, bool Once, int PollSeconds,
-    string? SmartctlPath, bool CollectOnly, string? FileRootsPath = null)
+// Server and ServerPin are optional on the command line: without them the agent reuses the
+// server saved by an earlier pairing or looks for one on the LAN (ServerLocator).
+// PinVerified tells whether a person supplied the pin (or an earlier pairing confirmed it).
+public sealed record AgentOptions(Uri? Server, string ServerPin, string StateDirectory, bool Once, int PollSeconds,
+    string? SmartctlPath, bool CollectOnly, string? FileRootsPath = null, bool PinVerified = true,
+    int DiscoveryPort = Discovery.DefaultPort, IPEndPoint? DiscoveryTarget = null, bool RebootToSlt = false, bool AssumeYes = false)
 {
     public static AgentOptions Parse(string[] args)
     {
         var values = new Dictionary<string, string>(StringComparer.Ordinal);
         var once = false;
         var collect = false;
+        var reboot = false;
+        var yes = false;
         for (var i = 0; i < args.Length; i++)
         {
             if (args[i] == "--once") { once = true; continue; }
             if (args[i] == "--collect-only") { collect = true; continue; }
-            if (args[i] is not ("--server" or "--server-pin" or "--state-dir" or "--poll-seconds" or "--smartctl" or "--file-roots"))
+            if (args[i] == "--reboot-to-slt") { reboot = true; continue; }
+            if (args[i] == "--yes") { yes = true; continue; }
+            if (args[i] is not ("--server" or "--server-pin" or "--state-dir" or "--poll-seconds" or "--smartctl" or "--file-roots" or "--discovery-port" or "--discovery-address"))
                 throw new ArgumentException($"Opção desconhecida: {args[i]}");
             if (++i == args.Length) throw new ArgumentException("Uma opção está sem valor.");
             if (!values.TryAdd(args[i - 1], args[i])) throw new ArgumentException("Opção repetida.");
         }
-        var server = new Uri(values.GetValueOrDefault("--server", "https://127.0.0.1:7443"), UriKind.Absolute);
-        EnsureLocalServer(server);
+        Uri? server = null;
+        if (values.TryGetValue("--server", out var address))
+        {
+            server = new Uri(address, UriKind.Absolute);
+            EnsureLocalServer(server);
+        }
         var pin = values.GetValueOrDefault("--server-pin", "").Replace(":", "", StringComparison.Ordinal);
-        if (!collect && (pin.Length != 64 || !pin.All(Uri.IsHexDigit)))
-            throw new ArgumentException("Informe --server-pin com os 64 caracteres SHA256 exibidos pelo servidor.");
+        if (pin.Length != 0 && (pin.Length != 64 || !pin.All(Uri.IsHexDigit)))
+            throw new ArgumentException("--server-pin, quando informado, deve ter os 64 caracteres SHA256 exibidos pelo servidor.");
+        if (pin.Length != 0 && server is null) throw new ArgumentException("--server-pin exige --server.");
         var poll = int.Parse(values.GetValueOrDefault("--poll-seconds", "10"));
         if (poll is < 2 or > 300) throw new ArgumentException("--poll-seconds deve estar entre 2 e 300.");
         var state = Path.GetFullPath(values.GetValueOrDefault("--state-dir", Path.Combine(
@@ -37,7 +50,16 @@ public sealed record AgentOptions(Uri Server, string ServerPin, string StateDire
         var fileRoots = values.GetValueOrDefault("--file-roots");
         if (fileRoots is not null && (!Path.IsPathFullyQualified(fileRoots) || !System.IO.File.Exists(fileRoots)))
             throw new ArgumentException("--file-roots exige caminho absoluto para JSON local existente.");
-        return new(server, pin.ToLowerInvariant(), state, once, poll, smartctl, collect, fileRoots);
+        var discoveryPort = int.Parse(values.GetValueOrDefault("--discovery-port", Discovery.DefaultPort.ToString()));
+        if (discoveryPort is < 1024 or > 65535) throw new ArgumentException("--discovery-port deve estar entre 1024 e 65535.");
+        IPEndPoint? target = null;
+        if (values.TryGetValue("--discovery-address", out var probe))
+        {
+            // Networks that drop broadcast: probe one LAN address directly instead.
+            if (!IPAddress.TryParse(probe, out var probeAddress) || !IsLocal(probeAddress)) throw new ArgumentException("--discovery-address exige um IP da rede local.");
+            target = new IPEndPoint(probeAddress, discoveryPort);
+        }
+        return new(server, pin.ToLowerInvariant(), state, once, poll, smartctl, collect, fileRoots, pin.Length != 0, discoveryPort, target, reboot, yes);
     }
 
     public static void EnsureLocalServer(Uri server)

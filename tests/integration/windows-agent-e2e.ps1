@@ -84,7 +84,8 @@ $serverProcess = $null
 $agentProcess = $null
 $admin = $null
 try {
-    $serverProcess = Start-DotnetProcess @($serverDll, '--bind', '127.0.0.1', '--port', [string]$Port, '--state-dir', $serverState) 'controller'
+    $discoveryPort = $Port + 1
+    $serverProcess = Start-DotnetProcess @($serverDll, '--bind', '127.0.0.1', '--port', [string]$Port, '--discovery-port', [string]$discoveryPort, '--state-dir', $serverState) 'controller'
     $connectionPath = Join-Path $serverState 'connection.json'
     Wait-Condition {
         $serverProcess.Refresh()
@@ -107,7 +108,12 @@ try {
     $pending = Get-Content -Raw -LiteralPath $pendingPath | ConvertFrom-Json
     $enrollments = @($admin.Get('/api/v1/enrollments') | ConvertFrom-Json)
     $request = @($enrollments | Where-Object { $_.id -eq $pending.id })
-    if ($request.Count -ne 1 -or $request[0].code -ne $pending.code -or $request[0].mode -ne 'WINDOWS') { throw 'Codigo/identidade de pareamento divergente.' }
+    # The short code exists only on the client's screen: the administrative listing must not reveal it.
+    if ($request.Count -ne 1 -or $request[0].code -ne '' -or -not $request[0].shortCode -or $request[0].mode -ne 'WINDOWS' -or $pending.code -notmatch '^\d{8}$') { throw 'Solicitacao de pareamento divergente ou codigo exposto no servidor.' }
+    $wrong = if ($pending.code -eq '00000000') { '00000001' } else { '00000000' }
+    $refused = $false
+    try { $null = $admin.Post('/api/v1/enrollments/' + $pending.id + '/approve', (@{ code = $wrong } | ConvertTo-Json -Compress)) } catch { $refused = $true }
+    if (-not $refused) { throw 'Codigo errado foi aceito.' }
     $approved = $admin.Post('/api/v1/enrollments/' + $pending.id + '/approve', (@{ code = $pending.code } | ConvertTo-Json -Compress)) | ConvertFrom-Json
     if ($approved.status -ne 'APPROVED') { throw 'Pareamento nao aprovado.' }
     $exitCode = Wait-AgentExit $agentProcess
@@ -137,7 +143,30 @@ try {
     $agentProcess = Start-DotnetProcess $agentArguments 'agent-revoked'
     if ((Wait-AgentExit $agentProcess) -eq 0) { throw 'Agente revogado encerrou com sucesso indevido.' }
     Write-Output 'PASS Certificado revogado recusado sem novo pareamento automatico'
-    Write-Output 'Windows Agent E2E: 4/4 cenarios aprovados. Nenhuma gravacao de disco executada.'
+
+    # No address and no pin: the client finds the server by itself and pairs with the short code.
+    $autoState = Join-Path $runtime 'agent-auto'
+    $autoArguments = @($agentDll, '--discovery-address', '127.0.0.1', '--discovery-port', [string]$discoveryPort, '--state-dir', $autoState, '--once')
+    $agentProcess = Start-DotnetProcess $autoArguments 'agent-discovery'
+    $autoPending = Join-Path $autoState 'enrollment.json'
+    Wait-Condition {
+        $agentProcess.Refresh()
+        if ($agentProcess.HasExited) { throw 'Agente encerrou antes de encontrar o servidor. Consulte logs privados do teste.' }
+        return (Test-Path -LiteralPath $autoPending)
+    } 'Agente nao encontrou o servidor pela rede.'
+    $pending = Get-Content -Raw -LiteralPath $autoPending | ConvertFrom-Json
+    if ($pending.serverUrl -ne $connection.url -or $pending.serverPin -ne $connection.serverPin) { throw 'Descoberta apontou para servidor ou certificado diferente.' }
+    $approved = $admin.Post('/api/v1/enrollments/' + $pending.id + '/approve', (@{ code = $pending.code } | ConvertTo-Json -Compress)) | ConvertFrom-Json
+    if ($approved.status -ne 'APPROVED' -or (Wait-AgentExit $agentProcess) -ne 0) { throw 'Pareamento por descoberta falhou.' }
+    $saved = Get-Content -Raw -LiteralPath (Join-Path $autoState 'server.json') | ConvertFrom-Json
+    if ($saved.url -ne $connection.url -or $saved.pin -ne $connection.serverPin) { throw 'Servidor confirmado nao foi registrado no cliente.' }
+    Write-Output 'PASS Descoberta na rede + codigo curto de 8 digitos, sem digitar endereco nem pin'
+
+    # Next start: nothing on the command line but the state directory.
+    $agentProcess = Start-DotnetProcess @($agentDll, '--state-dir', $autoState, '--once') 'agent-saved-server'
+    if ((Wait-AgentExit $agentProcess) -ne 0) { throw 'Cliente pareado nao reconectou usando o servidor registrado.' }
+    Write-Output 'PASS Cliente pareado reconecta sozinho ao servidor registrado'
+    Write-Output 'Windows Agent E2E: 6/6 cenarios aprovados. Nenhuma gravacao de disco executada.'
     Write-Output ('Logs e estado sensiveis somente em diretorio runtime ignorado pelo Git: ' + $runtime)
 }
 finally {

@@ -5,7 +5,16 @@ using SLT.WindowsAgent;
 
 if (args.Contains("--help", StringComparer.Ordinal))
 {
-    Console.WriteLine("SLT Windows Agent 0.1.0\n  --server https://IP-LAN:7443 --server-pin SHA256 [--state-dir DIR] [--once]\n  [--smartctl C:\\caminho\\smartctl.exe] [--poll-seconds 10] [--file-roots C:\\scopes.json]\n  --collect-only: imprime inventário local somente leitura, sem conectar ao servidor.\n  Para serviço, use o instalador em deploy/. Nunca inclua token administrativo neste cliente.");
+    Console.WriteLine("""
+        SLT Windows Agent 0.1.0
+          Sem opções: procura o servidor SLT Disk Manager na rede local e mostra o código de pareamento.
+          [--server https://IP-LAN:7443] [--server-pin SHA256]  endereço e pin, quando a busca automática não serve
+          [--state-dir DIR] [--once] [--poll-seconds 10] [--smartctl C:\caminho\smartctl.exe] [--file-roots C:\scopes.json]
+          [--discovery-port 7444] [--discovery-address IP-LAN]
+          --reboot-to-slt [--yes]: reinicia este computador em modo SLT Disk Manager (cliente já pareado, administrador).
+          --collect-only: imprime inventário local somente leitura, sem conectar ao servidor.
+          Para serviço, use o instalador em deploy/. Nunca inclua token administrativo neste cliente.
+        """);
     return 0;
 }
 try
@@ -17,6 +26,7 @@ try
         Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(inventory, Wire.Json));
         return 0;
     }
+    if (options.RebootToSlt) return await SltModeCommand.Run(options, CancellationToken.None);
     var builder = Host.CreateApplicationBuilder();
     builder.Services.AddSingleton(options);
     builder.Services.AddWindowsService(settings => settings.ServiceName = "SLTWindowsAgent");
