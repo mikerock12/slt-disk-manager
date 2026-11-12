@@ -1,5 +1,10 @@
 # Network Boot — evidências por fase
 
+Beta.7: o laboratório passou a incluir o modo SLT e o ProxyDHCP
+([PR 15](https://github.com/mikerock12/slt-disk-manager/actions/runs/43118758070) e
+[merge dcd01a9](https://github.com/mikerock12/slt-disk-manager/actions/runs/43123533851)).
+Os dois cenários entraram nos portões que aprovam o catálogo de perfis do instalador.
+
 P0–P2 validados em VMs na release beta.6. O laboratório completo passou no
 [PR 13](https://github.com/mikerock12/slt-disk-manager/actions/runs/42043355355)
 e no [merge 7592dc6](https://github.com/mikerock12/slt-disk-manager/actions/runs/42442085283).
@@ -16,7 +21,8 @@ aprovados para o catálogo do instalador.
 | PXE BIOS e UEFI sem ISO/USB | CI42442085283 aprovou menu, boot e login em SeaBIOS e OVMF | VMs com DHCP externo e Secure Boot desabilitado |
 | CSR/mTLS/INVENTORY por PXE | CI42442085283 aprovou o pareamento e o inventário assinado em BIOS e UEFI | Disco sintético RAW somente leitura, com SHA256 preservado |
 | API administrativa Network Boot via HTTPS real | Integração local11/11 | Token, consentimento, config inválida, traversal, auditoria e ausência de jobs; nenhum listener boot iniciado |
-| ProxyDHCP | Bloqueado | Somente DHCP externo implementado |
+| ProxyDHCP (beta.7) | CI43118758070 e CI43123533851: com um DHCP sem opções de boot, clientes BIOS (SeaBIOS/iPXE ROM) e UEFI (EDK2) chegaram ao menu; o endereço veio do DHCP do laboratório; o SLT não ofereceu endereço; o DHCP seguiu concedendo antes, durante e depois | VMs. DHCP e SLT ficam no mesmo host do laboratório; em rede real estão em máquinas diferentes. Roteadores e firmwares físicos não testados |
+| Modo SLT a partir da partição EFI (beta.7) | Mesmos CIs: plano `REBOOT_RESCUE` assinado e conferido, carregador `ipxe-local.efi` com hash do plano, VM UEFI iniciando por um disco GPT com `\EFI\SLT` (sem ROM PXE, ISO ou USB), pareamento por ticket de uso único, inventário por mTLS e `FORMAT_DISK` GPT/NTFS em disco sintético por ordem do servidor, sem teclado no cliente; reuso do ticket recusado; disco protegido recusado | O cliente Windows é representado pelas mesmas chamadas HTTPS; o passo `bcdedit`/partição EFI do Windows só tem testes com executor falso. Secure Boot desativado. BIOS/Legacy não atendido |
 | Falha antes do kernel e durante fetch, retorno Linux local após parar PXE | CI42442085283 aprovou em BIOS e UEFI | Fallback usa fixture Linux live em disco RAW somente leitura |
 | Parar HTTP/TFTP após boot preserva agente e Controller | CI42442085283 aprovou novo INVENTORY assinado com processo encerrado e portas liberadas em BIOS e UEFI | Disco sintético somente leitura |
 | Mensagem explícita de falha na tela do firmware | CI42442085283 aprovou a observação VGA; observador estrito 17/17 em testes locais | Dois quadros com frase completa, separados por ao menos 0,3 s, com confiança média de ao menos 80 |

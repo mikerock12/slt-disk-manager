@@ -10,6 +10,7 @@ import hashlib
 import json
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 import zipfile
@@ -19,11 +20,15 @@ parser.add_argument("tag")
 parser.add_argument("--repo", default="mikerock12/slt-disk-manager")
 parser.add_argument("--output", type=Path, required=True, help="New folder for the downloaded assets")
 parser.add_argument("--go", default="go")
+parser.add_argument("--reuse", action="store_true", help="Check the files already in --output instead of downloading again")
 args = parser.parse_args()
 if not re.fullmatch(r"v[0-9A-Za-z.-]+", args.tag):
     parser.error("Unexpected tag")
-if args.output.exists():
-    parser.error("Output folder already exists; choose a new one")
+if args.output.exists() != args.reuse:
+    parser.error("Output folder must be new, or already exist together with --reuse")
+go = shutil.which(args.go) or (str(Path(args.go).resolve()) if Path(args.go).is_file() else None)
+if not go:
+    parser.error("Go toolchain not found; pass --go <path to go>")
 
 
 def gh(*arguments):
@@ -41,11 +46,12 @@ def sha256(path):
 release = json.loads(gh("release", "view", args.tag, "--repo", args.repo, "--json", "tagName,targetCommitish,isPrerelease,assets"))
 commit = gh("api", f"repos/{args.repo}/commits/{release['targetCommitish']}", "--jq", ".sha").strip()
 assert re.fullmatch(r"[0-9a-f]{40}", commit), commit
-args.output.mkdir(parents=True)
-subprocess.run(["gh", "release", "download", args.tag, "--repo", args.repo, "--dir", str(args.output)], check=True)
+if not args.reuse:
+    args.output.mkdir(parents=True)
+    subprocess.run(["gh", "release", "download", args.tag, "--repo", args.repo, "--dir", str(args.output)], check=True)
 report = {"tag": args.tag, "commit": commit, "prerelease": release["isPrerelease"], "assets": [], "zips": [], "agents": []}
 names = {asset["name"] for asset in release["assets"]}
-assert names == {p.name for p in args.output.iterdir()}, "Downloaded files differ from the release asset list"
+assert names == {p.name for p in args.output.iterdir() if not p.name.startswith("_")}, "Downloaded files differ from the release asset list"
 for asset in sorted(release["assets"], key=lambda a: a["name"]):
     path = args.output / asset["name"]
     actual = sha256(path)
@@ -75,7 +81,7 @@ with zipfile.ZipFile(args.output / portable) as archive:
         target = args.output / "_agents" / Path(suffix).name
         target.parent.mkdir(exist_ok=True)
         target.write_bytes(archive.read(entry))
-        info = subprocess.check_output([args.go, "version", "-m", str(target)], text=True)
+        info = subprocess.check_output([go, "version", "-m", str(target)], text=True)
         revision = re.search(r"vcs\.revision=([0-9a-f]{40})", info)
         modified = re.search(r"vcs\.modified=(\w+)", info)
         assert revision and revision.group(1) == commit and modified and modified.group(1) == "false", suffix + ": not built from the clean release commit"
