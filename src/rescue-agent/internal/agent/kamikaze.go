@@ -300,6 +300,34 @@ func findKamikazeBundle(p kamikazePlatform, session string) (string, error) {
 	return found[0], nil
 }
 
+// pendingKamikazeSession finds the only package that has not produced a result yet.
+func pendingKamikazeSession(p kamikazePlatform) (string, error) {
+	found := []string{}
+	for _, root := range p.Roots() {
+		entries, err := os.ReadDir(filepath.Join(root, KamikazeDirectory))
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			dir := filepath.Join(root, KamikazeDirectory, e.Name())
+			if !e.IsDir() || !identifierPattern.MatchString(e.Name()) {
+				continue
+			}
+			if _, err := os.Stat(filepath.Join(dir, "bundle.json")); err != nil {
+				continue
+			}
+			if _, err := os.Stat(filepath.Join(dir, "result.json")); err == nil {
+				continue
+			}
+			found = append(found, e.Name())
+		}
+	}
+	if len(found) != 1 {
+		return "", fmt.Errorf("%d pacotes kamikaze pendentes encontrados; esperado exatamente 1. Prepare de novo no painel", len(found))
+	}
+	return found[0], nil
+}
+
 // RunKamikaze is the console program started by winpeshl.ini inside the kamikaze boot image.
 func RunKamikaze(ctx context.Context, options KamikazeOptions) error {
 	return runKamikaze(ctx, newKamikazePlatform(), options)
@@ -336,11 +364,20 @@ func runKamikaze(ctx context.Context, platform kamikazePlatform, options Kamikaz
 			r.say("Reinício automático falhou (%v); desligue e ligue o servidor.\n", err)
 		}
 	}()
-	if !identifierPattern.MatchString(options.SessionID) {
-		return errors.New("sessão kamikaze inválida")
-	}
 	if _, err := platform.Check(ctx); err != nil {
 		return err
+	}
+	if options.SessionID == "auto" {
+		// The boot image is generic (cached between sessions): it runs the one pending package.
+		session, err := pendingKamikazeSession(platform)
+		if err != nil {
+			return err
+		}
+		options.SessionID = session
+		r.options.SessionID = session
+	}
+	if !identifierPattern.MatchString(options.SessionID) {
+		return errors.New("sessão kamikaze inválida")
 	}
 	dir, err := findKamikazeBundle(platform, options.SessionID)
 	if err != nil {
@@ -399,6 +436,13 @@ func runKamikaze(ctx context.Context, platform kamikazePlatform, options Kamikaz
 		}
 		if op.Kind == "DEPLOY_WINDOWS" && r.bundleDisk[target.Number] {
 			return fmt.Errorf("operação %d: a mídia do Windows está no disco de destino", i+1)
+		}
+		if op.Kind == "DEPLOY_WINDOWS" {
+			for _, earlier := range r.bundle.Operations[:i] {
+				if d, e := resolveDisk(earlier.Target, disks); e == nil && r.bundleDisk[d.Number] {
+					return fmt.Errorf("operação %d: uma operação anterior apaga o disco onde está a mídia do Windows", i+1)
+				}
+			}
 		}
 		r.say("\n[%d] %s\n    DESTINO: disco %d | %s | serial %s | %s\n", i+1, kamikazeLabel(op), target.Number, target.Model, emptyDash(target.Serial), humanBytes(target.SizeBytes))
 		if op.Source != nil {

@@ -206,6 +206,9 @@
 
    <TabItem Header="Arquivos"><local:FilesPanel x:Name="Files"/></TabItem>
    <TabItem Header="Boot pela rede"><local:NetworkBootPanel x:Name="NetworkBoot"/></TabItem>
+   <TabItem Header="Discos do servidor"><local:ServerDisksPanel x:Name="ServerDisks"/></TabItem>
+   <TabItem Header="Máquinas virtuais"><local:VirtualMachinesPanel x:Name="VirtualMachines"/></TabItem>
+   <TabItem Header="Modo kamikaze"><local:KamikazePanel x:Name="Kamikaze"/></TabItem>
 
    <TabItem Header="Imagens">
     <Grid>

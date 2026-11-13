@@ -432,3 +432,28 @@ func (fakePEBase) VerifyApplied(byte) error                    { return nil }
 func (fakePEBase) VerifyBoot(byte, string) error               { return nil }
 func (fakePEBase) FlushVolume(byte) error                      { return nil }
 func (fakePEBase) DriveLayout(int) ([]byte, error)             { return nil, errors.New("fixture") }
+
+func TestKamikazeAutoSessionPicksTheOnlyPendingPackage(t *testing.T) {
+	const mib = 1024 * 1024
+	f := newKamikazeFixture(t, 8*mib, 8*mib, 12000)
+	f.write(t, KamikazeOperation{Kind: "FORMAT_DISK", Target: f.target, Format: &FormatOptions{TableType: "GPT", FileSystem: "NTFS", Label: "DADOS"}, Challenge: "APAGAR DST1"})
+	// An older package that already has its result is ignored.
+	old := filepath.Join(filepath.Dir(f.dir), "sessao-antiga")
+	os.MkdirAll(old, 0700)
+	os.WriteFile(filepath.Join(old, "bundle.json"), []byte("{}"), 0600)
+	os.WriteFile(filepath.Join(old, "result.json"), []byte("{}"), 0600)
+	var out bytes.Buffer
+	err := runKamikaze(context.Background(), f.platform, KamikazeOptions{SessionID: "auto", TrustPath: f.trust, NoReboot: true, Input: strings.NewReader("APAGAR DST1\n"), Output: &out})
+	if err != nil || len(f.platform.scripts) != 1 {
+		t.Fatalf("%v\n%s", err, out.String())
+	}
+	// Two pending packages: refuses instead of guessing.
+	g := newKamikazeFixture(t, 8*mib, 8*mib, 12000)
+	g.write(t, KamikazeOperation{Kind: "FORMAT_DISK", Target: g.target, Format: &FormatOptions{TableType: "GPT", FileSystem: "NTFS"}, Challenge: "APAGAR DST1"})
+	other := filepath.Join(filepath.Dir(g.dir), "sessao-2")
+	os.MkdirAll(other, 0700)
+	os.WriteFile(filepath.Join(other, "bundle.json"), []byte("{}"), 0600)
+	if err = runKamikaze(context.Background(), g.platform, KamikazeOptions{SessionID: "auto", TrustPath: g.trust, NoReboot: true, Input: strings.NewReader("APAGAR DST1\n"), Output: &out}); err == nil || len(g.platform.scripts) != 0 {
+		t.Fatal("pacote ambíguo executado")
+	}
+}
