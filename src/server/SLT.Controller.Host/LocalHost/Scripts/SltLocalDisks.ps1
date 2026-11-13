@@ -9,11 +9,15 @@ $ProgressPreference = 'SilentlyContinue'
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
 $p = [Console]::In.ReadToEnd() | ConvertFrom-Json
 
-function Done($value) { Write-Output ('SLT-RESULT:' + (ConvertTo-Json -InputObject $value -Compress -Depth 8)); exit 0 }
+# Everything this script prints goes as UTF-8 bytes straight to standard output: the Controller
+# reads UTF-8, while native tools (DISM, chkdsk, bcdboot) write in the console OEM code page.
+$script:stdout = [Console]::OpenStandardOutput()
+function Emit([string]$text) { $bytes = [Text.Encoding]::UTF8.GetBytes($text + "`n"); $script:stdout.Write($bytes, 0, $bytes.Length); $script:stdout.Flush() }
+function Done($value) { Emit ('SLT-RESULT:' + (ConvertTo-Json -InputObject $value -Compress -Depth 8)); exit 0 }
 function Fail([string]$message) { Done @{ error = $message } }
-# Straight to standard output, outside the pipeline: inside functions Write-Output would become
-# part of their return value (Invoke-Tool returned the log lines together with the exit code).
-function Say([string]$message) { [Console]::Out.WriteLine($message) }
+# Outside the pipeline: inside functions Write-Output would become part of their return value
+# (Invoke-Tool returned the log lines together with the exit code).
+function Say([string]$message) { Emit $message }
 function Letter($partition) { if ($partition.DriveLetter -and [char]$partition.DriveLetter -ne [char]0) { [string]$partition.DriveLetter } else { '' } }
 function Get-SltPartition([int]$disk, [int]$number) { Get-Partition -DiskNumber $disk -PartitionNumber $number }
 # Temporary drive letters for partitions without one (EFI, offline Windows); removed in finally.
@@ -49,8 +53,12 @@ function Reset-Table([int]$number, [string]$style) {
 }
 function Invoke-Tool([string]$path, [string[]]$arguments) {
     Say ("> " + (Split-Path -Leaf $path) + ' ' + ($arguments -join ' '))
-    & $path @arguments 2>&1 | ForEach-Object { "$_".Replace([string][char]0, '') } | Where-Object { $_.Trim() } | ForEach-Object { Say $_ }
-    return $LASTEXITCODE
+    # Decode the tool's output with the OEM code page (accents of DISM/chkdsk in pt-BR); lines are
+    # still forwarded as they arrive, so long repairs show progress in the panel.
+    [Console]::OutputEncoding = [Text.Encoding]::GetEncoding([Globalization.CultureInfo]::CurrentCulture.TextInfo.OEMCodePage)
+    try { & $path @arguments 2>&1 | ForEach-Object { "$_".Replace([string][char]0, '') } | Where-Object { $_.Trim() } | ForEach-Object { Say $_ }; $code = $LASTEXITCODE }
+    finally { [Console]::OutputEncoding = [Text.Encoding]::UTF8 }
+    return $code
 }
 
 try {
