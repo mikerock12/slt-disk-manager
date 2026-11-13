@@ -1,7 +1,29 @@
-# Pendências do SLT Disk Manager após a beta.7
+# Pendências do SLT Disk Manager após a beta.8
 
-Levantamento de 11/11/2026. A beta.7 fechou parte da lista anterior. Nada aqui ou na
-beta.7 foi homologado em hardware físico.
+Levantamento de 13/11/2026. Nada aqui, na beta.7 ou na beta.8 foi homologado em hardware
+físico.
+
+## Entregue na beta.8 (com evidência e limite)
+
+| Item | Evidência | Limite |
+|---|---|---|
+| Discos do servidor | 277 verificações do Controller (executor falso e discos em arquivo); 17/17 operações reais com VHDX sintéticos dentro de uma VM; verificar disco e BCDBoot reais no Windows da VM, que voltou a iniciar | MBR2GPT e SFC/DISM offline só com executor falso; pendrives e HDs físicos não testados |
+| Máquinas virtuais (Hyper-V) | 11/11 reais: VMs geração 1 e 2 criadas, ligadas, desligadas e excluídas com o VHDX | Entrega de HD físico à VM (pass-through) não exercitada; Hyper-V aninhado não testado |
+| Modo kamikaze | VM Hyper-V UEFI com Secure Boot: plano pela API real, imagem do WinRE via DISM, boot único em ramdisk, frases digitadas no console, clone 1 GB → 2 GB conferido (arquivo de 64 MB idêntico, GPT realocada), formatação MBR/exFAT, volta ao Windows e resultado coletado sem entradas de boot restantes | Instalar Windows pelo kamikaze só com testes de validação/fake; BIOS/Legacy não exercitado; hardware físico pendente |
+| Ícones e correção do Set-ServerRepository | Ícones nos executáveis, atalhos e instaladores; regressão do repositório vazio em PowerShell 5.1 e 7 | — |
+
+## Novas pendências da beta.8
+
+- **Kamikaze: instalar Linux no próprio servidor.** O WinPE não traz os instaladores Linux.
+  Hoje o caminho é uma VM com o HD ou o Rescue por pendrive. Critério: boot local do Rescue
+  a partir do disco (GRUB + live-boot) validado em VM.
+- **Kamikaze: instalação do Windows ponta a ponta** em VM (UEFI e BIOS), com o primeiro boot
+  do sistema instalado.
+- **Kamikaze sem WinRE:** servidores com WinRE desativado precisam de `reagentc /enable` ou
+  de um `kamikaze\winpe.wim`. Avaliar extrair o WinRE da mídia importada automaticamente.
+- **Pass-through de HD físico na VM** e matriz com pendrives/HDs reais.
+- **Falso positivo de antivírus:** o Malwarebytes classificou `SLT.Desktop.dll` como
+  `MachineLearning/Anomalous`. Reforça a necessidade de assinar os binários.
 
 ## Concluído na beta.7 (com a evidência e o limite de cada item)
 

@@ -1,10 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
-  <PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup>
+  <PropertyGroup><TargetFramework>net10.0</TargetFramework><ApplicationIcon>$(MSBuildThisFileDirectory)../../../deploy/branding/slt-disk-manager.ico</ApplicationIcon></PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../network-boot/SLT.NetworkBoot.Core/SLT.NetworkBoot.Core.csproj" />
     <Compile Include="../../windows-agent/SLT.WindowsAgent/Files/SecuredPath.cs" Link="Shared/SecuredPath.cs" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.0" />
     <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.0" />
     <PackageReference Include="SQLitePCLRaw.lib.e_sqlite3" Version="2.1.12" />
+    <None Update="LocalHost/Scripts/*.ps1" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

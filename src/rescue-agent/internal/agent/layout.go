@@ -447,7 +447,7 @@ func ntfsGeometry(path string) (int64, error) {
 	return (int64(count) + 1) * sector, nil
 }
 
-func verifyGPT(f *os.File, totalBytes int64, sector int) (int64, int64, error) {
+func verifyGPT(f io.ReaderAt, totalBytes int64, sector int) (int64, int64, error) {
 	last := totalBytes/int64(sector) - 1
 	type header struct {
 		current, alternate, first, last, array int64

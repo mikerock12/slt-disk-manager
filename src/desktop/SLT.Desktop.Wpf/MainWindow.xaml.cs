@@ -26,6 +26,9 @@ public partial class MainWindow : Window
         Files.Configure(RequireClient, ReviewPlanAsync, RefreshAsync);
         Deployment.Configure(RequireClient, ReviewPlanAsync, RefreshAsync);
         NetworkBoot.Configure(RequireClient);
+        ServerDisks.Configure(RequireClient);
+        VirtualMachines.Configure(RequireClient);
+        Kamikaze.Configure(RequireClient);
         _timer.Tick += async (_, _) => { if (!_busy && _client is not null) await RunAsync(RefreshAsync, false); };
         Loaded += async (_, _) =>
         {

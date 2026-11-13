@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -12,6 +13,28 @@ import (
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "disks" {
+		// Used by the Controller in full Windows: same IOCTL identity as the kamikaze console.
+		disks, err := agent.ListLocalDisks()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		json.NewEncoder(os.Stdout).Encode(disks)
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "kamikaze" {
+		set := flag.NewFlagSet("kamikaze", flag.ExitOnError)
+		var k agent.KamikazeOptions
+		set.StringVar(&k.SessionID, "session", "", "Sessão kamikaze preparada no painel do servidor")
+		set.StringVar(&k.TrustPath, "trust", `X:\SLT\trust.pem`, "Certificado do servidor gravado na imagem de boot")
+		set.BoolVar(&k.NoReboot, "no-reboot", false, "Não reiniciar ao terminar")
+		set.Parse(os.Args[2:])
+		if err := agent.RunKamikaze(context.Background(), k); err != nil {
+			os.Exit(1)
+		}
+		return
+	}
 	var o agent.WinPEOptions
 	flag.StringVar(&o.Server, "server", "", "URL HTTPS do controlador na LAN")
 	flag.StringVar(&o.ServerPin, "server-pin", "", "Pin SHA256 do certificado conferido no servidor")

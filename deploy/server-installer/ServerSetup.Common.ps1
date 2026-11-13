@@ -147,7 +147,10 @@ function Move-VerifiedTree([string]$Source, [string]$Destination, [switch]$KeepS
     }
     Assert-NoReparseChain $sourceFull
     $expected = Get-TreeManifest $sourceFull
-    $needed = (Get-ChildItem -LiteralPath $sourceFull -Recurse -File -Force | Measure-Object -Property Length -Sum).Sum
+    # Summed by hand: with StrictMode, Measure-Object over a folder without files returns no
+    # object and reading .Sum throws "The property 'Sum' cannot be found" (empty repository).
+    [long]$needed = 0
+    foreach ($file in @(Get-ChildItem -LiteralPath $sourceFull -Recurse -File -Force)) { $needed += $file.Length }
     $free = (New-Object IO.DriveInfo([IO.Path]::GetPathRoot($destinationFull))).AvailableFreeSpace
     if ($needed -and $free -lt ($needed + 64MB)) { throw "Espaço insuficiente no destino: precisa de $([math]::Ceiling($needed / 1MB)) MiB livres." }
     New-Item -ItemType Directory -Path $destinationFull -Force | Out-Null

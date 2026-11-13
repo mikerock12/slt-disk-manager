@@ -1,4 +1,4 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
-  <PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup>
+  <PropertyGroup><TargetFramework>net10.0</TargetFramework><ApplicationIcon>$(MSBuildThisFileDirectory)../../../deploy/branding/slt-disk-manager.ico</ApplicationIcon></PropertyGroup>
   <ItemGroup><ProjectReference Include="../SLT.NetworkBoot.Core/SLT.NetworkBoot.Core.csproj" /></ItemGroup>
 </Project>

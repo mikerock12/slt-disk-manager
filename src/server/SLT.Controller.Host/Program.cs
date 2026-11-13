@@ -177,6 +177,18 @@ app.MapPost("/agent/v1/jobs/{id}/stream-ack", (string id, StreamAck r, HttpConte
 app.MapGet("/api/v1/audit", () => Locked(() => store.Audit()));
 FileEndpoints.Map(app,controller);
 NetworkBootEndpoints.Map(app, networkBoot);
+// The server machine itself: its disks, Hyper-V virtual machines and kamikaze mode.
+// --local-disks virtual-only (tests) allows writes only to virtual disks (VHD/VHDX).
+var hostRunner = new Slt.Controller.LocalHost.NativeHostCommandRunner();
+var hostScripts = new Slt.Controller.LocalHost.HostScripts(hostRunner);
+var smartctl = Path.Combine(AppContext.BaseDirectory, "tools", "smartmontools", "smartctl.exe");
+var serverDisks = new Slt.Controller.LocalHost.ServerDiskManager(controller, hostScripts, directory, string.Equals(builder.Configuration["local-disks"], "virtual-only", StringComparison.OrdinalIgnoreCase))
+    { SmartctlPath = File.Exists(smartctl) ? smartctl : null };
+var hyperV = new Slt.Controller.LocalHost.HyperVManager(controller, hostScripts, serverDisks, directory);
+var kamikaze = new Slt.Controller.LocalHost.KamikazeManager(controller, hostRunner);
+// Results written by the kamikaze console are collected when the server is back in Windows.
+_ = Task.Run(() => { try { kamikaze.Reconcile(); } catch (Exception e) { app.Logger.LogError(e, "Conciliação do modo kamikaze"); } });
+Slt.Controller.LocalHost.LocalEndpoints.Map(app, serverDisks, hyperV, kamikaze);
 app.MapGet("/api/v1/dashboard", () => Locked(() => new
 {
     devices = store.All<Device>("device").Count,

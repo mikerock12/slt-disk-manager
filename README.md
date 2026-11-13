@@ -8,6 +8,20 @@ ainda não está homologado.** Inventário e diagnóstico são os fluxos indicad
 o primeiro teste em computadores de clientes. Não use gravação de disco em dados
 reais antes de homologar o ciclo em VMs e discos descartáveis.
 
+## Novidades da beta.8
+
+- **Discos do servidor.** Pendrives, HDs e SSDs ligados ao servidor:
+  - formatar, converter GPT ⇄ MBR e MBR → GPT sem perder dados;
+  - trocar o sistema de arquivos, redimensionar, verificar e corrigir erros;
+  - reparar a inicialização (BCDBoot) e o Windows (SFC/DISM);
+  - clonar disco a disco.
+- **Máquinas virtuais.** Pelo Hyper-V do servidor, em UEFI ou Legacy, com memória,
+  processadores e limite de CPU. Instale e configure um sistema num HD do servidor e leve-o
+  pronto ao cliente.
+- **Modo kamikaze.** O próprio servidor reinicia em modo SLT para clonar, formatar ou
+  reinstalar até o disco dele. A confirmação é digitada no console do servidor.
+- **Ícones próprios** nos programas, atalhos e instaladores.
+
 ## Novidades da beta.7
 
 - **Conectar sem digitar endereço nem pin.** O cliente encontra o servidor na rede e

@@ -130,6 +130,60 @@ Requisitos e limites:
 - depois de reiniciar o servidor, o Boot pela rede volta desligado: ligue-o de novo na
   página "Boot pela rede" antes de pedir o modo SLT.
 
+## Discos do próprio servidor
+
+Aba **Discos do servidor**: lista pendrives, HDs e SSDs ligados ao servidor. Escolha o disco
+(e a partição, quando for o caso) e a ação. Toda gravação mostra o que vai acontecer e pede
+para digitar uma frase como `APAGAR DISCO 5 64GB`.
+
+- **Disco inteiro:** verificar (saúde, SMART e verificação somente leitura), formatar
+  (GPT/MBR, NTFS/exFAT/FAT32), converter GPT ⇄ MBR (apaga), MBR → GPT sem perder dados
+  (MBR2GPT, para disco com Windows), clonar para outro disco (cópia conferida por SHA256;
+  o destino fica offline, leve-o ao cliente) e colocar online/offline.
+- **Partição:** formatar trocando o sistema de arquivos, redimensionar (0 = máximo),
+  corrigir erros (chkdsk), reparar a inicialização (BCDBoot) e reparar o Windows daquele
+  disco (DISM/SFC). **Reparar Windows do servidor** roda DISM e SFC no próprio servidor.
+- Discos com o Windows do servidor, o arquivo de paginação ou as pastas do SLT ficam
+  protegidos. Para eles use o modo kamikaze.
+
+## Máquinas virtuais
+
+Aba **Máquinas virtuais** (precisa do Hyper-V, que vem no Windows 10/11 Pro: ative em
+“Recursos do Windows” e reinicie). Escolha:
+
+- UEFI (geração 2) ou Legacy/BIOS (geração 1);
+- memória, processadores e o limite de uso da CPU;
+- o disco: VHDX novo na pasta/disco escolhido, VHDX existente ou **um HD ligado ao
+  servidor**;
+- a ISO do Windows ou do Linux.
+
+Depois use **Ligar** e **Abrir a tela da VM**. Com um HD do servidor entregue à VM, você
+instala e configura o sistema e os programas nele. Depois exclua a VM (o HD não é apagado)
+e coloque o HD no computador do cliente, atualizando só os drivers. Use UEFI para
+computadores UEFI e Legacy para computadores com BIOS/CSM.
+
+## Modo kamikaze: o próprio servidor em modo SLT
+
+Aba **Modo kamikaze**. Monte a lista de operações e confirme digitando `KAMIKAZE <NOME>`:
+
+- clonar um disco para outro;
+- formatar um disco, inclusive o do servidor;
+- instalar o Windows a partir de uma mídia importada.
+
+O servidor prepara um sistema de recuperação na memória e reinicia uma única vez nele. Na
+tela do servidor, digite a frase de cada operação (`APAGAR …`). `CANCELAR` volta ao Windows
+sem gravar nada. Ao terminar, ele reinicia sozinho. Se o disco dele ainda tiver Windows, o
+painel mostra o resultado.
+
+Requisitos e limites:
+
+- **Sistema de recuperação:** precisa do WinRE ativo (`reagentc /enable`) ou de um WinPE
+  em `kamikaze\winpe.wim` dentro do repositório.
+- **Instalar o Windows:** exige o repositório em outro disco que não o de destino. O
+  Windows instalado abre a configuração inicial normal.
+- **Linux:** instalar Linux no próprio servidor não é feito pelo kamikaze. Use uma VM com o
+  HD ou o SLT Rescue por pendrive.
+
 ## Diagnóstico
 
 Na página Computadores, selecione computador e disco e use **Consultar SMART** ou

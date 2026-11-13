@@ -1,0 +1,67 @@
+<UserControl x:Class="SLT.Desktop.KamikazePanel"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+ xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+ <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+  <StackPanel>
+   <DockPanel Margin="0,0,0,6">
+    <Button DockPanel.Dock="Right" Content="Atualizar" Style="{StaticResource SecondaryButton}" Margin="0" Click="Refresh_Click"/>
+    <TextBlock Text="Modo kamikaze" Style="{StaticResource PageTitle}" Margin="0" VerticalAlignment="Center"/>
+   </DockPanel>
+   <TextBlock Style="{StaticResource PageHint}" TextWrapping="Wrap" Margin="0,0,0,10"
+    Text="O próprio servidor reinicia em “modo SLT Disk Manager”: um sistema de recuperação do Windows carregado na memória, sem pendrive. Ali ele pode clonar seus discos, formatar qualquer um deles — inclusive o disco onde o servidor está — e instalar o Windows. Você monta a lista aqui, confirma, e na tela do servidor digita a frase de cada operação. A entrada de boot vale só para um reinício: depois o servidor volta ao Windows normal (se o disco dele ainda tiver um sistema)."/>
+   <Border Style="{StaticResource Card}" Margin="0,0,0,12"><TextBlock x:Name="EnvironmentStatus" Text="Consultando…" TextWrapping="Wrap" LineHeight="22"/></Border>
+   <TextBlock Text="Discos vistos pelo modo kamikaze" Style="{StaticResource SectionTitle}" Margin="0,0,0,6"/>
+   <DataGrid x:Name="Disks" Height="170">
+    <DataGrid.Columns>
+     <DataGridTextColumn Header="Nº" Binding="{Binding Number}" Width="45"/>
+     <DataGridTextColumn Header="Modelo" Binding="{Binding Model}" Width="*" MinWidth="160"/>
+     <DataGridTextColumn Header="Serial" Binding="{Binding Serial}" Width="150"/>
+     <DataGridTextColumn Header="Capacidade" Binding="{Binding Size}" Width="100"/>
+     <DataGridTextColumn Header="Tabela" Binding="{Binding PartitionStyle}" Width="70"/>
+     <DataGridTextColumn Header="Volumes" Binding="{Binding Volumes}" Width="150"/>
+     <DataGridTextColumn Header="Observações" Binding="{Binding NotesLabel}" Width="*" MinWidth="180"/>
+    </DataGrid.Columns>
+   </DataGrid>
+   <TextBlock Text="Montar a lista de operações" Style="{StaticResource SectionTitle}" Margin="0,14,0,6"/>
+   <Border Style="{StaticResource Card}">
+    <StackPanel>
+     <WrapPanel>
+      <StackPanel Margin="0,0,14,8"><TextBlock Text="Operação" Style="{StaticResource Caption}"/><ComboBox x:Name="Kind" Width="190" SelectedIndex="0" SelectionChanged="Kind_SelectionChanged"><ComboBoxItem Content="Clonar disco" Tag="CLONE_DISK"/><ComboBoxItem Content="Formatar disco" Tag="FORMAT_DISK"/><ComboBoxItem Content="Instalar Windows" Tag="DEPLOY_WINDOWS"/></ComboBox></StackPanel>
+      <StackPanel Margin="0,0,14,8" x:Name="SourceBox"><TextBlock Text="Origem" Style="{StaticResource Caption}"/><ComboBox x:Name="Source" Width="330"/></StackPanel>
+      <StackPanel Margin="0,0,14,8"><TextBlock Text="Destino (será apagado)" Style="{StaticResource Caption}"/><ComboBox x:Name="Target" Width="330"/></StackPanel>
+     </WrapPanel>
+     <WrapPanel x:Name="FormatBox" Visibility="Collapsed">
+      <StackPanel Margin="0,0,14,8"><TextBlock Text="Tabela" Style="{StaticResource Caption}"/><ComboBox x:Name="TableType" Width="90" SelectedIndex="0"><ComboBoxItem Content="GPT"/><ComboBoxItem Content="MBR"/></ComboBox></StackPanel>
+      <StackPanel Margin="0,0,14,8"><TextBlock Text="Sistema de arquivos" Style="{StaticResource Caption}"/><ComboBox x:Name="FileSystem" Width="110" SelectedIndex="0"><ComboBoxItem Content="NTFS"/><ComboBoxItem Content="EXFAT"/><ComboBoxItem Content="FAT32"/></ComboBox></StackPanel>
+      <StackPanel Margin="0,0,14,8"><TextBlock Text="Rótulo" Style="{StaticResource Caption}"/><TextBox x:Name="VolumeLabel" Width="150" MaxLength="16"/></StackPanel>
+     </WrapPanel>
+     <WrapPanel x:Name="DeployBox" Visibility="Collapsed">
+      <StackPanel Margin="0,0,14,8"><TextBlock Text="Mídia Windows importada" Style="{StaticResource Caption}"/><ComboBox x:Name="Media" Width="330" DisplayMemberPath="Name" SelectionChanged="Media_SelectionChanged"/></StackPanel>
+      <StackPanel Margin="0,0,14,8"><TextBlock Text="Edição" Style="{StaticResource Caption}"/><ComboBox x:Name="Edition" Width="260" DisplayMemberPath="Name"/></StackPanel>
+     </WrapPanel>
+     <Button Content="Adicionar à lista" Style="{StaticResource SecondaryButton}" HorizontalAlignment="Left" Click="Add_Click"/>
+     <ListBox x:Name="Planned" Height="110" Margin="0,10,0,6" DisplayMemberPath="Description"/>
+     <WrapPanel>
+      <Button Content="Remover selecionada" Style="{StaticResource SecondaryButton}" Click="Remove_Click"/>
+      <CheckBox x:Name="RebootNow" Content="Reiniciar o servidor assim que estiver pronto" IsChecked="True" Foreground="{StaticResource TextBrush}" VerticalAlignment="Center" Margin="10,0,16,0"/>
+      <Button Content="Preparar modo kamikaze…" Style="{StaticResource DangerButton}" Click="Prepare_Click"/>
+     </WrapPanel>
+    </StackPanel>
+   </Border>
+   <DockPanel Margin="0,14,0,6">
+    <Button DockPanel.Dock="Right" Content="Cancelar" Style="{StaticResource SecondaryButton}" Margin="0" Click="Cancel_Click"/>
+    <Button DockPanel.Dock="Right" Content="Reiniciar agora" Click="Reboot_Click"/>
+    <Button DockPanel.Dock="Right" Content="Ver detalhes" Style="{StaticResource SecondaryButton}" Click="Details_Click"/>
+    <TextBlock Text="Sessões" Style="{StaticResource SectionTitle}" Margin="0" VerticalAlignment="Center"/>
+   </DockPanel>
+   <DataGrid x:Name="Sessions" Height="170" MouseDoubleClick="Details_Click">
+    <DataGrid.Columns>
+     <DataGridTextColumn Header="Criada" Binding="{Binding When}" Width="100"/>
+     <DataGridTextColumn Header="Estado" Binding="{Binding StateLabel}" Width="160"/>
+     <DataGridTextColumn Header="Operações" Binding="{Binding SummaryLabel}" Width="2*" MinWidth="220"/>
+     <DataGridTextColumn Header="Mensagem" Binding="{Binding Message}" Width="*" MinWidth="200"/>
+    </DataGrid.Columns>
+   </DataGrid>
+  </StackPanel>
+ </ScrollViewer>
+</UserControl>
