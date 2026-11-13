@@ -74,10 +74,19 @@ try {
     Check (Test-Path -LiteralPath (Join-Path $source 'images/a/00000000.bin')) 'origem é preservada quando a migração falha'
     Rejects { Move-VerifiedTree $destination (Join-Path $destination 'dentro') } 'destino dentro da origem recusado'
     Check ((Move-VerifiedTree (Join-Path $work 'inexistente') (Join-Path $work 'x')) -eq 0) 'origem inexistente não é erro (servidor novo)'
+    # Regression: an empty repository (no files, only folders) failed with "The property 'Sum' cannot be found".
+    $emptySource=Join-Path $work 'vazio'; $emptyDestination=Join-Path $work 'vazio-novo'
+    New-Item -ItemType Directory -Path (Join-Path $emptySource 'images') -Force | Out-Null
+    Check ((Move-VerifiedTree $emptySource $emptyDestination) -eq 0 -and -not (Test-Path -LiteralPath $emptySource) -and (Test-Path -LiteralPath (Join-Path $emptyDestination 'images'))) 'repositório vazio é migrado sem erro de Sum e mantém as pastas'
+    $bareSource=Join-Path $work 'sem-nada'; New-Item -ItemType Directory -Path $bareSource | Out-Null
+    Check ((Move-VerifiedTree $bareSource (Join-Path $work 'sem-nada-novo')) -eq 0) 'pasta de repositório sem nenhum conteúdo é migrada sem erro'
 
     # Install-Server: validation only, started from the 32-bit PowerShell like the setup does.
     $installArguments=@('-PackageDirectory',(Join-Path $package 'server'),'-Bind','192.168.1.23','-AllowedSubnet','192.168.1.0/24','-ValidateOnly')
     $shells=@($native); if(Test-Path -LiteralPath $wow){$shells+=$wow}
+    # On the owner's real server the program folder is already in use and Install-Server refuses it (expected).
+    $realServer=Test-Path -LiteralPath (Join-Path $programFiles 'SLT Disk Manager Controller\SLT.Controller.Host.exe')
+    if($realServer){ Write-Output 'SKIP Install-Server -ValidateOnly: esta máquina tem o servidor instalado (executado no CI).' } else {
     foreach($shell in $shells){
         $label=if($shell -eq $wow){'PowerShell de 32 bits'}else{'PowerShell de 64 bits'}
         $plan=Invoke-Json $shell (Join-Path $server 'Install-Server.ps1') ($installArguments+@('-RepositoryDirectory',$repository))
@@ -91,6 +100,7 @@ try {
     Rejects { Invoke-Json $native (Join-Path $server 'Install-Server.ps1') ($installArguments+@('-RepositoryDirectory',(Join-Path $programFiles 'SLT Disk Manager Controller\repo'))) } 'Install-Server recusa repositório dentro da pasta do serviço'
     Rejects { Invoke-Json $native (Join-Path $server 'Install-Server.ps1') @('-PackageDirectory',(Join-Path $package 'server'),'-Bind','192.168.1.23','-AllowedSubnet','192.168.1.0/24','-InstallDirectory',(Join-Path $work 'fora'),'-ValidateOnly') } 'Install-Server recusa instalar o serviço fora de Program Files'
 
+    }
     # Update-Server: an installation left in "Program Files (x86)" by an earlier 32-bit setup.
     if($true){
         $update=Invoke-Plan (Join-Path $server 'Update-Server.ps1') @{PackageDirectory=(Join-Path $package 'server');ValidateOnly=$true;TestImagePath=$old}
@@ -126,6 +136,14 @@ try {
         $acl=Get-Acl -LiteralPath $repository
         $sids=@($acl.Access | ForEach-Object { $_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value } | Sort-Object -Unique)
         Check ($acl.AreAccessRulesProtected -and ($sids -join ',') -eq 'S-1-5-18,S-1-5-32-544') 'pasta do repositório fica com ACL protegida só para SISTEMA e Administradores'
+        # Same situation as a freshly installed server: repository and boot profiles exist but are empty.
+        $freshState=Join-Path $work 'estado-novo'
+        New-Item -ItemType Directory -Path (Join-Path $freshState 'repository') -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $freshState 'network-boot') -Force | Out-Null
+        $freshRepository=Join-Path $work 'Repositorio Novo'
+        $freshLine='"'+(Join-Path $package 'server\SLT.Controller.Host.exe')+'" --bind 127.0.0.1 --state-dir "'+$freshState+'"'
+        $freshOutput=& (Join-Path $server 'Set-ServerRepository.ps1') -RepositoryDirectory $freshRepository -MoveExisting -TestImagePath $freshLine 6>$null
+        Check (("$($freshOutput | Select-Object -Last 1)").EndsWith('--repository "'+$freshRepository+'"') -and -not (Test-Path -LiteralPath (Join-Path $freshState 'repository'))) 'Set-ServerRepository -MoveExisting funciona com repositório e perfis vazios (servidor recém-instalado)'
     } else { Write-Output 'SKIP migração real com ACL: exige sessão elevada (executada no CI).' }
 
     # Client service scripts.
