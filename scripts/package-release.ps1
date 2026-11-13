@@ -45,6 +45,9 @@ try {
     & (Join-Path $sevenOut '7z.exe') e $smartSetup 'bin\smartctl.exe' 'doc\COPYING.txt' 'doc\AUTHORS.txt' "-o$smartOut" -y -bso0 | Out-Null
     if($LASTEXITCODE -ne 0 -or -not(Test-Path -LiteralPath (Join-Path $smartOut 'smartctl.exe'))){throw 'Extração do smartctl falhou.'}
     Set-Content -LiteralPath (Join-Path $smartOut 'LEIA-ME-SLT.txt') -Encoding utf8 -Value "smartmontools 7.5, GNU GPL versão 2 ou posterior (COPYING.txt).`r`nUsado pelo cliente para o diagnóstico SMART somente leitura. Código-fonte correspondente: https://github.com/smartmontools/smartmontools/releases/tag/RELEASE_7_5`r`nInstalador oficial de origem: $smartUrl`r`nSHA256 conferido: $smartSha"
+    # The server also checks its own disks (Discos do servidor) and builds the kamikaze image.
+    Copy-Item -LiteralPath $smartOut -Destination (Join-Path $output 'server/tools/smartmontools') -Recurse
+    Copy-Item -LiteralPath artifacts/slt-winpe-agent.exe -Destination (Join-Path $output 'server/tools/slt-winpe-agent.exe')
     Copy-Item -LiteralPath README.md -Destination $output
     Copy-Item -LiteralPath docs/QUICKSTART.md -Destination $output
     Copy-Item -LiteralPath docs -Destination (Join-Path $output 'docs') -Recurse

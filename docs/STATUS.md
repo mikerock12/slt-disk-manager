@@ -1,7 +1,7 @@
 # Matriz de entrega e homologação
 
-Esta é a beta 0.1.0-beta.7 em validação, não o aceite integral da seção 25 da especificação.
-Evidências desta entrega em ENTREGA-2026-11-11-beta7.md; registros anteriores são históricos.
+Esta é a beta 0.1.0-beta.8 em validação, não o aceite integral da seção 25 da especificação.
+Evidências desta entrega em ENTREGA-2026-11-13-beta8.md; registros anteriores são históricos.
 
 | Requisito | Estado nesta entrega | Evidência/limite |
 |---|---|---|
@@ -15,6 +15,9 @@ Evidências desta entrega em ENTREGA-2026-11-11-beta7.md; registros anteriores s
 | Rescue Go | Implementado | Testes fixtures, build Linux amd64 e ISO real9/9 rede/pin/CSR/mTLS/INVENTORY/revogação emVM |
 | ISO/USB BIOS/UEFI | Construída e iniciada em QEMU | CI40613155072; firmware Ethernet/Wi-Fi, NetworkManager, CLI e motores presentes; SecureBoot/placas físicas ainda não homologados |
 | Reboot Windows→Rescue (modo SLT) | Implementado para UEFI sem Secure Boot (beta.7) | Entrada de firmware só para o próximo boot, carregador conferido por hash e ticket de uso único (ADR 004). Laboratório VM UEFI: boot pela partição EFI, pareamento por ticket e formatação por ordem do servidor. Passo `bcdedit` do Windows só com executor falso; BIOS/Legacy e Secure Boot não atendidos; hardware não homologado |
+| Discos do próprio servidor | Implementado (beta.8) | Formatar, converter, MBR2GPT, partição, redimensionar, verificar, chkdsk, BCDBoot, SFC/DISM, clone bruto conferido e online/offline, com plano assinado e confirmação digitada (ADR 005). Testes com executor falso e arquivos; teste real com VHDX sintéticos; discos do Windows/paginação/SLT protegidos |
+| Máquinas virtuais (Hyper-V) | Implementado (beta.8) | Geração 1 (BIOS) e 2 (UEFI), memória, vCPU, limite de CPU, VHDX ou HD do servidor em pass-through, ISO, rede, Secure Boot e TPM; validação com executor falso; pass-through de HD físico não exercitado em hardware |
+| Modo kamikaze (servidor em modo SLT) | Implementado (beta.8) | WinRE em ramdisk com entrada de boot única; pacote assinado de uso único; clone, formatação e instalação do Windows nos discos do próprio servidor (ADR 005). Ver ENTREGA-2026-11-13-beta8.md para o laboratório em VM |
 | CAPTURE/RESTORE raw | Implementado | Testes de chunks, corrupção e revalidação; físico não homologado |
 | Clone A→servidor→B | Assistente integrado | Captura validada + plano destino; GPT/MBR, NTFS/ext4 menor/maior em CI Linux |
 | Clone em lotes A→B | Implementado (beta.4) e redução (beta.5) | Janela limitada no servidor e descarte após confirmação; EXATO/PRESERVAR/AJUSTAR maior e menor (redução com até 1 GiB de blocos não nulos em RAM); lotes de zeros não trafegam; testes Controller, Go, E2E dois agentes e Linux real em CI; sem retomada após falha; físico não homologado |

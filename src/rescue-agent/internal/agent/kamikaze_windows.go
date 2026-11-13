@@ -20,7 +20,7 @@ func newKamikazePlatform() kamikazePlatform { return nativeKamikaze{} }
 func ListLocalDisks() ([]LocalDisk, error) {
 	disks := []LocalDisk{}
 	for number := 0; number < 256; number++ {
-		d, err := peDisk(number)
+		d, err := peDiskIdentity(number, false)
 		if err != nil {
 			continue
 		}

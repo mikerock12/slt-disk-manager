@@ -4,6 +4,9 @@ using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using Slt.Controller;
 
+if (args.Contains("--server-disks-vhd")) Environment.Exit(ServerLocalE2E.ServerDisksVhd());
+if (args.Contains("--hyperv-smoke")) Environment.Exit(ServerLocalE2E.HyperVSmoke());
+if (args.Length >= 3 && args[0] == "--kamikaze-image") Environment.Exit(KamikazeImageE2E.Run(args[1], args[2]));
 var root = Path.Combine(Path.GetTempPath(), "slt-controller-tests-" + Guid.NewGuid());
 Directory.CreateDirectory(root);
 int passed = 0;

@@ -2,7 +2,7 @@
   #error PackageDir is required
 #endif
 #ifndef AppVersion
-  #define AppVersion "0.1.0-beta.7"
+  #define AppVersion "0.1.0-beta.8"
 #endif
 #ifndef Edition
   #error Edition is required: server or client
@@ -28,7 +28,7 @@
 AppId={#EditionId}
 AppName=SLT Disk Manager {#EditionName}
 AppVersion={#AppVersion}
-VersionInfoVersion=0.1.0.70
+VersionInfoVersion=0.1.0.80
 AppPublisher=Smells Like Tech
 AppPublisherURL=https://softwares.smellsliketech.com.br
 AppSupportURL=https://github.com/mikerock12/slt-disk-manager

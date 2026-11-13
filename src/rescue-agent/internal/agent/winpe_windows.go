@@ -160,7 +160,11 @@ func peIO(handle syscall.Handle, code uint32, input []byte, size int) ([]byte, e
 	}
 	return out[:n], nil
 }
-func peDisk(number int) (Disk, error) {
+func peDisk(number int) (Disk, error) { return peDiskIdentity(number, true) }
+
+// peDiskIdentity reads one disk; requireSerial=false is used by the kamikaze inventory, which
+// identifies a disk by model, serial (possibly empty), size and sector and refuses duplicates.
+func peDiskIdentity(number int, requireSerial bool) (Disk, error) {
 	path := fmt.Sprintf(`\\.\PhysicalDrive%d`, number)
 	h, err := peOpen(path)
 	if err != nil {
@@ -180,7 +184,11 @@ func peDisk(number int) (Disk, error) {
 	if err != nil {
 		return Disk{}, err
 	}
-	model, serial, err := decodeWinPEDescriptor(descriptor)
+	decode := decodeWinPEDescriptor
+	if !requireSerial {
+		decode = decodeStorageDescriptor
+	}
+	model, serial, err := decode(descriptor)
 	if err != nil {
 		return Disk{}, err
 	}

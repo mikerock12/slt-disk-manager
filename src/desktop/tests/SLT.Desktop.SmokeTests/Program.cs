@@ -20,6 +20,15 @@ internal static class Program
             var main = new MainWindow();
             Check(main.FindName("Cloning") is ClonePanel && main.FindName("Files") is FilesPanel, "XAML: abas de clonagem e arquivos constroem sem erro");
             Check(Children<TabItem>(main).Count() >= 8, "XAML: navegação principal preservada");
+            Check(main.FindName("ServerDisks") is ServerDisksPanel && main.FindName("VirtualMachines") is VirtualMachinesPanel && main.FindName("Kamikaze") is KamikazePanel
+                && Children<TabItem>(main).Select(t => t.Header as string).Contains("Modo kamikaze"), "XAML: abas Discos do servidor, Máquinas virtuais e Modo kamikaze constroem sem erro");
+            var localDisk = System.Text.Json.JsonSerializer.Deserialize<ServerDisk>("{\"number\":5,\"model\":\"PENDRIVE\",\"serial\":\"\",\"sizeBytes\":64000000000,\"logicalSectorBytes\":512,\"physicalSectorBytes\":512,\"busType\":\"USB\",\"partitionStyle\":\"RAW\",\"isSystem\":false,\"isBoot\":false,\"isOffline\":true,\"isReadOnly\":false,\"uniqueId\":\"u\",\"health\":\"Healthy\",\"mediaType\":\"\",\"location\":\"\",\"partitions\":[],\"fingerprint\":\"f\",\"protections\":[],\"isVirtual\":false}", new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web))!;
+            Check(localDisk.State == "Offline" && localDisk.Table == "Sem tabela" && localDisk.Protection == "Livre para gravar", "Disco do servidor mostra estado, tabela e proteção em português");
+            var typed = new TypedConfirmWindow("Formatar o disco 5", ["Disco 5"], ["Tudo será apagado."], "APAGAR DISCO 5 64GB", true, "Autorizo", "Formatar");
+            var typedButton = Children<Button>(typed).Single(b => Equals(b.Content, "Formatar"));
+            Check(!typedButton.IsEnabled && string.Join(" ", Children<TextBlock>(typed).Select(t => t.Text)).Contains("APAGAR DISCO 5 64GB"), "Confirmação local exige frase digitada e consentimento antes de habilitar");
+            var vm = new VmMachine("Bancada", "Running", 1, 4L << 30, 2, 50, 10, 7, "", [new VmDrive("", 3)], "");
+            Check(vm.Firmware.StartsWith("Legacy") && vm.Disks == "disco físico 3" && vm.Cpu.Contains("limite 50%"), "Máquina virtual mostra firmware, HD físico e limite de CPU");
             Check(main.Background is SolidColorBrush { Color: { R: < 40, G: < 40, B: < 40 } } && main.FontSize >= 15 && ((TabControl)main.FindName("Workspace")).TabStripPlacement == Dock.Left, "Janela aplica o tema escuro, fonte de 15 px e menu lateral");
             var approvalStyle = new PlanApprovalWindow(new Job("j", new JobPlan("j", "INVENTORY", "d", "", "", 0, 512, "", "AUTORIZAR", DateTimeOffset.UtcNow.AddMinutes(5), true), "AWAITING_APPROVAL", DateTimeOffset.UtcNow, null, null, null), null, null, null);
             Check(approvalStyle.Background is SolidColorBrush { Color: { R: < 40 } }, "Janelas de confirmação usam o mesmo tema");

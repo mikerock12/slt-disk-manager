@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.1.0-beta.8 — 2026-11-13 — discos do servidor, máquinas virtuais e modo kamikaze
+
+- **Discos do servidor** (nova aba): pendrives, HDs e SSDs ligados ao próprio servidor —
+  formatar disco, converter GPT ⇄ MBR (vazio), MBR → GPT sem perder dados (MBR2GPT),
+  formatar partição (trocar o sistema de arquivos), redimensionar, verificar (saúde,
+  SMART, scan somente leitura), corrigir volume (chkdsk), reparar inicialização (BCDBoot),
+  reparar Windows (DISM e SFC, deste servidor ou de outro disco), clonar disco a disco
+  (cópia bruta conferida por SHA256, GPT de reserva realocada, destino menor quando as
+  partições cabem) e colocar online/offline. Plano assinado, validade de 15 minutos,
+  confirmação digitada com disco e capacidade e releitura do disco antes de gravar. Discos
+  com o Windows do servidor, paginação ou dados do SLT ficam protegidos.
+- **Máquinas virtuais** (nova aba, Hyper-V): UEFI (geração 2) ou Legacy/BIOS (geração 1),
+  memória, processadores e limite de uso da CPU em %, VHDX novo na pasta/disco escolhido,
+  VHDX existente ou um HD do servidor entregue à VM para instalar o sistema e levá-lo
+  pronto ao cliente, ISO, rede, Secure Boot (Windows/Linux) e TPM; ligar, abrir a tela,
+  desligar, trocar ISO e excluir.
+- **Modo kamikaze** (nova aba): o servidor reinicia uma vez num WinRE/WinPE carregado na
+  memória e, no próprio console, clona discos, formata qualquer disco — inclusive o dele —
+  ou instala o Windows. Pacote assinado e de uso único, frase digitada por operação,
+  `CANCELAR` volta sem gravar, entrada de boot única e resultado coletado ao voltar ao
+  Windows (ADR 005).
+- **Ícones próprios** no painel, servidor, cliente, modo SLT, instaladores, atalhos e
+  Adicionar/Remover Programas.
+- **Correção:** `Set-ServerRepository.ps1 -MoveExisting` falhava com repositório vazio
+  (“The property 'Sum' cannot be found”).
+
 ## 0.1.0-beta.7 — 2026-11-11 — conexão por código, modo SLT, formatação e instalador
 
 - **Conexão sem endereço nem pin de 64 caracteres:** o servidor responde a uma busca na

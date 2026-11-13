@@ -11,7 +11,9 @@ $p = [Console]::In.ReadToEnd() | ConvertFrom-Json
 
 function Done($value) { Write-Output ('SLT-RESULT:' + (ConvertTo-Json -InputObject $value -Compress -Depth 8)); exit 0 }
 function Fail([string]$message) { Done @{ error = $message } }
-function Say([string]$message) { Write-Output $message }
+# Straight to standard output, outside the pipeline: inside functions Write-Output would become
+# part of their return value (Invoke-Tool returned the log lines together with the exit code).
+function Say([string]$message) { [Console]::Out.WriteLine($message) }
 function Letter($partition) { if ($partition.DriveLetter -and [char]$partition.DriveLetter -ne [char]0) { [string]$partition.DriveLetter } else { '' } }
 function Get-SltPartition([int]$disk, [int]$number) { Get-Partition -DiskNumber $disk -PartitionNumber $number }
 # Temporary drive letters for partitions without one (EFI, offline Windows); removed in finally.
@@ -55,9 +57,8 @@ try {
     switch ($Operation) {
         'inventory' {
             $pagefile = @(Get-CimInstance Win32_PageFileUsage -ErrorAction SilentlyContinue | ForEach-Object { $_.Name.Substring(0, 1).ToUpperInvariant() })
-            $physical = @(Get-PhysicalDisk -ErrorAction SilentlyContinue)
+            # Get-PhysicalDisk (SSD/HDD) takes 15-20 s on some machines: it is queried only by check-disk.
             $disks = @(foreach ($d in (Get-Disk | Sort-Object Number)) {
-                $pd = $physical | Where-Object { "$($_.DeviceId)" -eq "$($d.Number)" } | Select-Object -First 1
                 $parts = @(Get-Partition -DiskNumber $d.Number -ErrorAction SilentlyContinue | Sort-Object PartitionNumber | ForEach-Object {
                     $v = $null; try { $v = $_ | Get-Volume -ErrorAction Stop } catch { }
                     $letter = Letter $_
@@ -71,7 +72,7 @@ try {
                     logicalSectorBytes = [int]$d.LogicalSectorSize; physicalSectorBytes = [int]$d.PhysicalSectorSize; busType = [string]$d.BusType
                     partitionStyle = [string]$d.PartitionStyle; isSystem = [bool]$d.IsSystem; isBoot = [bool]$d.IsBoot; isOffline = [bool]$d.IsOffline
                     isReadOnly = [bool]$d.IsReadOnly; uniqueId = [string]$d.UniqueId; health = [string]$d.HealthStatus
-                    mediaType = $(if ($pd) { [string]$pd.MediaType } else { '' }); location = [string]$d.Location; partitions = $parts }
+                    mediaType = ''; location = [string]$d.Location; partitions = $parts }
             })
             Done @{ disks = $disks; pagefileDrives = $pagefile; systemDrive = $env:SystemDrive.Substring(0, 1).ToUpperInvariant() }
         }
@@ -130,7 +131,11 @@ try {
                 if (-not $letter) { continue }
                 $v = $part | Get-Volume
                 $item = [ordered]@{ driveLetter = $letter; fileSystem = [string]$v.FileSystem; result = '' }
-                if ($v.FileSystem -in 'NTFS', 'ReFS') { Say "Verificando $($letter): (somente leitura)..."; $item.result = [string](Repair-Volume -DriveLetter $letter -Scan) }
+                if ($v.FileSystem -in 'NTFS', 'ReFS') {
+                    Say "Verificando $($letter): (somente leitura)..."
+                    try { $item.result = [string](Repair-Volume -DriveLetter $letter -Scan) }
+                    catch { $item.result = if ("$($_.Exception.Message)" -match 'already running|em execução|em andamento') { 'Windows já está verificando este volume; tente de novo mais tarde' } else { 'Não verificado: ' + $_.Exception.Message } }
+                }
                 elseif ($v.FileSystem -in 'FAT32', 'FAT', 'exFAT') { $code = Invoke-Tool (Join-Path $env:windir 'System32\chkdsk.exe') @("$($letter):"); $item.result = if ($code -eq 0) { 'NoErrorsFound' } else { "chkdsk código $code" } }
                 else { $item.result = 'Sistema de arquivos não verificado' }
                 Say "$($letter): $($item.result)"

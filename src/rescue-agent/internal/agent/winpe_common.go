@@ -194,6 +194,15 @@ func validateWinPETarget(p Plan, disks []Disk) (Disk, error) {
 	return d, nil
 }
 func decodeWinPEDescriptor(data []byte) (string, string, error) {
+	model, serial, err := decodeStorageDescriptor(data)
+	if err == nil && serial == "" {
+		return "", "", errors.New("modelo/serial não informado pelo dispositivo")
+	}
+	return model, serial, err
+}
+
+// decodeStorageDescriptor accepts an empty serial: virtual disks (VHDX, Hyper-V) have none.
+func decodeStorageDescriptor(data []byte) (string, string, error) {
 	if len(data) < 36 {
 		return "", "", errors.New("STORAGE_DEVICE_DESCRIPTOR truncado")
 	}
@@ -233,8 +242,8 @@ func decodeWinPEDescriptor(data []byte) (string, string, error) {
 		return "", "", e
 	}
 	model := strings.TrimSpace(vendor + " " + product)
-	if model == "" || serial == "" {
-		return "", "", errors.New("modelo/serial não informado pelo dispositivo")
+	if model == "" {
+		return "", "", errors.New("modelo não informado pelo dispositivo")
 	}
 	return model, serial, nil
 }

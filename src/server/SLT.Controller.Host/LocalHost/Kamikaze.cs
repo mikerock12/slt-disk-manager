@@ -24,6 +24,8 @@ public sealed record KamikazeSession(string Id, string State, DateTimeOffset Cre
 public sealed class KamikazeManager
 {
     private static readonly Regex Guid = new(@"\{[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\}");
+    // 1.5 GiB shows as "1,6 GB", not "2 GB": small disks are told apart by size in the summary.
+    private static string Size(long bytes) => bytes < 10_000_000_000 ? $"{bytes / 1e9:N1} GB" : $"{bytes / 1e9:N0} GB";
     private static readonly Regex Label = new("^[A-Za-z0-9_-]{0,16}$");
     private readonly Controller controller;
     private readonly IHostCommandRunner runner;
@@ -170,7 +172,7 @@ public sealed class KamikazeManager
                     }
                     read.Add(src.Identity);
                     ops.Add(new { kind = "CLONE_DISK", target = KDisk(target), source = KDisk(src), challenge });
-                    summary.Add($"{index}. Clonar {src.Model} ({src.SizeBytes / 1e9:N0} GB) → {target.Model} ({target.SizeBytes / 1e9:N0} GB)");
+                    summary.Add($"{index}. Clonar {src.Model} ({Size(src.SizeBytes)}) → {target.Model} ({Size(target.SizeBytes)})");
                     break;
                 }
                 case "FORMAT_DISK":
@@ -181,7 +183,7 @@ public sealed class KamikazeManager
                     Controller.Ensure(fs != "FAT32" || target.SizeBytes <= 32L * 1024 * 1024 * 1024, 400, $"Operação {index}: FAT32 só até 32 GB.");
                     Controller.Ensure(op.TableType == "GPT" || target.SizeBytes <= 2L * 1024 * 1024 * 1024 * 1024, 400, $"Operação {index}: MBR só até 2 TiB.");
                     ops.Add(new { kind = "FORMAT_DISK", target = KDisk(target), format = new { tableType = op.TableType, fileSystem = fs, label = op.Label ?? "" }, challenge });
-                    summary.Add($"{index}. Formatar {target.Model} ({target.SizeBytes / 1e9:N0} GB) em {op.TableType}/{fs}");
+                    summary.Add($"{index}. Formatar {target.Model} ({Size(target.SizeBytes)}) em {op.TableType}/{fs}");
                     break;
                 }
                 case "DEPLOY_WINDOWS":
@@ -195,7 +197,7 @@ public sealed class KamikazeManager
                     Controller.Ensure(op.Account == null, 400, $"Operação {index}: no modo kamikaze o Windows instalado abre a configuração inicial normal; a conta é criada no primeiro boot.");
                     var deployFirmware = firmware == "UEFI" ? "GPT_UEFI" : "MBR_BIOS";
                     ops.Add(new { kind = "DEPLOY_WINDOWS", target = KDisk(target), deployment = new { mediaPath = Path.GetRelativePath(repositoryRoot, file), mediaSha256 = media.Sha256, mediaSizeBytes = media.SizeBytes, imageIndex = op.ImageIndex, firmware = deployFirmware }, challenge });
-                    summary.Add($"{index}. Instalar {media.Name} (edição {op.ImageIndex}, {(firmware == "UEFI" ? "UEFI/GPT" : "BIOS/MBR")}) em {target.Model} ({target.SizeBytes / 1e9:N0} GB)");
+                    summary.Add($"{index}. Instalar {media.Name} (edição {op.ImageIndex}, {(firmware == "UEFI" ? "UEFI/GPT" : "BIOS/MBR")}) em {target.Model} ({Size(target.SizeBytes)})");
                     if (firmware == "BIOS") warnings.Add("Instalação em BIOS usa o bootsect.exe da imagem de boot; se ele não existir no WinRE a operação para antes de gravar.");
                     break;
                 }
