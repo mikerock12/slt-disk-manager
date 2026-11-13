@@ -61,6 +61,27 @@ desenvolvimento, que também é o servidor real, não foi reiniciada.
   - formatar o disco do sistema foi recusado com o aviso para usar o kamikaze;
   - o reparo do Windows (DISM + SFC) também foi executado (registro abaixo).
 
+- **Instalação do Windows pelo kamikaze, na mesma VM:**
+  - a mídia oficial do Windows 10 foi importada pelo Controller da VM;
+  - o plano `DEPLOY_WINDOWS` (Pro, UEFI/GPT) foi feito para um disco virtual de 40 GB;
+  - no console, a mídia foi conferida por SHA256 e o disco foi particionado (EFI, MSR,
+    Windows);
+  - DISM e BCDBoot concluíram em 11 minutos;
+  - a VM voltou sozinha ao Windows original, com o resultado `COMPLETED` e nenhuma entrada de
+    boot restante.
+- **Primeiro boot do Windows instalado:** a VM foi iniciada pelo disco de 40 GB. O Windows
+  passou pelas fases de “Preparando-se” e pelos reinícios da instalação e chegou ao OOBE
+  (“Um momento…”). O OOBE não foi concluído porque a VM estava sem rede.
+- **Telas:**
+  [console](screens/lab-kamikaze-console.png),
+  [concluído](screens/lab-kamikaze-concluido.png),
+  [instalação](screens/lab-kamikaze-instalar-windows.png) e
+  [Windows instalado no OOBE](screens/lab-kamikaze-windows-instalado-oobe.png).
+- **Queda de energia simulada sem querer:** o PC de desenvolvimento reiniciou sozinho
+  (desligamento limpo pedido pelo sistema, sem relação com o laboratório) enquanto o console
+  kamikaze aguardava a confirmação. Ao voltar, a sessão foi marcada `INTERRUPTED`, nada foi
+  repetido e o disco de destino continuou vazio.
+
 Bugs reais achados no laboratório e corrigidos:
 
 - os discos virtuais não informam serial e o agente os ignorava;
@@ -73,8 +94,8 @@ Bugs reais achados no laboratório e corrigidos:
 
 - Sem homologação em hardware físico.
 - Kamikaze:
-  - a instalação do Windows foi coberta por validação e testes com executor falso, não ponta
-    a ponta em VM;
+  - instalação do Windows comprovada em VM UEFI, com o primeiro boot do sistema instalado
+    descrito acima;
   - BIOS/Legacy não foi exercitado;
   - instalar Linux no próprio servidor não é oferecido.
 - Pass-through de HD físico para a VM não exercitado.
