@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param([string]$Version='0.1.0-beta.1')
 $ErrorActionPreference='Stop'
 $projectRoot=Split-Path -Parent $PSScriptRoot
@@ -51,6 +51,8 @@ try {
     foreach($document in @('AGENTS.md','contexto.md','SECURITY.md','CHANGELOG.md','SLT_Disk_Manager_Especificacao_Tecnica.md')){Copy-Item -LiteralPath $document -Destination $output}
     Copy-Item -LiteralPath LICENSE -Destination $output
     Copy-Item -Path deploy/portable/* -Destination $output -Recurse
+    New-Item -ItemType Directory -Path (Join-Path $output 'branding') | Out-Null
+    Copy-Item -Path deploy/branding/*.ico -Destination (Join-Path $output 'branding')
     Copy-Item -LiteralPath deploy/windows-agent-installer -Destination (Join-Path $output 'install-agent') -Recurse
     Copy-Item -LiteralPath deploy/server-installer -Destination (Join-Path $output 'install-server') -Recurse
     New-Item -ItemType Directory -Path (Join-Path $output 'rescue') | Out-Null

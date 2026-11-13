@@ -14,10 +14,12 @@
   #define EditionName "Servidor"
   #define EditionId "{{A21348C4-4BD9-4533-9F63-B99F3F80D0F1}"
   #define EditionDir "SLT Disk Manager"
+  #define EditionIcon "slt-disk-manager.ico"
 #elif Edition == "client"
   #define EditionName "Cliente"
   #define EditionId "{{6B3F0D52-8E4A-4C71-9A2D-5F1C7E83B904}"
   #define EditionDir "SLT Disk Manager Cliente"
+  #define EditionIcon "slt-client.ico"
 #else
   #error Edition must be server or client
 #endif
@@ -50,6 +52,9 @@ CloseApplications=no
 RestartApplications=no
 DisableProgramGroupPage=yes
 UninstallDisplayName=SLT Disk Manager {#EditionName} {#AppVersion}
+; Custom icons (scripts/generate-icons.py): the setup itself, Add/Remove Programs and every shortcut.
+SetupIconFile=..\branding\slt-setup.ico
+UninstallDisplayIcon={app}\branding\{#EditionIcon}
 
 [Languages]
 Name: "brazilianportuguese"; MessagesFile: "compiler:Languages\BrazilianPortuguese.isl"
@@ -83,6 +88,7 @@ Source: "{#PackageDir}\Iniciar-Cliente.ps1"; DestDir: "{app}"; Flags: ignorevers
 Source: "{#PackageDir}\install-agent\*"; DestDir: "{app}\install-agent"; Flags: ignoreversion recursesubdirs createallsubdirs
 #endif
 Source: "{#PackageDir}\Executar-Instalacao.ps1"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#PackageDir}\branding\*.ico"; DestDir: "{app}\branding"; Flags: ignoreversion
 Source: "{#PackageDir}\docs\*"; DestDir: "{app}\docs"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#PackageDir}\README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#PackageDir}\QUICKSTART.md"; DestDir: "{app}"; Flags: ignoreversion
@@ -101,17 +107,17 @@ Type: files; Name: "{group}\Cliente Windows.lnk"
 #if Edition == "server"
 ; With the Windows service: the panel talks to the service and must read connection.json, which only
 ; Administrators and SYSTEM may read. The shortcut asks for elevation (flag set in [Code]).
-Name: "{group}\SLT Disk Manager - Painel"; Filename: "{app}\desktop\SLT.Desktop.exe"; Parameters: "--connection ""{code:ServiceConnection}"""; WorkingDir: "{app}\desktop"; Check: UsesService
-Name: "{userdesktop}\SLT Disk Manager - Painel"; Filename: "{app}\desktop\SLT.Desktop.exe"; Parameters: "--connection ""{code:ServiceConnection}"""; WorkingDir: "{app}\desktop"; Tasks: desktopicon; Check: UsesService
+Name: "{group}\SLT Disk Manager - Painel"; Filename: "{app}\desktop\SLT.Desktop.exe"; Parameters: "--connection ""{code:ServiceConnection}"""; WorkingDir: "{app}\desktop"; IconFilename: "{app}\branding\slt-disk-manager.ico"; Check: UsesService
+Name: "{userdesktop}\SLT Disk Manager - Painel"; Filename: "{app}\desktop\SLT.Desktop.exe"; Parameters: "--connection ""{code:ServiceConnection}"""; WorkingDir: "{app}\desktop"; IconFilename: "{app}\branding\slt-disk-manager.ico"; Tasks: desktopicon; Check: UsesService
 ; Without the service: portable server plus panel. Servidor.cmd itself opens the service panel if a service appears later.
-Name: "{group}\Servidor e painel"; Filename: "{app}\Servidor.cmd"; WorkingDir: "{app}"; Check: not UsesService
-Name: "{userdesktop}\SLT Disk Manager - Servidor e painel"; Filename: "{app}\Servidor.cmd"; WorkingDir: "{app}"; Tasks: desktopicon; Check: not UsesService
+Name: "{group}\Servidor e painel"; Filename: "{app}\Servidor.cmd"; WorkingDir: "{app}"; IconFilename: "{app}\branding\slt-disk-manager.ico"; Check: not UsesService
+Name: "{userdesktop}\SLT Disk Manager - Servidor e painel"; Filename: "{app}\Servidor.cmd"; WorkingDir: "{app}"; IconFilename: "{app}\branding\slt-disk-manager.ico"; Tasks: desktopicon; Check: not UsesService
 #else
-Name: "{group}\SLT Disk Manager - Cliente"; Filename: "{app}\Cliente.cmd"; WorkingDir: "{app}"
-Name: "{userdesktop}\SLT Disk Manager - Cliente"; Filename: "{app}\Cliente.cmd"; WorkingDir: "{app}"; Tasks: desktopicon
-Name: "{group}\Reiniciar em modo SLT Disk Manager"; Filename: "{app}\Modo-SLT.cmd"; WorkingDir: "{app}"
+Name: "{group}\SLT Disk Manager - Cliente"; Filename: "{app}\Cliente.cmd"; WorkingDir: "{app}"; IconFilename: "{app}\branding\slt-client.ico"
+Name: "{userdesktop}\SLT Disk Manager - Cliente"; Filename: "{app}\Cliente.cmd"; WorkingDir: "{app}"; IconFilename: "{app}\branding\slt-client.ico"; Tasks: desktopicon
+Name: "{group}\Reiniciar em modo SLT Disk Manager"; Filename: "{app}\Modo-SLT.cmd"; WorkingDir: "{app}"; IconFilename: "{app}\branding\slt-mode.ico"
 #endif
-Name: "{group}\Guia de uso ({#EditionName})"; Filename: "{app}\QUICKSTART.md"
+Name: "{group}\Guia de uso ({#EditionName})"; Filename: "{app}\QUICKSTART.md"; IconFilename: "{app}\branding\{#EditionIcon}"
 
 [Run]
 ; The service scripts re-run themselves in the 64-bit PowerShell (this setup is a 32-bit process),

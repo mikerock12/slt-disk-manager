@@ -8,5 +8,6 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>SLT.Desktop</AssemblyName>
     <Version>0.1.0</Version>
+    <ApplicationIcon>$(MSBuildThisFileDirectory)../../../deploy/branding/slt-disk-manager.ico</ApplicationIcon>
   </PropertyGroup>
 </Project>
